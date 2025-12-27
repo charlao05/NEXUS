@@ -1,0 +1,54 @@
+# SEGURANÇA: CREDENCIAIS E VARIÁVEIS DE AMBIENTE
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+.env.test
+
+# REPLIT
+.replit
+.upm/
+replit_integrations/
+
+# SECRETS E CONFIGURAÇÕES SENSÍVEIS
+secrets/
+.secrets/
+keys/
+credentials.json
+.credentials
+
+# API KEYS E TOKENS
+*.key
+*.pem
+*.private
+accessToken*
+secretKey*
+apiKey*
+
+# ARQUIVOS DE SISTEMA
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# DEPENDÊNCIAS
+node_modules/
+.npm
+.yarn/
+
+# BUILD
+build/
+dist/
+.next/
+out/
+
+# LOGS
+*.log
+logs/
+
+# HISTÓRICO GIT SENSÍVEL
+.git/
+.git-credentials
