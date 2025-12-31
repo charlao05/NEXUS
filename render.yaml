@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: nexus-backend
+    env: python
+    plan: free
+    region: ohio
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /health
+    numInstances: 1
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MERCADO_PAGO_CLIENT_ID
+        sync: false
+      - key: MERCADO_PAGO_CLIENT_SECRET
+        sync: false
+      - key: MERCADO_PAGO_PUBLIC_KEY
+        sync: false
+      - key: MERCADO_PAGO_ACCESS_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: PORT
+        value: "10000"
+      - key: ENVIRONMENT
+        value: "production"
+      - key: NEXUS_VERSION
+        value: "1.0.0"
+
+# Configuração de construção
+build:
+  builder: heroku
+  
+# Variáveis de ambiente globais
+envVars:
+  - key: PYTHONUNBUFFERED
+    value: "1"
+  - key: PIP_CACHE_DIR
+    value: "/opt/render/.cache/pip"
+
+# Disco persistente (opcional, para banco de dados local)
+# disk:
+#   name: nexus-data
+#   mountPath: /opt/render/nexus-data
+#   sizeGB: 10
