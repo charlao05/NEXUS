@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: nexus-backend
+    runtime: python
+    pythonVersion: 3.11
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    envVars:
+      - key: OPENAI_API_KEY
+        scope: run
+        sync: false
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        value: sqlite:///./nexus.db
+    healthCheckPath: /api/diagnosis/health
+    healthCheckInterval: 10
+    healthCheckTimeout: 5
+    maxInstances: 2
+    minInstances: 1
+    memoryMB: 512
+    cpuCount: 0.25
+    autoDeploy: true
+    branch: main
+    repo: https://github.com/charlao05/NEXUS
+
+  - type: web
+    name: nexus-frontend
+    runtime: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    autoDeploy: true
+    branch: main
+    repo: https://github.com/charlao05/NEXUS
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://nexus-backend.onrender.com
+
+databases:
+  - name: nexus-db
+    databaseName: nexus
+    user: nexus_user
+    region: oregon
+
+env:
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+  ENVIRONMENT: production
+  DATABASE_URL: ${DATABASE_URL}
