@@ -1,48 +1,46 @@
 services:
   - type: web
     name: nexus-backend
-    runtime: python
-    pythonVersion: 3.11
+    env: python
+    plan: free
+    region: ohio
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    startCommand: python main.py
+    healthCheckPath: /health
+    numInstances: 1
     envVars:
       - key: OPENAI_API_KEY
-        scope: run
         sync: false
-      - key: ENVIRONMENT
-        value: production
+      - key: MERCADO_PAGO_CLIENT_ID
+        sync: false
+      - key: MERCADO_PAGO_CLIENT_SECRET
+        sync: false
+      - key: MERCADO_PAGO_PUBLIC_KEY
+        sync: false
+      - key: MERCADO_PAGO_ACCESS_TOKEN
+        sync: false
       - key: DATABASE_URL
-        value: sqlite:///./nexus.db
-    healthCheckPath: /api/diagnosis/health
-    healthCheckInterval: 10
-    healthCheckTimeout: 5
-    maxInstances: 2
-    minInstances: 1
-    memoryMB: 512
-    cpuCount: 0.25
-    autoDeploy: true
-    branch: main
-    repo: https://github.com/charlao05/NEXUS
+        sync: false
+      - key: PORT
+        value: "10000"
+      - key: ENVIRONMENT
+        value: "production"
+      - key: NEXUS_VERSION
+        value: "1.0.0"
 
-  - type: web
-    name: nexus-frontend
-    runtime: static
-    buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: frontend/dist
-    autoDeploy: true
-    branch: main
-    repo: https://github.com/charlao05/NEXUS
-    envVars:
-      - key: VITE_API_BASE_URL
-        value: https://nexus-backend.onrender.com
+# Configuração de construção
+build:
+  builder: heroku
+  
+# Variáveis de ambiente globais
+envVars:
+  - key: PYTHONUNBUFFERED
+    value: "1"
+  - key: PIP_CACHE_DIR
+    value: "/opt/render/.cache/pip"
 
-databases:
-  - name: nexus-db
-    databaseName: nexus
-    user: nexus_user
-    region: oregon
-
-env:
-  OPENAI_API_KEY: ${OPENAI_API_KEY}
-  ENVIRONMENT: production
-  DATABASE_URL: ${DATABASE_URL}
+# Disco persistente (opcional, para banco de dados local)
+# disk:
+#   name: nexus-data
+#   mountPath: /opt/render/nexus-data
+#   sizeGB: 10
