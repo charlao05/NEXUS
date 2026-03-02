@@ -18,7 +18,9 @@ services:
       - key: JWT_SECRET
         sync: false
       - key: DATABASE_URL
-        sync: false  # Internal URL do Postgres Render
+        fromDatabase:
+          name: nexus-db
+          property: connectionString
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
