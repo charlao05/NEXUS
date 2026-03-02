@@ -1,0 +1,52 @@
+{
+  "2026-01": {
+    "month": "2026-01",
+    "categoria_mei": "servicos",
+    "receitas": [
+      {"descricao": "Site para Padaria do José", "valor": 2500.00, "data": "2026-01-05"},
+      {"descricao": "Logo + Identidade Visual - Loja de Roupas", "valor": 1800.00, "data": "2026-01-12"},
+      {"descricao": "Manutenção Site - Cliente Recorrente", "valor": 500.00, "data": "2026-01-20"},
+      {"descricao": "Consultoria Marketing Digital", "valor": 800.00, "data": "2026-01-25"}
+    ],
+    "despesas": [
+      {"descricao": "Internet/telefone", "valor": 150.00, "data": "2026-01-05"},
+      {"descricao": "Software (Canva Pro)", "valor": 49.90, "data": "2026-01-10"},
+      {"descricao": "Hospedagem sites clientes", "valor": 120.00, "data": "2026-01-15"},
+      {"descricao": "Material de escritório", "valor": 80.00, "data": "2026-01-18"},
+      {"descricao": "Curso online (atualização)", "valor": 200.00, "data": "2026-01-22"}
+    ],
+    "impostos_pagos": 0.0
+  },
+  "2025-12": {
+    "month": "2025-12",
+    "categoria_mei": "servicos",
+    "receitas": [
+      {"descricao": "Site e-commerce completo", "valor": 3500.00, "data": "2025-12-08"},
+      {"descricao": "Gestão redes sociais (3 meses)", "valor": 1200.00, "data": "2025-12-15"},
+      {"descricao": "Criação de posts (pacote 20)", "valor": 600.00, "data": "2025-12-20"}
+    ],
+    "despesas": [
+      {"descricao": "Internet/telefone", "valor": 150.00, "data": "2025-12-05"},
+      {"descricao": "Software (Canva Pro)", "valor": 49.90, "data": "2025-12-10"},
+      {"descricao": "Hospedagem sites", "valor": 120.00, "data": "2025-12-15"},
+      {"descricao": "Aluguel coworking", "valor": 400.00, "data": "2025-12-01"}
+    ],
+    "impostos_pagos": 0.0
+  },
+  "2025-11": {
+    "month": "2025-11",
+    "categoria_mei": "servicos",
+    "receitas": [
+      {"descricao": "Logo + Cartão de Visitas", "valor": 800.00, "data": "2025-11-10"},
+      {"descricao": "Landing Page - Evento", "valor": 1500.00, "data": "2025-11-18"},
+      {"descricao": "Manutenção mensal sites", "valor": 600.00, "data": "2025-11-25"}
+    ],
+    "despesas": [
+      {"descricao": "Internet/telefone", "valor": 150.00, "data": "2025-11-05"},
+      {"descricao": "Software", "valor": 49.90, "data": "2025-11-10"},
+      {"descricao": "Hospedagem", "valor": 120.00, "data": "2025-11-15"},
+      {"descricao": "Transporte (reuniões clientes)", "valor": 200.00, "data": "2025-11-20"}
+    ],
+    "impostos_pagos": 0.0
+  }
+}

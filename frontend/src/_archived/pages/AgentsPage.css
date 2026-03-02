@@ -1,0 +1,732 @@
+.agents-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0F172A 0%, #1E293B 25%, #1E1B4B 50%, #164E63 75%, #0C4A6E 100%);
+}
+
+/* ========================================
+   NAVBAR SUPERIOR - Design Premium
+   ======================================== */
+
+.navbar-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: 80px;
+  background: linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #0F172A 100%);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(8px);
+}
+
+.navbar-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  height: 100%;
+  padding: 0 2rem;
+}
+
+.navbar-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+}
+
+/* Logo e Brand */
+.navbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.navbar-logo {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 50%, #06B6D4 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 25px rgba(59, 130, 246, 0.3);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  transition: transform 0.3s ease;
+}
+
+.navbar-logo:hover {
+  transform: rotate(5deg) scale(1.05);
+}
+
+.navbar-logo-text {
+  color: white;
+  font-size: 1.25rem;
+  font-weight: 900;
+}
+
+.navbar-titles {
+  display: flex;
+  flex-direction: column;
+}
+
+.navbar-title {
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: white;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.navbar-subtitle {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #94a3b8;
+  margin: 0;
+}
+
+/* Botões de Navegação */
+.navbar-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.navbar-btn {
+  padding: 0.625rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.navbar-btn:focus {
+  outline: none;
+}
+
+/* Botão ATIVO (Agentes) */
+.navbar-btn-active {
+  background: linear-gradient(135deg, #2563EB 0%, #1E40AF 100%);
+  color: white;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
+  border: 2px solid rgba(59, 130, 246, 0.2);
+}
+
+.navbar-btn-active:hover {
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
+  transform: scale(1.05);
+}
+
+.navbar-btn-active:active {
+  transform: scale(0.98);
+}
+
+/* Botões INATIVOS */
+.navbar-btn-inactive {
+  background: rgba(30, 41, 59, 0.5);
+  color: #cbd5e1;
+  border: 1px solid rgba(71, 85, 105, 0.5);
+}
+
+.navbar-btn-inactive:hover {
+  background: rgba(51, 65, 85, 0.5);
+  color: white;
+  border-color: #64748b;
+  transform: scale(1.05);
+}
+
+.navbar-btn-inactive:active {
+  transform: scale(0.98);
+}
+
+/* ========================================
+   HERO SECTION - "Agentes de IA"
+   ======================================== */
+
+.page-header {
+  margin: 3rem 2rem 2rem 2rem;
+  border-radius: 1rem;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.95) 50%, rgba(17, 24, 39, 0.95) 100%);
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Padrão decorativo de fundo */
+.hero-decorative {
+  position: absolute;
+  inset: 0;
+  opacity: 0.05;
+  pointer-events: none;
+}
+
+.hero-decorative::before,
+.hero-decorative::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+}
+
+.hero-decorative::before {
+  top: 0;
+  right: 0;
+  width: 384px;
+  height: 384px;
+  background: #60a5fa;
+}
+
+.hero-decorative::after {
+  bottom: 0;
+  left: 0;
+  width: 384px;
+  height: 384px;
+  background: #c084fc;
+}
+
+/* Conteúdo do Hero */
+.hero-content {
+  position: relative;
+  padding: 3rem 2rem;
+}
+
+.hero-inner {
+  max-width: 56rem;
+}
+
+.hero-title {
+  font-size: 3rem;
+  font-weight: 900;
+  margin: 0 0 1rem 0;
+  line-height: 1.2;
+  color: #ffffff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.hero-title-gradient {
+  background: linear-gradient(135deg, #22D3EE 0%, #A78BFA 50%, #F472B6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: brightness(1.2);
+}
+
+.hero-subtitle {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0 0 1.5rem 0;
+  line-height: 1.6;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  opacity: 1;
+}
+
+/* Badge "6 Agentes Disponíveis" */
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.hero-badge-indicator {
+  width: 8px;
+  height: 8px;
+  background: #4ade80;
+  border-radius: 50%;
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.1);
+  }
+}
+
+.hero-badge-text {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* Responsividade do Hero */
+@media (min-width: 1024px) {
+  .hero-content {
+    padding: 4rem 3rem;
+  }
+
+  .hero-title {
+    font-size: 3rem;
+  }
+
+  .hero-subtitle {
+    font-size: 1.25rem;
+  }
+}
+
+/* ========================================
+   RESTO DA PÁGINA (Cards dos Agentes)
+   ======================================== */
+
+/* Container dos cards */
+.agents-page > section {
+  padding: 0 2rem 2rem 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.1) 100%);
+  border-radius: 1rem;
+}
+
+.agents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.6rem;
+  margin-bottom: 3.4rem;
+  align-items: stretch;
+}
+
+.agent-card {
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 16px;
+  padding: 1.6rem 1.75rem;
+  box-shadow: var(--shadow);
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border 0.22s ease;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.agent-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 18px 40px rgba(79, 70, 229, 0.22);
+  border-color: rgba(109, 74, 255, 0.25);
+}
+
+.agent-card__header h3 {
+  margin: 0 0 0.8rem 0;
+  color: #1f3b73;
+  font-size: 1.3rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.agent-card__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-card__body p {
+  color: #374151;
+  margin: 0 0 1rem 0;
+  line-height: 1.6;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+}
+
+.agent-card__actions {
+  margin-top: auto;
+}
+
+/* BASE - Botão padrão (caso não tenha classe específica) */
+.agent-card__button {
+  width: 100%;
+  color: white;
+  border: none;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 700;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  letter-spacing: 0.1px;
+}
+
+.agent-card__button:active {
+  transform: scale(0.95);
+}
+
+.agent-card__button:focus {
+  outline: none;
+}
+
+/* 🌐 AUTOMAÇÃO WEB - Azul (Confiança técnica, estabilidade, profissionalismo) */
+.btn-automation {
+  background: linear-gradient(135deg, #2563EB 0%, #1E40AF 100%);
+  box-shadow: 0 12px 26px rgba(37, 99, 235, 0.24);
+}
+
+.btn-automation:hover {
+  background: linear-gradient(135deg, #1E40AF 0%, #1E3A8A 100%);
+  box-shadow: 0 20px 25px -5px rgba(37, 99, 235, 0.4), 
+              0 10px 10px -5px rgba(37, 99, 235, 0.2);
+  transform: translateY(-1px) scale(1.02);
+}
+
+.btn-automation:focus {
+  box-shadow: 0 0 0 4px rgba(147, 197, 253, 0.5);
+}
+
+/* 📅 AGENDA COMPLETA - Roxo (Organização, inteligência, sofisticação) */
+.btn-agenda {
+  background: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
+  box-shadow: 0 12px 26px rgba(124, 58, 237, 0.24);
+}
+
+.btn-agenda:hover {
+  background: linear-gradient(135deg, #6D28D9 0%, #5B21B6 100%);
+  box-shadow: 0 20px 25px -5px rgba(124, 58, 237, 0.4), 
+              0 10px 10px -5px rgba(124, 58, 237, 0.2);
+  transform: translateY(-1px) scale(1.02);
+}
+
+.btn-agenda:focus {
+  box-shadow: 0 0 0 4px rgba(216, 180, 254, 0.5);
+}
+
+/* 👥 CLIENTES (CRM) - Cyan (Relacionamento, comunicação, confiança social) */
+.btn-clients {
+  background: linear-gradient(135deg, #0891B2 0%, #0E7490 100%);
+  box-shadow: 0 12px 26px rgba(8, 145, 178, 0.24);
+}
+
+.btn-clients:hover {
+  background: linear-gradient(135deg, #0E7490 0%, #155E75 100%);
+  box-shadow: 0 20px 25px -5px rgba(8, 145, 178, 0.4), 
+              0 10px 10px -5px rgba(8, 145, 178, 0.2);
+  transform: translateY(-1px) scale(1.02);
+}
+
+.btn-clients:focus {
+  box-shadow: 0 0 0 4px rgba(103, 232, 249, 0.5);
+}
+
+/* 💰 ANÁLISE FINANCEIRA - Verde (Crescimento, dinheiro, segurança financeira) */
+.btn-financial {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  box-shadow: 0 12px 26px rgba(5, 150, 105, 0.24);
+}
+
+.btn-financial:hover {
+  background: linear-gradient(135deg, #047857 0%, #065F46 100%);
+  box-shadow: 0 20px 25px -5px rgba(5, 150, 105, 0.4), 
+              0 10px 10px -5px rgba(5, 150, 105, 0.2);
+  transform: translateY(-1px) scale(1.02);
+}
+
+.btn-financial:focus {
+  box-shadow: 0 0 0 4px rgba(134, 239, 172, 0.5);
+}
+
+/* 📄 NOTA FISCAL - Indigo (Profissionalismo, seriedade, documentação) */
+.btn-invoice {
+  background: linear-gradient(135deg, #4F46E5 0%, #4338CA 100%);
+  box-shadow: 0 12px 26px rgba(79, 70, 229, 0.24);
+}
+
+.btn-invoice:hover {
+  background: linear-gradient(135deg, #4338CA 0%, #3730A3 100%);
+  box-shadow: 0 20px 25px -5px rgba(79, 70, 229, 0.4), 
+              0 10px 10px -5px rgba(79, 70, 229, 0.2);
+  transform: translateY(-1px) scale(1.02);
+}
+
+.btn-invoice:focus {
+  box-shadow: 0 0 0 4px rgba(165, 180, 252, 0.5);
+}
+
+/* 💳 COBRANÇAS - Rosa (Ação urgente mas suave, importância, atenção) */
+.btn-billing {
+  background: linear-gradient(135deg, #DB2777 0%, #BE185D 100%);
+  box-shadow: 0 12px 26px rgba(219, 39, 119, 0.24);
+}
+
+.btn-billing:hover {
+  background: linear-gradient(135deg, #BE185D 0%, #9F1239 100%);
+  box-shadow: 0 20px 25px -5px rgba(219, 39, 119, 0.4), 
+              0 10px 10px -5px rgba(219, 39, 119, 0.2);
+  transform: translateY(-1px) scale(1.02);
+}
+
+.btn-billing:focus {
+  box-shadow: 0 0 0 4px rgba(249, 168, 212, 0.5);
+}
+
+/* Legado - mantém compatibilidade */
+.btn-execute {
+  background: linear-gradient(135deg, var(--nexus-purple-main) 0%, var(--nexus-purple-hover) 55%, var(--nexus-cyan) 100%);
+  box-shadow: 0 12px 26px rgba(91, 123, 255, 0.24);
+}
+
+.btn-execute:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 30px rgba(109, 74, 255, 0.24);
+}
+
+.btn-execute:active {
+  transform: translateY(0);
+}
+
+.tasks-section {
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 1.7rem;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.tasks-section h2 {
+  margin-top: 0;
+  color: #111827;
+}
+
+.tasks-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.tasks-table thead {
+  background: #f8fafc;
+}
+
+.tasks-table th,
+.tasks-table td {
+  padding: 0.85rem;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.tasks-table th {
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.badge {
+  padding: 0.32rem 0.72rem;
+  border-radius: 12px;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.badge-yellow {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.badge-blue {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.badge-green {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.badge-red {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.badge-gray {
+  background: #e5e7eb;
+  color: #4b5563;
+}
+
+.error-text {
+  color: #dc2626;
+  font-size: 0.95rem;
+}
+
+.execution-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 14px;
+  padding: 2rem;
+  min-width: 520px;
+  max-width: 640px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.modal-content h2 {
+  margin-top: 0;
+  color: #0f172a;
+  letter-spacing: -0.3px;
+}
+
+.form-field {
+  margin-bottom: 1rem;
+}
+
+.form-field label {
+  display: block;
+  margin-bottom: 0.45rem;
+  color: #111827;
+  font-weight: 600;
+}
+
+.form-field input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  font-size: 1rem;
+  background: #f8fafc;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.form-field input:focus {
+  outline: none;
+  border-color: #6d4aff;
+  box-shadow: 0 0 0 3px rgba(109, 74, 255, 0.12);
+}
+
+.form-field input::placeholder {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.field-description {
+  background: #eef2ff;
+  border-left: 3px solid #6d4aff;
+  padding: 0.55rem 0.9rem;
+  margin: 0.5rem 0;
+  font-size: 0.92rem;
+  color: #1f2937;
+  border-radius: 8px;
+  line-height: 1.5;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.85rem;
+  color: #6b7280;
+  font-style: italic;
+}
+
+.modal-description {
+  color: #4b5563;
+  font-size: 0.98rem;
+  margin: -0.5rem 0 1rem 0;
+  line-height: 1.45;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.modal-actions button {
+  flex: 1;
+  padding: 0.8rem;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: all 0.18s ease;
+  font-weight: 700;
+}
+
+.modal-actions button:first-child {
+  background: linear-gradient(135deg, #22d3ee 0%, #6d4aff 100%);
+  color: white;
+  box-shadow: 0 12px 24px rgba(109, 74, 255, 0.2);
+}
+
+.modal-actions button:first-child:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 28px rgba(34, 211, 238, 0.18);
+}
+
+.modal-actions button:last-child {
+  background: #e5e7eb;
+  color: #111827;
+}
+
+.modal-actions button:last-child:hover {
+  background: #d1d5db;
+}
+
+.integration-buttons {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.btn-integration {
+  flex: 1;
+  min-width: 200px;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  background: linear-gradient(135deg, #22d3ee 0%, #6d4aff 100%);
+  color: white;
+  transition: all 0.18s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 12px 22px rgba(109, 74, 255, 0.18);
+}
+
+.btn-integration:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 26px rgba(34, 211, 238, 0.2);
+}
+
+.btn-integration:active {
+  transform: translateY(0);
+}
+
+details {
+  cursor: pointer;
+}
+
+details summary {
+  color: #6d4aff;
+  font-weight: 600;
+}
+
+details pre {
+  background: #f8fafc;
+  padding: 1rem;
+  border-radius: 10px;
+  overflow-x: auto;
+  margin-top: 0.5rem;
+  border: 1px solid #e5e7eb;
+}

@@ -17,6 +17,8 @@ secrets/
 keys/
 credentials.json
 .credentials
+config/sa-key.json
+config/*.json
 
 # API KEYS E TOKENS
 *.key
@@ -52,3 +54,13 @@ logs/
 # HISTÓRICO GIT SENSÍVEL
 .git/
 .git-credentials
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo

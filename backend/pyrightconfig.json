@@ -1,0 +1,66 @@
+{
+  "include": ["."],
+  "exclude": [
+    "**/__pycache__",
+    "**/node_modules",
+    ".venv",
+    "_archived",
+    "_archived/**",
+    "**/test_*"
+  ],
+  "ignore": [
+    "_archived/**",
+    "**/test_*"
+  ],
+  "typeCheckingMode": "off",
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Windows",
+  "venvPath": "..",
+  "venv": ".venv",
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": [".", "scripts"]
+    },
+    {
+      "root": "scripts",
+      "extraPaths": [".."]
+    }
+  ],
+  "reportMissingImports": false,
+  "reportMissingModuleSource": false,
+  "reportMissingTypeStubs": false,
+  "reportUnknownMemberType": false,
+  "reportUnknownArgumentType": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownParameterType": false,
+  "reportOptionalMemberAccess": false,
+  "reportGeneralTypeIssues": false,
+  "reportUnboundVariable": false,
+  "reportPartiallyUnknownType": false,
+  "reportPrivateUsage": false,
+  "reportUnusedImport": false,
+  "reportUnusedVariable": false,
+  "reportDeprecated": false,
+  "reportUnknownLambdaType": false,
+  "reportOptionalCall": false,
+  "reportUndefinedVariable": false,
+  "reportReturnType": false,
+  "reportArgumentType": false,
+  "reportIndexIssue": false,
+  "reportOperatorIssue": false,
+  "reportCallIssue": false,
+  "reportPossiblyUnbound": false,
+  "reportOptionalSubscript": false,
+  "reportOptionalIterable": false,
+  "reportOptionalOperand": false,
+  "reportInvalidTypeForm": false,
+  "reportAttributeAccessIssue": false,
+  "reportAssignmentType": false,
+  "reportAbstractUsage": false,
+  "reportIncompatibleVariableOverride": false,
+  "reportIncompatibleMethodOverride": false,
+  "reportRedefinedVariable": false,
+  "reportMissingParameterType": false,
+  "reportInvalidStringEscapeSequence": false
+}

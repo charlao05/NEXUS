@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>DOM Structure Test</title>
+  <style>
+    body { font-family: monospace; padding: 20px; }
+    .section { background: #f0f0f0; padding: 15px; margin: 10px 0; border-radius: 5px; }
+    .error { color: red; font-weight: bold; }
+    .success { color: green; font-weight: bold; }
+    h2 { margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>🔍 DOM Structure Inspection</h1>
+  <p>Abra DevTools (F12) e cola isso no console:</p>
+  
+  <div class="section">
+    <h3>Verificar Contagem de Navbars:</h3>
+    <pre><code>
+console.log('Total navbars:', document.querySelectorAll('.navbar-header').length);
+console.log('Total page-headers:', document.querySelectorAll('.page-header').length);
+console.log('Total agents-page:', document.querySelectorAll('.agents-page').length);
+
+// Se tiver mais de 1 de qualquer coisa, há duplicação!
+    </code></pre>
+  </div>
+
+  <div class="section">
+    <h3>Verificar Renderização React:</h3>
+    <pre><code>
+// Verificar se React está sendo renderizado corretamente
+const agentsPage = document.querySelector('.agents-page');
+console.log('Agents Page div:', agentsPage);
+console.log('Filhos diretos:', agentsPage.children.length);
+console.log('Estrutura:', {
+  navbar: agentsPage.querySelector('.navbar-header') ? '✓' : '✗',
+  pageHeader: agentsPage.querySelector('.page-header') ? '✓' : '✗',
+  agentsSection: agentsPage.querySelector('.agents-section') ? '✓' : '✗'
+});
+    </code></pre>
+  </div>
+
+  <div class="section">
+    <h3>Verificar CSS Aplicado:</h3>
+    <pre><code>
+const navbar = document.querySelector('.navbar-header');
+const styles = window.getComputedStyle(navbar);
+console.log('Navbar CSS:', {
+  position: styles.position,
+  zIndex: styles.zIndex,
+  height: styles.height,
+  background: styles.background
+});
+    </code></pre>
+  </div>
+
+  <p><strong>Resultado esperado:</strong></p>
+  <ul>
+    <li>Total navbars: <span class="success">1</span></li>
+    <li>Total page-headers: <span class="success">1</span></li>
+    <li>Total agents-page: <span class="success">1</span></li>
+    <li>Filhos diretos (agents-page): <span class="success">3</span> (navbar, header, section)</li>
+  </ul>
+
+  <p><em>Se qualquer valor for diferente, há duplicação na renderização.</em></p>
+</body>
+</html>

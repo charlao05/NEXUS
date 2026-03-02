@@ -1,0 +1,14 @@
+nome: "Instagram"
+url_login: "https://www.instagram.com/accounts/login/"
+url_base: "https://www.instagram.com"
+
+seletor_usuario: "input[name='username']"
+seletor_senha: "input[name='password']"
+seletor_botao_login: "button[type='button']:has-text('Log in')"
+
+tempo_espera_login_ms: 10000
+tempo_espera_elemento_ms: 8000
+
+descricao: |
+  Configuração para login automatizado no Instagram.
+  Suporta fluxos de captura de leads, qualificação e resposta personalizada.

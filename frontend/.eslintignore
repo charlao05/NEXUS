@@ -1,0 +1,5 @@
+# Ignorar arquivos de configuração no ESLint
+.eslintrc.cjs
+vite.config.ts
+tsconfig*.json
+src/_archived

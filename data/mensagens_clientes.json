@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "canal": "whatsapp",
+    "nome_cliente": "João",
+    "texto": "Oi, você tem horário pra corte de cabelo amanhã depois das 18h?"
+  },
+  {
+    "id": 2,
+    "canal": "instagram",
+    "nome_cliente": "Ana",
+    "texto": "Queria saber o valor de cabelo + hidratação e se tem vaga sábado de manhã"
+  }
+]

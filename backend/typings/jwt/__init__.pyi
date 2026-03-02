@@ -1,0 +1,29 @@
+"""Type stubs for PyJWT library."""
+from typing import Any, Dict, List, Optional, Union
+
+class ExpiredSignatureError(Exception): ...
+class InvalidTokenError(Exception): ...
+class DecodeError(InvalidTokenError): ...
+class InvalidSignatureError(DecodeError): ...
+class InvalidAlgorithmError(InvalidTokenError): ...
+class MissingRequiredClaimError(InvalidTokenError): ...
+
+def encode(
+    payload: Dict[str, Any],
+    key: Union[str, bytes],
+    algorithm: str = "HS256",
+    headers: Optional[Dict[str, Any]] = None,
+    json_encoder: Optional[type] = None,
+) -> str: ...
+
+def decode(
+    jwt: Union[str, bytes],
+    key: Union[str, bytes] = "",
+    algorithms: Optional[List[str]] = None,
+    options: Optional[Dict[str, Any]] = None,
+    audience: Optional[Union[str, List[str]]] = None,
+    issuer: Optional[str] = None,
+    leeway: float = 0,
+) -> Dict[str, Any]: ...
+
+def get_unverified_header(jwt: Union[str, bytes]) -> Dict[str, Any]: ...

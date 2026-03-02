@@ -1,0 +1,120 @@
+{
+  "mei_id": "mei_001",
+  "mei_name": "João Silva - Consultoria",
+  "cnpj": "XX.XXX.XXX/0001-XX",
+  "obligations": [
+    {
+      "id": "das_nov_2025",
+      "type": "das",
+      "name": "DAS Novembro 2025",
+      "description": "Guia de Recolhimento do Simples Nacional",
+      "due_date": "2025-11-20",
+      "estimated_value": 121.50,
+      "status": "pending",
+      "priority": "high",
+      "penalty_days_late": 30,
+      "penalty_percentage": 0.02,
+      "url_payment": "https://servicos.receita.federal.gov.br/",
+      "notes": "Refer ao DAS de novembro. Pagar até o 20º dia do mês seguinte."
+    },
+    {
+      "id": "das_dec_2025",
+      "type": "das",
+      "name": "DAS Dezembro 2025",
+      "description": "Guia de Recolhimento do Simples Nacional",
+      "due_date": "2026-01-20",
+      "estimated_value": 121.50,
+      "status": "pending",
+      "priority": "normal",
+      "penalty_days_late": 30,
+      "penalty_percentage": 0.02,
+      "url_payment": "https://servicos.receita.federal.gov.br/",
+      "notes": "Refer ao DAS de dezembro. Pagar até o 20º dia de janeiro."
+    },
+    {
+      "id": "dasn_2024",
+      "type": "dasn",
+      "name": "DASN Anual 2024",
+      "description": "Declaração Anual do Simples Nacional",
+      "due_date": "2025-05-31",
+      "estimated_value": 0,
+      "status": "pending",
+      "priority": "critical",
+      "penalty_days_late": 60,
+      "penalty_percentage": 0.05,
+      "url_payment": "https://www8.receita.federal.gov.br/simplesnacional/",
+      "notes": "DASN deve ser declarada anualmente até 31 de maio. Fundamental para permanência no regime."
+    },
+    {
+      "id": "rent_dec_2025",
+      "type": "fixed_expense",
+      "name": "Aluguel Dezembro 2025",
+      "description": "Aluguel do local comercial",
+      "due_date": "2025-12-05",
+      "estimated_value": 1500.00,
+      "status": "pending",
+      "priority": "high",
+      "penalty_days_late": 1,
+      "penalty_percentage": 0.1,
+      "notes": "Pagar até o quinto dia do mês para evitar problemas com locador."
+    },
+    {
+      "id": "water_nov_2025",
+      "type": "utility",
+      "name": "Água Novembro 2025",
+      "description": "Conta de água do estabelecimento",
+      "due_date": "2025-11-25",
+      "estimated_value": 150.00,
+      "status": "pending",
+      "priority": "normal",
+      "penalty_days_late": 15,
+      "penalty_percentage": 0.02,
+      "notes": "Utilities. Vencimento geralmente no 25º dia."
+    },
+    {
+      "id": "electricity_nov_2025",
+      "type": "utility",
+      "name": "Luz Novembro 2025",
+      "description": "Conta de eletricidade do estabelecimento",
+      "due_date": "2025-11-28",
+      "estimated_value": 300.00,
+      "status": "pending",
+      "priority": "normal",
+      "penalty_days_late": 15,
+      "penalty_percentage": 0.02,
+      "notes": "Utilities. Vencimento geralmente no 28º dia."
+    },
+    {
+      "id": "internet_dec_2025",
+      "type": "utility",
+      "name": "Internet Dezembro 2025",
+      "description": "Serviço de internet banda larga",
+      "due_date": "2025-12-10",
+      "estimated_value": 120.00,
+      "status": "pending",
+      "priority": "normal",
+      "penalty_days_late": 10,
+      "penalty_percentage": 0.01,
+      "notes": "Serviço mensal recorrente."
+    },
+    {
+      "id": "cnpj_renewal_2026",
+      "type": "registration",
+      "name": "Renovação CNPJ 2026",
+      "description": "Manutenção e renovação do CNPJ de MEI",
+      "due_date": "2026-01-31",
+      "estimated_value": 0,
+      "status": "pending",
+      "priority": "critical",
+      "penalty_days_late": 0,
+      "penalty_percentage": 0,
+      "url_payment": "https://www.gov.br/empresas/pt-br/servicos/cnpj/manter-dados-atualizados",
+      "notes": "Necessário manter CNPJ ativo. Fazer anualmente no portal da Receita."
+    }
+  ],
+  "settings": {
+    "notification_days_before": [30, 14, 7, 1],
+    "timezone": "America/Sao_Paulo",
+    "preferred_contact": "whatsapp"
+  }
+}

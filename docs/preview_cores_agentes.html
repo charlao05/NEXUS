@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎨 Cores dos Agentes NEXUS - Preview</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 3rem 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 3rem;
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            text-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.95;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+            gap: 2rem;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 30px 60px rgba(0,0,0,0.2);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card-emoji {
+            font-size: 3rem;
+        }
+
+        .card-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #1f2937;
+        }
+
+        .card-description {
+            color: #6b7280;
+            margin-bottom: 1.5rem;
+            line-height: 1.6;
+        }
+
+        .card-info {
+            background: #f9fafb;
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card-info p {
+            margin: 0.5rem 0;
+            color: #4b5563;
+            font-size: 0.9rem;
+        }
+
+        .card-info strong {
+            color: #1f2937;
+        }
+
+        .card-button {
+            width: 100%;
+            padding: 1rem;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .card-button:hover {
+            transform: translateY(-2px) scale(1.02);
+        }
+
+        .card-button:active {
+            transform: scale(0.95);
+        }
+
+        .card-button:focus {
+            outline: none;
+        }
+
+        /* 🌐 AUTOMAÇÃO WEB - Azul */
+        .btn-automation {
+            background: linear-gradient(135deg, #2563EB 0%, #1E40AF 100%);
+            box-shadow: 0 12px 26px rgba(37, 99, 235, 0.24);
+        }
+
+        .btn-automation:hover {
+            background: linear-gradient(135deg, #1E40AF 0%, #1E3A8A 100%);
+            box-shadow: 0 20px 25px -5px rgba(37, 99, 235, 0.4), 
+                        0 10px 10px -5px rgba(37, 99, 235, 0.2);
+        }
+
+        .btn-automation:focus {
+            box-shadow: 0 0 0 4px rgba(147, 197, 253, 0.5);
+        }
+
+        /* 📅 AGENDA COMPLETA - Roxo */
+        .btn-agenda {
+            background: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
+            box-shadow: 0 12px 26px rgba(124, 58, 237, 0.24);
+        }
+
+        .btn-agenda:hover {
+            background: linear-gradient(135deg, #6D28D9 0%, #5B21B6 100%);
+            box-shadow: 0 20px 25px -5px rgba(124, 58, 237, 0.4), 
+                        0 10px 10px -5px rgba(124, 58, 237, 0.2);
+        }
+
+        .btn-agenda:focus {
+            box-shadow: 0 0 0 4px rgba(216, 180, 254, 0.5);
+        }
+
+        /* 👥 CLIENTES - Cyan */
+        .btn-clients {
+            background: linear-gradient(135deg, #0891B2 0%, #0E7490 100%);
+            box-shadow: 0 12px 26px rgba(8, 145, 178, 0.24);
+        }
+
+        .btn-clients:hover {
+            background: linear-gradient(135deg, #0E7490 0%, #155E75 100%);
+            box-shadow: 0 20px 25px -5px rgba(8, 145, 178, 0.4), 
+                        0 10px 10px -5px rgba(8, 145, 178, 0.2);
+        }
+
+        .btn-clients:focus {
+            box-shadow: 0 0 0 4px rgba(103, 232, 249, 0.5);
+        }
+
+        /* 💰 FINANCEIRO - Verde */
+        .btn-financial {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            box-shadow: 0 12px 26px rgba(5, 150, 105, 0.24);
+        }
+
+        .btn-financial:hover {
+            background: linear-gradient(135deg, #047857 0%, #065F46 100%);
+            box-shadow: 0 20px 25px -5px rgba(5, 150, 105, 0.4), 
+                        0 10px 10px -5px rgba(5, 150, 105, 0.2);
+        }
+
+        .btn-financial:focus {
+            box-shadow: 0 0 0 4px rgba(134, 239, 172, 0.5);
+        }
+
+        /* 📄 NOTA FISCAL - Indigo */
+        .btn-invoice {
+            background: linear-gradient(135deg, #4F46E5 0%, #4338CA 100%);
+            box-shadow: 0 12px 26px rgba(79, 70, 229, 0.24);
+        }
+
+        .btn-invoice:hover {
+            background: linear-gradient(135deg, #4338CA 0%, #3730A3 100%);
+            box-shadow: 0 20px 25px -5px rgba(79, 70, 229, 0.4), 
+                        0 10px 10px -5px rgba(79, 70, 229, 0.2);
+        }
+
+        .btn-invoice:focus {
+            box-shadow: 0 0 0 4px rgba(165, 180, 252, 0.5);
+        }
+
+        /* 💳 COBRANÇAS - Rosa */
+        .btn-billing {
+            background: linear-gradient(135deg, #DB2777 0%, #BE185D 100%);
+            box-shadow: 0 12px 26px rgba(219, 39, 119, 0.24);
+        }
+
+        .btn-billing:hover {
+            background: linear-gradient(135deg, #BE185D 0%, #9F1239 100%);
+            box-shadow: 0 20px 25px -5px rgba(219, 39, 119, 0.4), 
+                        0 10px 10px -5px rgba(219, 39, 119, 0.2);
+        }
+
+        .btn-billing:focus {
+            box-shadow: 0 0 0 4px rgba(249, 168, 212, 0.5);
+        }
+
+        .footer {
+            text-align: center;
+            color: white;
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .footer p {
+            margin: 0.5rem 0;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎨 Cores dos Agentes NEXUS</h1>
+            <p>Gradientes Psicológicos Únicos para Identidade Visual</p>
+        </div>
+
+        <div class="grid">
+            <!-- AUTOMAÇÃO WEB -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-emoji">🌐</span>
+                    <h3 class="card-title">Automação Web</h3>
+                </div>
+                <p class="card-description">
+                    Automação de sites com Playwright (login, formulários, etc)
+                </p>
+                <div class="card-info">
+                    <p><strong>Cor:</strong> Azul</p>
+                    <p><strong>Gradiente:</strong> #2563EB → #1E40AF</p>
+                    <p><strong>Psicologia:</strong> Confiança técnica, estabilidade, profissionalismo</p>
+                </div>
+                <button class="card-button btn-automation">
+                    Executar
+                </button>
+            </div>
+
+            <!-- AGENDA COMPLETA -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-emoji">📅</span>
+                    <h3 class="card-title">Agenda Completa</h3>
+                </div>
+                <p class="card-description">
+                    Prazos fiscais, pagamentos, NFs, fornecedores e deadlines. A IA monitora tudo.
+                </p>
+                <div class="card-info">
+                    <p><strong>Cor:</strong> Roxo</p>
+                    <p><strong>Gradiente:</strong> #7C3AED → #6D28D9</p>
+                    <p><strong>Psicologia:</strong> Organização, inteligência, sofisticação</p>
+                </div>
+                <button class="card-button btn-agenda">
+                    Executar
+                </button>
+            </div>
+
+            <!-- CLIENTES CRM -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-emoji">👥</span>
+                    <h3 class="card-title">Clientes (CRM)</h3>
+                </div>
+                <p class="card-description">
+                    CRM Completo: Cadastro, agendamento, análise e probabilidades de compra
+                </p>
+                <div class="card-info">
+                    <p><strong>Cor:</strong> Cyan</p>
+                    <p><strong>Gradiente:</strong> #0891B2 → #0E7490</p>
+                    <p><strong>Psicologia:</strong> Relacionamento, comunicação, confiança social</p>
+                </div>
+                <button class="card-button btn-clients">
+                    Executar
+                </button>
+            </div>
+
+            <!-- ANÁLISE FINANCEIRA -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-emoji">💰</span>
+                    <h3 class="card-title">Análise Financeira</h3>
+                </div>
+                <p class="card-description">
+                    Contador pessoal: analisa entradas, saídas, lucro real e prevê faturamento
+                </p>
+                <div class="card-info">
+                    <p><strong>Cor:</strong> Verde</p>
+                    <p><strong>Gradiente:</strong> #059669 → #047857</p>
+                    <p><strong>Psicologia:</strong> Crescimento, dinheiro, segurança financeira</p>
+                </div>
+                <button class="card-button btn-financial">
+                    Executar
+                </button>
+            </div>
+
+            <!-- NOTA FISCAL -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-emoji">📄</span>
+                    <h3 class="card-title">Nota Fiscal</h3>
+                </div>
+                <p class="card-description">
+                    Gera instruções detalhadas para emissão de Nota Fiscal (NFS-e)
+                </p>
+                <div class="card-info">
+                    <p><strong>Cor:</strong> Indigo</p>
+                    <p><strong>Gradiente:</strong> #4F46E5 → #4338CA</p>
+                    <p><strong>Psicologia:</strong> Profissionalismo, seriedade, documentação</p>
+                </div>
+                <button class="card-button btn-invoice">
+                    Executar
+                </button>
+            </div>
+
+            <!-- COBRANÇAS -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-emoji">💳</span>
+                    <h3 class="card-title">Cobranças</h3>
+                </div>
+                <p class="card-description">
+                    Envio automático de cobranças e lembretes de pagamento
+                </p>
+                <div class="card-info">
+                    <p><strong>Cor:</strong> Rosa</p>
+                    <p><strong>Gradiente:</strong> #DB2777 → #BE185D</p>
+                    <p><strong>Psicologia:</strong> Ação urgente (mas suave), importância, atenção</p>
+                </div>
+                <button class="card-button btn-billing">
+                    Executar
+                </button>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>✨ <strong>NEXUS</strong> - Automações Inteligentes para MEI</p>
+            <p>Cada agente possui identidade visual única baseada em psicologia das cores</p>
+            <p>📄 Documentação completa em <code>docs/CORES_AGENTES_PSICOLOGIA.md</code></p>
+        </div>
+    </div>
+
+    <script>
+        // Adiciona efeito de clique
+        document.querySelectorAll('.card-button').forEach(button => {
+            button.addEventListener('click', function() {
+                const agentName = this.parentElement.querySelector('.card-title').textContent;
+                alert(`✅ Executando: ${agentName}\n\nEsta é uma prévia visual.\nImplementação completa no sistema NEXUS!`);
+            });
+        });
+
+        // Log das cores ao carregar
+        console.log('🎨 CORES DOS AGENTES NEXUS');
+        console.log('========================');
+        console.log('🌐 Automação Web: Azul (#2563EB → #1E40AF)');
+        console.log('📅 Agenda: Roxo (#7C3AED → #6D28D9)');
+        console.log('👥 Clientes: Cyan (#0891B2 → #0E7490)');
+        console.log('💰 Financeiro: Verde (#059669 → #047857)');
+        console.log('📄 Nota Fiscal: Indigo (#4F46E5 → #4338CA)');
+        console.log('💳 Cobranças: Rosa (#DB2777 → #BE185D)');
+    </script>
+</body>
+</html>

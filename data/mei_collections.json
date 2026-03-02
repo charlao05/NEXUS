@@ -1,0 +1,7 @@
+{
+  "mei_id": "mei_001",
+  "open_invoices": [
+    {"id": "inv_001", "client": "Cliente A", "amount": 500.00, "due_date": "2025-11-05", "status": "overdue", "phone": "+5511999999999"},
+    {"id": "inv_002", "client": "Cliente B", "amount": 250.00, "due_date": "2025-11-25", "status": "pending", "phone": "+5511888888888"}
+  ]
+}

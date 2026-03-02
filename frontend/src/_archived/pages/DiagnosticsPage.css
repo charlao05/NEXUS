@@ -1,0 +1,276 @@
+.diagnostics-page {
+  padding: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.page-header {
+  margin-bottom: 2rem;
+}
+
+.page-header h1 {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.page-header p {
+  color: #374151;
+  font-size: 1.1rem;
+}
+
+.diagnostics-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+
+@media (max-width: 1200px) {
+  .diagnostics-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+.input-section,
+.results-section,
+.history-section {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.input-section h2,
+.results-section h2,
+.history-section h2 {
+  margin-top: 0;
+  color: #2c3e50;
+  font-size: 1.5rem;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #495057;
+  font-weight: 500;
+}
+
+.form-group textarea,
+.form-group input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 1rem;
+  font-family: inherit;
+}
+
+.form-group textarea {
+  resize: vertical;
+}
+
+.form-actions {
+  display: flex;
+  gap: 1rem;
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-view {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background 0.2s;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--nexus-purple-main) 0%, var(--nexus-purple-hover) 55%, var(--nexus-cyan) 100%);
+  color: white;
+  flex: 1;
+  font-weight: 700;
+  border-radius: 10px;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #2980b9;
+}
+
+.btn-primary:disabled {
+  background: #95a5a6;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: #e0e0e0;
+  color: #333;
+}
+
+.btn-secondary:hover {
+  background: #d0d0d0;
+}
+
+.btn-view {
+  background: linear-gradient(135deg, var(--nexus-purple-main) 0%, var(--nexus-purple-hover) 55%, var(--nexus-cyan) 100%);
+  color: white;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  border-radius: 10px;
+}
+
+.btn-view:hover {
+  background: #2980b9;
+}
+
+.results-section {
+  grid-column: span 2;
+}
+
+.result-card {
+  background: #f8fafc;
+  border-left: 4px solid var(--nexus-cyan);
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  border-radius: 10px;
+}
+
+.result-card h3 {
+  margin-top: 0;
+  color: #2c3e50;
+  font-size: 1.2rem;
+}
+
+.problem-text {
+  color: #495057;
+  font-size: 1.1rem;
+  line-height: 1.6;
+}
+
+.causes-list,
+.next-steps-list {
+  padding-left: 1.5rem;
+}
+
+.causes-list li,
+.next-steps-list li {
+  margin-bottom: 0.75rem;
+  color: #495057;
+  line-height: 1.6;
+}
+
+.solutions-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.solution-item {
+  background: white;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  padding: 1rem;
+}
+
+.solution-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.solution-header h4 {
+  margin: 0;
+  color: #2c3e50;
+}
+
+.priority-badge {
+  padding: 0.3rem 0.7rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.priority-high {
+  background: #ff7675;
+  color: #d63031;
+}
+
+.priority-medium {
+  background: #ffeaa7;
+  color: #d63031;
+}
+
+.priority-low {
+  background: #55efc4;
+  color: #00b894;
+}
+
+.solution-item p {
+  color: #7f8c8d;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.result-meta {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-top: 1px solid #dee2e6;
+  margin-top: 1rem;
+}
+
+.result-meta small {
+  color: #95a5a6;
+  font-size: 0.85rem;
+}
+
+.history-section {
+  grid-column: span 2;
+}
+
+.history-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.history-item {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  padding: 1rem;
+}
+
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.history-header strong {
+  color: #2c3e50;
+  flex: 1;
+}
+
+.history-header small {
+  color: #95a5a6;
+  font-size: 0.85rem;
+}
+
+.history-summary {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.history-summary span {
+  color: #7f8c8d;
+  font-size: 0.9rem;
+}

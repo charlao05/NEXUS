@@ -1,0 +1,50 @@
+# Configuração de automação — Receita Federal (Consulta CPF)
+# ==========================================================
+# Usado pelo planejador de automação para gerar planos de ação.
+
+receita_federal_cpf:
+  name: "Receita Federal — Consulta Situação Cadastral CPF"
+  base_url: "https://servicos.receita.fazenda.gov.br/Servicos/CPF/ConsultaSituacao/ConsultaPublica.asp"
+  description: "Consulta pública da situação cadastral do CPF"
+  risk_level: "low"
+  selectors:
+    campo_cpf: "input#txtCPF"
+    campo_nascimento: "input#txtDataNascimento"
+    botao_consultar: "input#id_submit"
+    resultado: "#idConteudo"
+    captcha: "img#imgCaptcha"
+  notes: |
+    A consulta de CPF na Receita Federal requer:
+    1. Número do CPF (formato: XXX.XXX.XXX-XX)
+    2. Data de nascimento (formato: DD/MM/AAAA)
+    3. Resolução de captcha (pode exigir interação manual)
+    
+    IMPORTANTE: Este serviço pode ter captcha que impede automação total.
+    O agente deve informar ao usuário quando encontrar captcha.
+
+receita_federal_cnpj:
+  name: "Receita Federal — Consulta CNPJ"
+  base_url: "https://solucoes.receita.fazenda.gov.br/Servicos/cnpjreva/cnpjreva_solicitacao.asp"
+  description: "Consulta pública de CNPJ (comprovante de inscrição)"
+  risk_level: "low"
+  selectors:
+    campo_cnpj: "input#cnpj"
+    botao_consultar: "input[type='submit']"
+    resultado: "#principal"
+  notes: |
+    Consulta de CNPJ — requer apenas o número do CNPJ.
+    Pode ter captcha hCaptcha.
+
+simples_nacional:
+  name: "Portal do Simples Nacional"
+  base_url: "https://www8.receita.fazenda.gov.br/SimplesNacional/"
+  description: "Portal do Simples Nacional — DAS, DASN, PGMEI"
+  risk_level: "medium"
+  selectors:
+    link_pgmei: "a[href*='PGMEI']"
+    link_das: "a[href*='DAS']"
+    link_dasn: "a[href*='DASN']"
+  notes: |
+    O Portal do Simples Nacional requer certificado digital ou código de acesso.
+    Risco médio por envolver acesso autenticado a dados fiscais.
+    O agente NÃO deve armazenar credenciais — o usuário deve digitá-las manualmente.

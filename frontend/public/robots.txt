@@ -1,0 +1,17 @@
+# NEXUS - robots.txt
+User-agent: *
+
+# Permitir páginas públicas
+Allow: /login
+Allow: /termos
+Allow: /privacidade
+Allow: /pricing
+
+# Bloquear rotas internas autenticadas
+Disallow: /dashboard
+Disallow: /admin
+Disallow: /agents
+Disallow: /onboarding
+Disallow: /docs
+Disallow: /api/
+Disallow: /success

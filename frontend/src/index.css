@@ -1,0 +1,171 @@
+/* stylelint-disable */
+@tailwind base; /* stylelint-disable-line */
+@tailwind components; /* stylelint-disable-line */
+@tailwind utilities; /* stylelint-disable-line */
+/* stylelint-enable */
+
+/* ===== THEME: LIGHT MODE OVERRIDES ===== */
+html.light { color-scheme: light; }
+html.dark  { color-scheme: dark; }
+
+/* ---- 1. Page & panel backgrounds ---- */
+html.light .bg-slate-900,
+html.light .bg-slate-900\/50,
+html.light .bg-slate-900\/60,
+html.light .bg-slate-900\/80 { background-color: #ffffff !important; }
+
+html.light .bg-slate-800,
+html.light .bg-slate-800\/50,
+html.light .bg-slate-800\/60,
+html.light .bg-slate-800\/30 { background-color: #ffffff !important; }
+
+html.light .bg-slate-700     { background-color: #e2e8f0 !important; }
+html.light .bg-slate-700\/50 { background-color: #f1f5f9 !important; }
+html.light .bg-slate-700\/30 { background-color: #f1f5f9 !important; }
+
+/* ---- 2. Main page gradient → light neutral ---- */
+html.light .from-slate-900  { --tw-gradient-from: #f8fafc !important; }
+html.light .via-slate-800   { --tw-gradient-via:  #ffffff !important; }
+html.light .to-slate-900    { --tw-gradient-to:   #f8fafc !important; }
+html.light .via-indigo-900  { --tw-gradient-via:  #eef2ff !important; }
+
+/* ---- 3. Agent-card subtle gradients → light tints ---- */
+html.light .from-blue-900\/30    { --tw-gradient-from: rgba(219,234,254,0.5) !important; }
+html.light .to-cyan-900\/30      { --tw-gradient-to:   rgba(207,250,254,0.5) !important; }
+html.light .from-green-900\/30   { --tw-gradient-from: rgba(220,252,231,0.5) !important; }
+html.light .to-emerald-900\/30   { --tw-gradient-to:   rgba(209,250,229,0.5) !important; }
+html.light .from-emerald-900\/30 { --tw-gradient-from: rgba(209,250,229,0.5) !important; }
+html.light .to-teal-900\/30      { --tw-gradient-to:   rgba(204,251,241,0.5) !important; }
+html.light .from-red-900\/30     { --tw-gradient-from: rgba(254,226,226,0.5) !important; }
+html.light .to-pink-900\/30      { --tw-gradient-to:   rgba(252,231,243,0.5) !important; }
+html.light .from-amber-900\/30   { --tw-gradient-from: rgba(254,243,199,0.5) !important; }
+html.light .to-orange-900\/30    { --tw-gradient-to:   rgba(255,237,213,0.5) !important; }
+
+html.light .bg-green-900\/20,
+html.light .bg-blue-900\/20,
+html.light .bg-red-900\/20,
+html.light .bg-emerald-900\/20 { background-color: rgba(0,0,0,0.02) !important; }
+
+/* ---- 4. Text: dark-on-light hierarchy ---- */
+html.light .text-white     { color: #1e293b !important; }
+html.light .text-slate-100 { color: #1e293b !important; }
+html.light .text-slate-200 { color: #334155 !important; }
+html.light .text-slate-300 { color: #475569 !important; }
+html.light .text-slate-400 { color: #64748b !important; }
+html.light .text-slate-500 { color: #94a3b8 !important; }
+
+/* ---- 5. RESTORE white text inside vibrant gradient backgrounds ---- */
+/* (500/600-level from-* gradients are visually saturated; text must stay white) */
+html.light [class*="from-green-500"]  .text-white,
+html.light [class*="from-green-500"].text-white,
+html.light [class*="from-green-600"]  .text-white,
+html.light [class*="from-green-600"].text-white,
+html.light [class*="from-blue-500"]   .text-white,
+html.light [class*="from-blue-500"].text-white,
+html.light [class*="from-emerald-500"] .text-white,
+html.light [class*="from-emerald-500"].text-white,
+html.light [class*="from-emerald-600"] .text-white,
+html.light [class*="from-emerald-600"].text-white,
+html.light [class*="from-red-500"]    .text-white,
+html.light [class*="from-red-500"].text-white,
+html.light [class*="from-purple-500"] .text-white,
+html.light [class*="from-purple-500"].text-white,
+html.light [class*="from-cyan-500"]   .text-white,
+html.light [class*="from-cyan-500"].text-white,
+html.light [class*="from-slate-500"]  .text-white,
+html.light [class*="from-slate-500"].text-white,
+html.light [class*="from-amber-500"]  .text-white,
+html.light [class*="from-amber-500"].text-white,
+html.light [class*="from-amber-600"]  .text-white,
+html.light [class*="from-amber-600"].text-white,
+html.light .bg-green-600 .text-white,
+html.light .bg-green-600.text-white,
+html.light .bg-amber-600 .text-white,
+html.light .bg-amber-600.text-white,
+html.light .bg-green-500 .text-white,
+html.light .bg-green-500.text-white { color: #ffffff !important; }
+
+/* ---- 6. Accent text — darker shades for white-bg contrast ---- */
+html.light .text-green-400  { color: #16a34a !important; }
+html.light .text-blue-400   { color: #2563eb !important; }
+html.light .text-cyan-400   { color: #0891b2 !important; }
+html.light .text-purple-400 { color: #9333ea !important; }
+html.light .text-red-400    { color: #dc2626 !important; }
+html.light .text-amber-300  { color: #d97706 !important; }
+html.light .text-amber-400  { color: #d97706 !important; }
+
+/* ---- 7. Borders ---- */
+html.light .border-slate-700\/50,
+html.light .border-slate-700\/30,
+html.light .border-slate-700  { border-color: #e2e8f0 !important; }
+html.light .border-slate-600\/50,
+html.light .border-slate-600\/30,
+html.light .border-slate-600  { border-color: #cbd5e1 !important; }
+
+/* Colored agent-card borders → matching light tints */
+html.light .border-blue-700\/30    { border-color: #bfdbfe !important; }
+html.light .border-green-700\/30   { border-color: #bbf7d0 !important; }
+html.light .border-emerald-700\/30 { border-color: #a7f3d0 !important; }
+html.light .border-red-700\/30     { border-color: #fecaca !important; }
+html.light .border-amber-700\/30   { border-color: #fde68a !important; }
+
+/* Hover borders */
+html.light .hover\:border-slate-600:hover  { border-color: #94a3b8 !important; }
+html.light .hover\:border-blue-500\/50:hover   { border-color: #93c5fd !important; }
+html.light .hover\:border-green-500\/50:hover  { border-color: #86efac !important; }
+html.light .hover\:border-emerald-500\/50:hover { border-color: #6ee7b7 !important; }
+html.light .hover\:border-red-500\/50:hover    { border-color: #fca5a5 !important; }
+
+/* ---- 8. Nav ---- */
+html.light nav { background-color: rgba(255,255,255,0.92) !important; backdrop-filter: blur(12px); }
+
+/* ---- 9. Inputs ---- */
+html.light input[type="text"],
+html.light input[type="email"],
+html.light input[type="password"],
+html.light input[type="search"],
+html.light input[type="number"],
+html.light textarea,
+html.light select {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+html.light input::placeholder,
+html.light textarea::placeholder { color: #94a3b8 !important; }
+
+/* ---- 10. Depth / shadows for light mode ---- */
+html.light .rounded-2xl { box-shadow: 0 1px 3px 0 rgba(0,0,0,0.06), 0 1px 2px -1px rgba(0,0,0,0.06); }
+html.light .rounded-xl  { box-shadow: 0 1px 2px 0 rgba(0,0,0,0.04); }
+
+/* ---- 11. Misc helpers ---- */
+html.light .bg-slate-900\/60 { background-color: rgba(255,255,255,0.7) !important; }
+html.light .shadow-green-500\/20 { --tw-shadow-color: rgba(22,163,74,0.12) !important; }
+
+/* ---- 12. Light mode readability — larger text ---- */
+html.light .text-sm  { font-size: 0.9375rem !important; line-height: 1.4 !important; }
+html.light .text-xs  { font-size: 0.8125rem !important; line-height: 1.35 !important; }
+html.light .text-\[10px\] { font-size: 0.75rem !important; }
+html.light .text-\[9px\]  { font-size: 0.6875rem !important; }
+
+/* Better contrast focus rings */
+html.light *:focus-visible {
+  outline: 2px solid #16a34a !important;
+  outline-offset: 2px;
+}
+
+/* ---- 13. Indigo gradient (login/pricing) light override ---- */
+html.light .from-indigo-900\/30 { --tw-gradient-from: rgba(224,231,255,0.5) !important; }
+html.light .to-indigo-900\/30   { --tw-gradient-to:   rgba(224,231,255,0.5) !important; }
+html.light .border-indigo-700\/30 { border-color: #c7d2fe !important; }
+
+/* ===== END THEME OVERRIDES ===== */
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+}

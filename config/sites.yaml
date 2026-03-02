@@ -1,0 +1,19 @@
+# Configure aqui os sites/plataformas suportados pela automação.
+# Para novos alvos (ex.: n8n, twitter, etc.), copie a estrutura abaixo e ajuste URLs/seletores.
+# Configs detalhadas por site estão em config/sites/<nome>.yaml
+
+instagram:
+  base_url: "https://www.instagram.com"
+  selectors:
+    login_username: "input[name='username']"
+    login_password: "input[name='password']"
+    login_button: "button[type='submit']"
+  notes: |
+    Exemplo de automação de login do Instagram. NÃO coloque usuário ou senha neste arquivo.
+
+receita_federal:
+  base_url: "https://servicos.receita.fazenda.gov.br"
+  config_file: "config/sites/receita_federal.yaml"
+  notes: |
+    Consultas de CPF, CNPJ e Simples Nacional.
+    Veja config/sites/receita_federal.yaml para seletores detalhados.
