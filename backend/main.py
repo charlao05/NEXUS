@@ -316,6 +316,14 @@ try:
 except ImportError as e:
     logging.warning(f"Não foi possível importar agent automation routes: {e}")
 
+# Importar rotas de Integrações Governamentais (CNPJ, CND, NFSe, Transparência)
+try:
+    from app.api.gov_integrations import router as gov_router  # type: ignore[import]
+    app.include_router(gov_router)  # type: ignore[arg-type]
+    logging.info("✅ Rotas de Integrações Governamentais carregadas")
+except ImportError as e:
+    logging.warning(f"Não foi possível importar gov_integrations routes: {e}")
+
 # Pré-carregar módulo de inteligência dos agentes (OpenAI GPT-4.1)
 try:
     from app.api.agent_chat import get_llm_response  # type: ignore[import]  # noqa: F401
