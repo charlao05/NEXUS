@@ -761,12 +761,25 @@ async def create_checkout(
     if not stripe.api_key:
         raise HTTPException(status_code=503, detail="Stripe não configurado")
 
-    if payment.plan not in ("pro", "enterprise"):
-        raise HTTPException(status_code=400, detail="Plano inválido. Use 'pro' ou 'enterprise'")
+    # Normalizar nome do plano (aceitar aliases antigos)
+    plan_key = _PLAN_ALIASES.get(payment.plan, payment.plan)
+    _VALID_PAID_PLANS = {"essencial", "profissional", "completo"}
+    if plan_key not in _VALID_PAID_PLANS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Plano inválido: '{payment.plan}'. Use: {', '.join(sorted(_VALID_PAID_PLANS))}",
+        )
 
     try:
-        price_in_cents = int(float(PLANS[payment.plan]["price"]) * 100)
+        price_in_cents = PLANS[plan_key]["price"]  # já está em centavos
         frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173")
+
+        _PLAN_DISPLAY_NAMES = {
+            "essencial": "Essencial",
+            "profissional": "Profissional",
+            "completo": "Completo",
+        }
+        plan_display = _PLAN_DISPLAY_NAMES.get(plan_key, plan_key.capitalize())
 
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],
@@ -774,8 +787,8 @@ async def create_checkout(
                 "price_data": {
                     "currency": "brl",
                     "product_data": {
-                        "name": f"NEXUS {payment.plan.capitalize()} Plan",
-                        "description": f"Acesso ao plano {payment.plan} do NEXUS",
+                        "name": f"NEXUS {plan_display}",
+                        "description": f"Acesso ao plano {plan_display} do NEXUS",
                     },
                     "unit_amount": price_in_cents,
                     "recurring": {"interval": "month"},
@@ -787,7 +800,7 @@ async def create_checkout(
             cancel_url=f"{frontend_url}/pricing",
             customer_email=payment.email,
             metadata={
-                "plan": payment.plan,
+                "plan": plan_key,
                 "user_id": str(current_user["user_id"]),
                 "email": payment.email,
             },
@@ -846,7 +859,8 @@ async def stripe_webhook(request: Request):
         if event_type == "checkout.session.completed":
             session_obj: Any = event.data.object  # type: ignore[union-attr]
             user_id = session_obj.metadata.get("user_id") if session_obj.metadata else None
-            plan = session_obj.metadata.get("plan", "pro") if session_obj.metadata else "pro"
+            raw_plan = session_obj.metadata.get("plan", "free") if session_obj.metadata else "free"
+            plan = _normalize_plan(raw_plan)
 
             if user_id:
                 user = db.query(User).filter(User.id == int(user_id)).first()
@@ -911,7 +925,8 @@ async def verify_payment(
     try:
         session = stripe.checkout.Session.retrieve(request_data.session_id)
         if session.payment_status == "paid":
-            plan = session.metadata.get("plan", "pro") if session.metadata else "pro"
+            raw_plan = session.metadata.get("plan", "free") if session.metadata else "free"
+            plan = _normalize_plan(raw_plan)
             db = _get_db_session()
             try:
                 user = db.query(User).filter(User.id == current_user["user_id"]).first()

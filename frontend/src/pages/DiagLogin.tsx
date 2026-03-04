@@ -18,6 +18,8 @@ interface TestResult {
 export default function DiagLogin() {
   const [results, setResults] = useState<TestResult[]>([])
   const [running, setRunning] = useState(false)
+  const [diagEmail, setDiagEmail] = useState('')
+  const [diagPassword, setDiagPassword] = useState('')
 
   const addResult = (r: TestResult) =>
     setResults((prev) => [...prev.filter((p) => p.name !== r.name), r])
@@ -73,8 +75,8 @@ export default function DiagLogin() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: 'charles.rsilva05@gmail.com',
-          password: 'Admin@123',
+          email: diagEmail,
+          password: diagPassword,
         }),
       })
       const data = await r.json()
@@ -153,7 +155,7 @@ export default function DiagLogin() {
     const t7 = Date.now()
     try {
       const { login } = await import('../services/authService')
-      const result = await login('charles.rsilva05@gmail.com', 'Admin@123')
+      const result = await login(diagEmail, diagPassword)
       addResult({
         name: '7. authService.login (axios)',
         status: 'ok',
@@ -199,10 +201,27 @@ export default function DiagLogin() {
         Testa toda a cadeia: API_BASE → proxy Vite → backend → JWT → /me
       </p>
 
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+        <input
+          type="email"
+          placeholder="Email para teste"
+          value={diagEmail}
+          onChange={e => setDiagEmail(e.target.value)}
+          style={{ background: '#1e293b', color: '#fff', border: '1px solid #475569', padding: '10px 16px', borderRadius: 8, fontSize: 14, minWidth: 250 }}
+        />
+        <input
+          type="password"
+          placeholder="Senha para teste"
+          value={diagPassword}
+          onChange={e => setDiagPassword(e.target.value)}
+          style={{ background: '#1e293b', color: '#fff', border: '1px solid #475569', padding: '10px 16px', borderRadius: 8, fontSize: 14, minWidth: 200 }}
+        />
+      </div>
+
       <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
         <button
           onClick={runDiag}
-          disabled={running}
+          disabled={running || !diagEmail || !diagPassword}
           style={{
             background: running ? '#334155' : '#22c55e',
             color: '#fff',

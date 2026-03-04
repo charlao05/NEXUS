@@ -44,7 +44,7 @@ async def require_admin(
     plan = current_user.get("plan", "free")
     role = current_user.get("role", "user")
 
-    if role in ("admin", "superadmin") or email in _get_admin_emails() or plan == "enterprise":
+    if role in ("admin", "superadmin") or email in _get_admin_emails() or plan in ("enterprise", "completo"):
         return current_user
 
     raise HTTPException(status_code=403, detail="Acesso restrito a administradores")

@@ -35,9 +35,18 @@ def find_overdue(path: str | Path) -> List[Dict[str, Any]]:
 
 
 def generate_collection_message(invoice: Dict[str, Any]) -> str:
-    client = invoice.get("client")
+    client = invoice.get("client") or "Cliente"
     amount = invoice.get("amount")
     due_date = invoice.get("due_date")
+    
+    # Guard contra amount None
+    if amount is None:
+        return f"Cobrança pendente para {client}. Valor não informado."
+    
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return f"Cobrança pendente para {client}. Valor inválido."
     
     # Type guard para due_date
     if not due_date:

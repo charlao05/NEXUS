@@ -102,6 +102,11 @@ export default function Pricing() {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // Ler plano atual do usuário
+  const currentPlan = (localStorage.getItem('user_plan') || 'free').toLowerCase();
+  // Normalizar aliases legados
+  const normalizedPlan = currentPlan === 'pro' ? 'essencial' : currentPlan === 'enterprise' ? 'completo' : currentPlan;
 
   const handleSelectPlan = async (planId: string) => {
     console.log('🎯 Plano selecionado:', planId);
@@ -276,6 +281,11 @@ export default function Pricing() {
                 <>
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   Processando...
+                </>
+              ) : normalizedPlan === plan.id ? (
+                <>
+                  <Rocket className="w-4 h-4" />
+                  ✓ Plano Atual
                 </>
               ) : (
                 <>

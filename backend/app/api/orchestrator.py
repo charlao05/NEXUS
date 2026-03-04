@@ -17,8 +17,10 @@ import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
+
+from app.api.auth import get_current_user  # type: ignore[import]
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +87,10 @@ class ApprovalRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.post("/run", response_model=OrchestratorRunResponse)
-async def run_orchestrator(request: OrchestratorRunRequest) -> OrchestratorRunResponse:
+async def run_orchestrator(
+    request: OrchestratorRunRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> OrchestratorRunResponse:
     """Executa uma tarefa completa no orquestrador LangGraph.
 
     O orquestrador segue o loop: sense → plan → policy → act → check.
@@ -134,7 +139,10 @@ async def run_orchestrator(request: OrchestratorRunRequest) -> OrchestratorRunRe
 
 
 @router.get("/task/{task_id}")
-async def get_task_status(task_id: str) -> dict[str, Any]:
+async def get_task_status(
+    task_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
     """Retorna o status e resultados de uma tarefa."""
     if task_id not in _task_results:
         raise HTTPException(status_code=404, detail=f"Tarefa {task_id} não encontrada")
@@ -142,7 +150,11 @@ async def get_task_status(task_id: str) -> dict[str, Any]:
 
 
 @router.post("/approve/{task_id}")
-async def approve_task(task_id: str, request: ApprovalRequest) -> dict[str, Any]:
+async def approve_task(
+    task_id: str,
+    request: ApprovalRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
     """Aprova ou rejeita uma tarefa que requer aprovação humana.
 
     Após aprovar, o grafo continua a execução de onde parou.

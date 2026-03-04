@@ -335,7 +335,7 @@ async def execute_workflow(request: WorkflowRequest, user: dict = Depends(get_cu
 # ============================================
 
 @router.get("/list")
-async def list_agents():
+async def list_agents(current_user: dict[str, Any] = Depends(get_current_user)):
     """Lista todos os agentes disponíveis"""
     return {
         "agents": [
@@ -384,7 +384,10 @@ async def list_agents():
 
 
 @router.get("/{agent_id}/config")
-async def get_agent_config(agent_id: str):
+async def get_agent_config(
+    agent_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
     """Retorna configuração de um agente"""
     agent_id = _resolve_agent_id(agent_id)
     if agent_id not in agent_configs:
@@ -398,7 +401,11 @@ async def get_agent_config(agent_id: str):
 
 
 @router.put("/{agent_id}/config")
-async def update_agent_config(agent_id: str, config: AgentConfig):
+async def update_agent_config(
+    agent_id: str,
+    config: AgentConfig,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
     """Atualiza configuração de um agente"""
     agent_id = _resolve_agent_id(agent_id)
     if agent_id not in agent_configs:

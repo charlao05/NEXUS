@@ -201,7 +201,8 @@ function AgentConfig() {
     }
   }, [token]);
 
-  const hasAccess = (id === 'agenda' || id === 'clientes') || realPlan === 'pro' || realPlan === 'enterprise';
+  const _PAID_PLANS = ['essencial', 'profissional', 'completo', 'pro', 'enterprise'];
+  const hasAccess = (id === 'agenda' || id === 'clientes') || _PAID_PLANS.includes(realPlan);
 
   useEffect(() => {
     if (checkedAccess && !hasAccess) {

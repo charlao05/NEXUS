@@ -315,7 +315,7 @@ class AgentHub:
     def notify_pagamento_atrasado(self, cliente_id: str, valor: float, dias_atraso: int) -> None:
         """Notifica sobre pagamento atrasado - dispara workflow de cobrança"""
         message = AgentMessage(
-            from_agent=AgentType.FINANCEIRO,
+            from_agent=AgentType.CONTABILIDADE,
             to_agent=AgentType.COBRANCA,
             event_type=EventType.PAGAMENTO_ATRASADO,
             payload={
@@ -341,10 +341,10 @@ class AgentHub:
         asyncio.create_task(self.publish(message))
     
     def request_nf_emissao(self, dados_nf: Dict) -> None:
-        """Solicita emissão de NF ao agente de documentos"""
+        """Solicita emissão de NF ao agente de contabilidade"""
         message = AgentMessage(
-            from_agent=AgentType.FINANCEIRO,
-            to_agent=AgentType.DOCUMENTOS,
+            from_agent=AgentType.CONTABILIDADE,
+            to_agent=AgentType.CONTABILIDADE,
             event_type=EventType.ACAO_SOLICITADA,
             payload={
                 "acao": "emitir_nf",

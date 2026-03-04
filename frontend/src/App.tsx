@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './contexts/AuthContext'
+import ErrorBoundary from './components/ErrorBoundary'
 import Dashboard from './pages/Dashboard'
 import NexusCodexLogin from './components/NexusCodexLogin'
 import PaymentSuccess from './pages/PaymentSuccess'
@@ -48,6 +49,7 @@ function App() {
   )
 
   return (
+    <ErrorBoundary>
     <BrowserRouter>
       {token ? (
         needsOnboarding ? (
@@ -94,6 +96,7 @@ function App() {
       )}
       <CookieConsentBanner />
     </BrowserRouter>
+    </ErrorBoundary>
   )
 }
 

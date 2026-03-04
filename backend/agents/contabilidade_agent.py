@@ -176,7 +176,14 @@ class ContabilidadeAgent:
 
         handler = dispatch.get(action)
         if handler:
-            return handler(parameters)
+            try:
+                return handler(parameters)
+            except Exception as e:
+                logger.error("Erro no agente contabilidade (action=%s): %s", action, e, exc_info=True)
+                return {
+                    "status": "error",
+                    "message": f"Erro ao executar '{action}': {str(e)}",
+                }
         return {
             "status": "error",
             "message": f"Ação desconhecida: {action}. Ações disponíveis: {list(dispatch.keys())}"

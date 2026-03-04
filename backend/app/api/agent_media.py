@@ -19,10 +19,12 @@ import io
 import base64
 import logging
 import tempfile
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+
+from app.api.auth import get_current_user  # type: ignore[import]
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +66,7 @@ def _get_openai_raw():
 async def transcribe_audio(
     audio: UploadFile = File(...),
     agent: str = Form("assistente"),
+    current_user: dict[str, Any] = Depends(get_current_user),
 ):
     """
     Recebe áudio gravado pelo frontend, transcreve via Whisper,
@@ -189,6 +192,7 @@ async def upload_and_process(
     agent: str = Form("assistente"),
     message: str = Form(""),
     files: list[UploadFile] = File(...),
+    current_user: dict[str, Any] = Depends(get_current_user),
 ):
     """
     Recebe arquivos (imagens, PDFs, docs) do frontend.

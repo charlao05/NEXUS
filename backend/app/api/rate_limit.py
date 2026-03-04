@@ -29,6 +29,22 @@ RATE_LIMITS: dict[str, dict[str, int]] = {
         "requests_per_hour": 200,
         "requests_per_day": 1000,
     },
+    "essencial": {
+        "requests_per_minute": 60,
+        "requests_per_hour": 2000,
+        "requests_per_day": 10000,
+    },
+    "profissional": {
+        "requests_per_minute": 120,
+        "requests_per_hour": 5000,
+        "requests_per_day": 50000,
+    },
+    "completo": {
+        "requests_per_minute": 200,
+        "requests_per_hour": 10000,
+        "requests_per_day": 100000,
+    },
+    # Aliases legados
     "pro": {
         "requests_per_minute": 60,
         "requests_per_hour": 2000,

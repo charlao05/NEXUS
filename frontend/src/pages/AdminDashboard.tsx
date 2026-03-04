@@ -98,7 +98,7 @@ export default function AdminDashboard() {
         ...(searchTerm && { search: searchTerm }),
         ...(filterPlan && { plan: filterPlan }),
       })
-      const res = await axios.get(`/api/admin/users?${params}`, { headers })
+      const res = await axios.get(apiUrl(`/api/admin/users?${params}`), { headers })
       setUsers(res.data.users || [])
       setTotalUsers(res.data.total || 0)
     } catch {
@@ -280,8 +280,9 @@ export default function AdminDashboard() {
               >
                 <option value="">Todos os planos</option>
                 <option value="free">Free</option>
-                <option value="pro">Pro</option>
-                <option value="enterprise">Enterprise</option>
+                <option value="essencial">Essencial</option>
+                <option value="profissional">Profissional</option>
+                <option value="completo">Completo</option>
               </select>
               <span className="text-slate-400 text-sm">{totalUsers} total</span>
             </div>
@@ -303,6 +304,9 @@ export default function AdminDashboard() {
                   {users.map(u => {
                     const planColors: Record<string, string> = {
                       free: 'bg-slate-600 text-slate-200',
+                      essencial: 'bg-blue-600/30 text-blue-300',
+                      profissional: 'bg-green-600/30 text-green-300',
+                      completo: 'bg-purple-600/30 text-purple-300',
                       pro: 'bg-green-600/30 text-green-300',
                       enterprise: 'bg-purple-600/30 text-purple-300',
                     }
