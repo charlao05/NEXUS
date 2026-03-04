@@ -467,20 +467,22 @@ async def execute_agent_action(
 
     # ── Detectar intenção de automação web ────────────────────────
     user_message = action.parameters.get("message", "")
-    if user_message and action.action in ("smart_chat", "chat") and agent_id == "assistente":
+    # Automação disponível para assistente e contabilidade (DAS, NF, Receita)
+    _automation_agents = {"assistente", "contabilidade", "agenda"}
+    if user_message and action.action in ("smart_chat", "chat") and agent_id in _automation_agents:
         try:
             from app.api.agent_automation import _detect_automation_intent
             intent = _detect_automation_intent(user_message)
             if intent:
                 # Redirecionar para o fluxo de automação
-                from app.api.agent_automation import start_automation, AutomationStartRequest
+                from app.api.agent_automation import _start_automation_core, AutomationStartRequest
                 auto_req = AutomationStartRequest(
                     agent_id=agent_id,
                     goal=user_message,
                     message=user_message,
                     user_id=_user_id or 1,
                 )
-                auto_result = await start_automation(auto_req)
+                auto_result = await _start_automation_core(auto_req, user_id=_user_id or 1)
                 _save_chat(user_message, auto_result.message, _user_id)
                 return {
                     "status": "success",

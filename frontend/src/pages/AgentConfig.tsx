@@ -774,6 +774,45 @@ function AgentConfig() {
                     <div className="whitespace-pre-wrap text-base leading-relaxed">
                       {formatMessage(msg.content)}
                     </div>
+                    {/* Display de plano de automação (steps + risco) */}
+                    {msg.automation && msg.automation.steps && msg.automation.steps.length > 0 && (
+                      <div className="mt-3 bg-slate-800/60 rounded-lg border border-slate-600/40 p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-semibold text-slate-300 uppercase tracking-wide flex items-center gap-1.5">
+                            <Globe className="w-3.5 h-3.5" />
+                            Plano de Automação
+                          </span>
+                          {msg.automation.risk_level && (
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              msg.automation.risk_level === 'low' ? 'bg-green-500/20 text-green-400' :
+                              msg.automation.risk_level === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                              msg.automation.risk_level === 'high' ? 'bg-orange-500/20 text-orange-400' :
+                              'bg-red-500/20 text-red-400'
+                            }`}>
+                              {msg.automation.risk_level === 'low' ? '🟢 Baixo' :
+                               msg.automation.risk_level === 'medium' ? '🟡 Médio' :
+                               msg.automation.risk_level === 'high' ? '🟠 Alto' : '🔴 Crítico'} risco
+                            </span>
+                          )}
+                        </div>
+                        {msg.automation.plan_summary && (
+                          <p className="text-sm text-slate-300 mb-2">{msg.automation.plan_summary}</p>
+                        )}
+                        <div className="space-y-1.5">
+                          {msg.automation.steps.map((step, i) => (
+                            <div key={i} className="flex items-start gap-2 text-sm">
+                              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center text-xs text-slate-300 font-medium mt-0.5">
+                                {(step as Record<string, unknown>).step as number || i + 1}
+                              </span>
+                              <span className="text-slate-300">
+                                {(step as Record<string, unknown>).description as string || `Passo ${i + 1}`}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2">⚠️ Nenhuma senha ou dado sensível será incluído.</p>
+                      </div>
+                    )}
                     {/* Botões de aprovação de automação */}
                     {msg.automation?.requires_approval && msg.automation.status === 'awaiting_approval' && (
                       <div className="mt-3 flex gap-2">

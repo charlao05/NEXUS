@@ -5,6 +5,24 @@
 .env.production
 .env.development
 .env.test
+.env.backend
+.env.example
+.env.template
+.env.local.example
+
+# TEST FILES WITH SECRETS
+_test_stripe.py
+audit_output.txt
+
+# DATABASE FILES
+*.db.empty_backup
+backend/data/nexus.db
+
+# OAUTH GUIDES WITH SECRETS
+OAUTH_FIX_GUIDE.md
+OAUTH_COMPLETE_GUIDE.md
+README_OAUTH_EXECUCAO.md
+FIX_OAUTH_URGENTE.ps1
 
 # REPLIT
 .replit

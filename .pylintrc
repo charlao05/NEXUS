@@ -1,0 +1,37 @@
+[MASTER]
+init-hook='import sys; sys.path.insert(0, "backend")'
+load-plugins=pylint.extensions.docparams
+
+[MESSAGES CONTROL]
+disable=
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    too-many-arguments,
+    too-many-locals,
+    too-many-branches,
+    import-error,
+    no-name-in-module,
+    unused-wildcard-import,
+    wildcard-import,
+    line-too-long,
+    fixme,
+    protected-access,
+    too-few-public-methods,
+    no-else-return,
+    consider-using-f-string,
+    broad-except,
+    invalid-name,
+    attribute-defined-outside-init,
+    too-many-return-statements,
+    no-member,
+    unsubscriptable-object
+
+[FORMAT]
+max-line-length=120
+
+[VARIABLES]
+init-import=no
+
+[DESIGN]
+max-attributes=10

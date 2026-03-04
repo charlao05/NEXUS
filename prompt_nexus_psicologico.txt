@@ -1,0 +1,199 @@
+
+Crie uma landing page HTML para NEXUS - Plataforma Unificada de Automação.
+Design baseado em PSICOLOGIA DAS CORES, NEUROMARKETING e CIÊNCIA COMPORTAMENTAL.
+
+=== DIRETRIZES LEGAIS (OBRIGATÓRIO) ===
+❌ NUNCA prometa valores específicos de economia
+❌ NUNCA garanta resultados financeiros
+✅ Foque em funcionalidades e benefícios potenciais
+✅ Use linguagem de possibilidade, não certeza
+
+=== FUNDAMENTOS DE PSICOLOGIA DAS CORES ===
+
+PALETA CIENTÍFICA PARA CONFIANÇA E CONVERSÃO:
+
+AZUL (Cor Principal - 60% da paleta):
+Psicologia: Confiança, segurança, estabilidade, profissionalismo
+Uso: Usado por 90% dos bancos e empresas de tecnologia
+Aplicação no NEXUS:
+- Primário: #2563EB (blue-600) - Tom profissional, não infantil
+- Claro: #3B82F6 (blue-500) - Para elementos secundários
+- Escuro: #1E40AF (blue-700) - Textos importantes
+- Muito Claro: #DBEAFE (blue-100) - Backgrounds sutis
+
+ROXO (Cor Secundária - 25% da paleta):
+Psicologia: Inovação, tecnologia, sofisticação, premium
+Uso: Associado a IA, futuro, inteligência
+Aplicação no NEXUS:
+- Primário: #7C3AED (purple-600)
+- Médio: #8B5CF6 (purple-500)
+- Escuro: #5B21B6 (purple-700)
+
+VERDE (Cor de Sucesso - 10% da paleta):
+Psicologia: Crescimento, segurança, validação positiva
+Uso: Checkmarks, badges de sucesso, confirmações
+Aplicação no NEXUS:
+- Sucesso: #10B981 (green-500)
+- Escuro: #059669 (green-600)
+
+CINZA (Neutro - 5% da paleta):
+Psicologia: Sofisticação, neutralidade, elegância
+Uso: Textos, backgrounds, elementos neutros
+Aplicação no NEXUS:
+- Texto Principal: #1F2937 (gray-800) - Alta legibilidade
+- Texto Secundário: #6B7280 (gray-500)
+- Background: #F9FAFB (gray-50) - Descanso visual
+- Bordas: #E5E7EB (gray-200)
+
+BRANCO:
+Psicologia: Clareza, simplicidade, honestidade, espaço
+Uso: Background principal, espaço negativo
+Aplicação: #FFFFFF - 70% da página deve ser branca
+
+CORES A EVITAR (Ciência Comportamental):
+❌ Vermelho Puro (#FF0000): Ansiedade, perigo, alarme
+❌ Amarelo Vibrante (#FFFF00): Fadiga visual, ansiedade
+❌ Laranja Forte: Urgência agressiva, spam
+❌ Preto Puro (#000000): Opressivo, pesado
+✅ Use tons suavizados quando necessário
+
+=== GRADIENTES PSICOLÓGICOS ===
+
+GRADIENTE HERO (Tranquilidade + Confiança):
+- from-blue-50 via-purple-50 to-cyan-50
+- Efeito: Calmo, tecnológico, confiável
+- Evita: Gradientes agressivos ou muito contrastantes
+
+GRADIENTE CTA (Ação + Sofisticação):
+- from-blue-600 to-purple-600
+- Efeito: Moderno, premium, convida ação
+- Saturação: Moderada (não muito vibrante)
+
+GRADIENTE FOOTER (Profissionalismo):
+- from-gray-800 to-gray-900
+- Efeito: Sólido, estabelecido, sério
+
+=== PRINCÍPIOS DE NEUROMARKETING ===
+
+1. HIERARQUIA VISUAL (Processamento Cerebral):
+
+Cérebro processa informação em camadas:
+F-Pattern (Leitura): Logo → Título → Subtítulo → CTAs → Conteúdo
+Z-Pattern (Escaneamento): Topo esquerda → Topo direita → Diagonal → Baixo esquerda → Baixo direita
+
+Aplicação:
+- Logo: Topo esquerda (primeiro ponto de fixação)
+- CTA Principal: Topo direita E centro hero
+- Título: Centro, grande, contraste máximo
+- Subtítulo: Logo abaixo, leitura natural
+- CTAs Secundários: Seguem diagonal natural do olhar
+
+2. ESPAÇAMENTO COGNITIVO (Redução de Carga Mental):
+
+Lei de Hick: Menos opções = Decisão mais rápida
+Lei de Miller: Humanos processam 7±2 itens por vez
+
+Aplicação:
+- Espaços em branco: 60-70% da página
+- Grupos de 3 itens (benefícios, passos)
+- 6 agentes (dentro do limite cognitivo)
+- Margens generosas: py-16 lg:py-24 entre seções
+- Padding interno: p-8 em cards (respiração)
+
+3. CONTRASTE E ATENÇÃO (Sistema de Ativação Reticular):
+
+Olho humano detecta contraste antes de cor
+Área de alta atenção: 5% da tela
+
+Aplicação:
+- CTA Primário: Máximo contraste (branco em azul, ou azul em branco)
+- Ratio de contraste: Mínimo 4.5:1 (WCAG AAA)
+- Um único ponto focal por seção
+- Botões: hover aumenta contraste 20%
+
+4. SOCIAL PROOF (Viés de Conformidade):
+
+Humanos seguem comportamento de grupo
+Números geram confiança (specificity bias)
+
+Aplicação:
+- Posição: Logo após hero (validação imediata)
+- Números reais mas conservadores: "500+ usuários" não "1 milhão"
+- Depoimentos: Fotos + nomes + cargos reais
+- Badges: Posicionar estrategicamente nos cards
+
+5. GATILHOS DE DOPAMINA (Sistema de Recompensa):
+
+Microinterações liberam dopamina
+Expectativa > Recompensa
+
+Aplicação:
+- Hover em cards: Elevação suave (transform: translateY(-4px))
+- Hover em botões: Escala 105% + sombra
+- Transições: 300ms (sweet spot neurológico)
+- Loading states: Feedback imediato
+- Confirmações visuais: Checkmarks animados
+
+6. ANCORAGEM VISUAL (Priming Cognitivo):
+
+Primeira informação ancora percepção subsequente
+
+Aplicação:
+- Hero: Mensagem mais forte e impactante
+- Números grandes primeiro: "500+ usuários" antes de features
+- Cores âncora: Azul estabelece confiança para resto da página
+
+7. REDUÇÃO DE FRICÇÃO (Modelo de Comportamento de Fogg):
+
+Comportamento = Motivação × Habilidade × Gatilho
+Remover obstáculos aumenta conversão
+
+Aplicação:
+- CTA claro: "Acessar Plataforma" não "Clique aqui"
+- Um CTA primário por seção
+- Scroll suave (não saltos bruscos)
+- Mobile-first: Botões grandes (mínimo 44px)
+- Sem formulários longos na landing
+
+=== ESTRUTURA HTML COM PSICOLOGIA APLICADA ===
+
+[... HTML completo omitido aqui por brevidade ...]
+
+=== RESUMO DA PSICOLOGIA APLICADA ===
+
+CORES E EMOÇÕES:
+✅ Azul (60%): Confiança, segurança, profissionalismo
+✅ Roxo (25%): Inovação, sofisticação, tecnologia
+✅ Verde (10%): Validação, crescimento, segurança
+✅ Branco (70% espaço): Clareza, respiração, honestidade
+✅ Cinza (neutro): Sofisticação, equilíbrio
+
+NEUROMARKETING:
+✅ F-Pattern: Logo → Título → CTAs → Conteúdo
+✅ Z-Pattern: Navegação natural do olhar
+✅ Lei de Hick: 3 opções principais (benefícios, passos)
+✅ Lei de Miller: 6 agentes (dentro do limite cognitivo)
+✅ Espaços em branco: 60-70% da página
+✅ Contraste 4.5:1: Legibilidade perfeita
+✅ Transições 300ms: Timing neurológico ideal
+✅ Social proof: Posicionamento estratégico
+✅ Micro-recompensas: Hovers, animações, ripples
+
+GATILHOS COMPORTAMENTAIS:
+✅ Ancoragem visual: Hero estabelece tom
+✅ Validação social: Logo após primeira impressão
+✅ Redução de fricção: Um CTA claro por seção
+✅ Dopamina: Feedback visual imediato
+✅ Conformidade: Depoimentos reais
+✅ Escassez implícita: "Junte-se a centenas"
+✅ Autoridade: Cores profissionais, design premium
+
+RESULTADO ESPERADO:
+Uma landing page que psicologicamente:
+- Transmite confiança imediata (azul dominante)
+- Comunica inovação (toques de roxo)
+- Valida ações (verde nos checks)
+- Reduz ansiedade (espaços brancos generosos)
+- Facilita decisão (hierarquia clara)
+- Recompensa interação (micro-animações)
+- Estabelece autoridade (design premium)

@@ -48,6 +48,7 @@ class AutomationStartRequest(BaseModel):
     agent_id: str = Field(default="assistente", description="Agente que solicitou")
     goal: str = Field(description="O que o usuário quer automatizar")
     message: str = Field(default="", description="Mensagem original do usuário")
+    user_id: int | None = Field(default=None, description="User ID (set internally)")
 
 
 class AutomationApproveRequest(BaseModel):
@@ -81,11 +82,12 @@ class AutomationResultResponse(BaseModel):
 
 def _detect_automation_intent(message: str) -> dict[str, Any] | None:
     """Detecta se a mensagem do usuário contém intenção de automação.
+    Usa LLM para classificação inteligente com fallback para keywords.
     Retorna dict com goal e site_hint se detectado, ou None.
     """
     msg = message.lower().strip()
 
-    # Palavras-chave de automação
+    # ── Fase 1: Keywords rápidas (zero-cost, sem LLM) ────────────
     automation_keywords = [
         "automatizar", "automação", "abrir site", "acessar site",
         "preencher formulário", "consultar cpf", "consultar cnpj",
@@ -94,25 +96,59 @@ def _detect_automation_intent(message: str) -> dict[str, Any] | None:
         "automatize", "execut", "rodar automação", "fazer por mim",
         "pode fazer isso", "pode realizar", "realizar a consulta",
         "n8n", "selenium", "playwright", "navegador",
+        # Expressões naturais adicionais
+        "acessar o site", "entrar no site", "abrir o portal",
+        "gerar boleto", "gerar das", "pagar das", "emitir das",
+        "verificar situação", "consulta cadastral", "situação cadastral",
+        "consultar situação", "fazer a consulta", "fazer consulta",
+        "pode consultar", "quero consultar", "preciso consultar",
+        "pode acessar", "pode verificar", "pode emitir",
+        "me ajuda a acessar", "me ajude a acessar",
+        "quero acessar", "quero emitir", "quero gerar",
+        "pesquisar no site", "buscar no site", "buscar cpf",
+        "nota fiscal eletrônica", "nfs-e", "nfse",
+        "certificado digital", "e-cac", "ecac",
+        "pgmei", "regularizar", "parcelar",
     ]
 
-    has_intent = any(kw in msg for kw in automation_keywords)
-    if not has_intent:
-        return None
+    keyword_match = any(kw in msg for kw in automation_keywords)
 
-    # Tentar identificar o site/serviço
+    # ── Fase 2: Se keyword não bateu, tentar classificação LLM ───
+    if not keyword_match:
+        try:
+            llm_detected = _llm_classify_automation(message)
+            if not llm_detected:
+                return None
+        except Exception as e:
+            logger.debug(f"LLM classification fallback: {e}")
+            return None
+
+    # ── Fase 3: Identificar site/serviço ─────────────────────────
     site_hints = {
         "receita federal": "receita_federal",
         "consultar cpf": "receita_federal",
         "consultar cnpj": "receita_federal",
         "cpf": "receita_federal",
         "cnpj": "receita_federal",
+        "situação cadastral": "receita_federal",
+        "consulta cadastral": "receita_federal",
+        "e-cac": "receita_federal",
+        "ecac": "receita_federal",
         "simples nacional": "simples_nacional",
         "das ": "simples_nacional",
         "dasn": "simples_nacional",
+        "pgmei": "simples_nacional",
+        "gerar das": "simples_nacional",
+        "pagar das": "simples_nacional",
+        "emitir das": "simples_nacional",
+        "parcelar": "simples_nacional",
+        "regularizar": "simples_nacional",
         "prefeitura": "prefeitura",
         "nota fiscal": "prefeitura_nf",
+        "nfs-e": "prefeitura_nf",
+        "nfse": "prefeitura_nf",
         "emitir nf": "prefeitura_nf",
+        "nota fiscal eletrônica": "prefeitura_nf",
         "instagram": "instagram",
         "gov.br": "gov_br",
     }
@@ -124,6 +160,53 @@ def _detect_automation_intent(message: str) -> dict[str, Any] | None:
             break
 
     return {"goal": message, "site_hint": site_hint}
+
+
+def _llm_classify_automation(message: str) -> bool:
+    """Usa o LLM para classificar se a mensagem é um pedido de automação web.
+    Retorna True se for automação, False caso contrário.
+    Chamada rápida com max_tokens baixo.
+    """
+    try:
+        from app.api.agent_chat import get_openai_client
+
+        client = get_openai_client()
+        if not client:
+            return False
+
+        classification_prompt = """Você é um classificador binário. Analise a mensagem do usuário e responda APENAS "SIM" ou "NAO".
+
+Responda "SIM" se o usuário está pedindo para:
+- Acessar, abrir ou navegar em um site ou portal
+- Consultar algo em um site do governo (CPF, CNPJ, DAS, nota fiscal)
+- Preencher formulário online
+- Emitir documento eletrônico (nota fiscal, boleto, DAS)
+- Fazer qualquer tarefa que envolva controlar um navegador web
+- Realizar ação automatizada em um site ou sistema online
+
+Responda "NAO" se o usuário está:
+- Fazendo uma pergunta informacional (ex: "o que é CPF?", "quando vence o DAS?")
+- Pedindo dica, explicação ou orientação teórica
+- Conversando normalmente sem querer ação prática em site
+- Pedindo para calcular, listar ou resumir algo do sistema interno
+
+Mensagem:"""
+
+        response = client.chat_completion(
+            messages=[
+                {"role": "system", "content": classification_prompt},
+                {"role": "user", "content": message},
+            ],
+            temperature=0.0,
+            max_tokens=5,
+        )
+
+        answer = response.strip().upper().replace(".", "")
+        return answer in ("SIM", "YES", "S")
+
+    except Exception as e:
+        logger.debug(f"LLM classification error: {e}")
+        return False
 
 
 async def _generate_automation_plan(goal: str, site_hint: str) -> dict[str, Any]:
@@ -385,6 +468,14 @@ async def start_automation(
 ) -> AutomationStartResponse:
     """Inicia automação: gera plano e retorna para aprovação do usuário. Requer autenticação."""
     user_id = current_user["user_id"]
+    return await _start_automation_core(request, user_id)
+
+
+async def _start_automation_core(
+    request: AutomationStartRequest,
+    user_id: int,
+) -> AutomationStartResponse:
+    """Core logic para iniciar automação — chamável tanto pelo endpoint quanto por agent_hub."""
     task_id = f"auto_{uuid.uuid4().hex[:12]}"
 
     # Detectar site/serviço
