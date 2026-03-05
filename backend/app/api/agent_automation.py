@@ -125,31 +125,31 @@ def _detect_automation_intent(message: str) -> dict[str, Any] | None:
 
     # ── Fase 3: Identificar site/serviço ─────────────────────────
     site_hints = {
-        "receita federal": "receita_federal",
-        "consultar cpf": "receita_federal",
-        "consultar cnpj": "receita_federal",
-        "cpf": "receita_federal",
-        "cnpj": "receita_federal",
-        "situação cadastral": "receita_federal",
-        "consulta cadastral": "receita_federal",
-        "e-cac": "receita_federal",
-        "ecac": "receita_federal",
+        "receita federal": "receita_federal_cpf",
+        "consultar cpf": "receita_federal_cpf",
+        "consultar cnpj": "receita_federal_cnpj",
+        "cpf": "receita_federal_cpf",
+        "cnpj": "receita_federal_cnpj",
+        "situação cadastral": "receita_federal_cpf",
+        "consulta cadastral": "receita_federal_cpf",
+        "e-cac": "ecac",
+        "ecac": "ecac",
         "simples nacional": "simples_nacional",
-        "das ": "simples_nacional",
+        "das ": "pgmei_das",
         "dasn": "simples_nacional",
-        "pgmei": "simples_nacional",
-        "gerar das": "simples_nacional",
-        "pagar das": "simples_nacional",
-        "emitir das": "simples_nacional",
+        "pgmei": "pgmei_das",
+        "gerar das": "pgmei_das",
+        "pagar das": "pgmei_das",
+        "emitir das": "pgmei_das",
         "parcelar": "simples_nacional",
         "regularizar": "simples_nacional",
-        "prefeitura": "prefeitura",
-        "nota fiscal": "prefeitura_nf",
-        "nfs-e": "prefeitura_nf",
-        "nfse": "prefeitura_nf",
-        "emitir nf": "prefeitura_nf",
-        "nota fiscal eletrônica": "prefeitura_nf",
-        "instagram": "instagram",
+        "prefeitura": "prefeitura_nfse",
+        "nota fiscal": "prefeitura_nfse",
+        "nfs-e": "prefeitura_nfse",
+        "nfse": "prefeitura_nfse",
+        "emitir nf": "prefeitura_nfse",
+        "nota fiscal eletrônica": "prefeitura_nfse",
+        "instagram": "generico",
         "gov.br": "gov_br",
     }
 
@@ -210,13 +210,25 @@ Mensagem:"""
 
 
 async def _generate_automation_plan(goal: str, site_hint: str) -> dict[str, Any]:
-    """Usa o LLM para gerar um plano de automação estruturado."""
+    """Usa o LLM para gerar um plano de automação estruturado.
+    
+    Integra templates MEI para enriquecer o contexto do planner.
+    """
     try:
         from app.api.agent_chat import get_openai_client
 
         client = get_openai_client()
         if not client:
             return _fallback_plan(goal, site_hint)
+
+        # Carregar template específico
+        template_context = ""
+        try:
+            from backend.orchestrator.templates import get_template, format_template_for_llm
+            template = get_template(site_hint)
+            template_context = format_template_for_llm(template, goal)
+        except Exception as e:
+            logger.debug(f"Templates não disponíveis: {e}")
 
         system_prompt = f"""Você é o planejador de automação do NEXUS.
 O usuário quer automatizar uma tarefa web. Gere um plano de ações SEGURO.
@@ -225,10 +237,17 @@ REGRAS:
 1. Responda APENAS com JSON válido
 2. Cada passo deve ter: step (número), action (tipo), description (pt-BR), params
 3. NUNCA inclua senhas, tokens ou dados sensíveis
-4. Ações disponíveis: navigate, click, type, wait, screenshot, read_text
+4. Actions disponíveis: navigate, click, type, wait, screenshot, read_text,
+   scroll, hover, select_option, check_checkbox, submit_form, upload_file,
+   go_back, go_forward, get_page_state, extract_table, find_by_text,
+   evaluate_js, get_attribute
 5. Inclua "risk_level": low|medium|high baseado nas ações
+6. SEMPRE inclua get_page_state após navigate para "enxergar" a página
+7. Se o site requer login, inclua passo para PARAR e avisar o usuário
 
 Site/serviço detectado: {site_hint}
+
+{template_context}
 
 Formato:
 {{
@@ -266,39 +285,75 @@ Formato:
 
 
 def _fallback_plan(goal: str, site_hint: str) -> dict[str, Any]:
-    """Plano de fallback quando o LLM não está disponível."""
-    plans: dict[str, dict[str, Any]] = {
-        "receita_federal": {
-            "plan_summary": "Consulta de situação cadastral do CPF na Receita Federal",
-            "risk_level": "low",
-            "steps": [
-                {"step": 1, "action": "navigate", "description": "Abrir site da Receita Federal — Consulta CPF", "params": {"url": "https://servicos.receita.fazenda.gov.br/Servicos/CPF/ConsultaSituacao/ConsultaPublica.asp"}},
-                {"step": 2, "action": "wait", "description": "Aguardar carregamento da página", "params": {"seconds": 2}},
-                {"step": 3, "action": "screenshot", "description": "Capturar tela para verificação", "params": {}},
-                {"step": 4, "action": "read_text", "description": "Ler conteúdo da página para orientar próximos passos", "params": {"selector": "body"}},
-            ],
-        },
-        "simples_nacional": {
-            "plan_summary": "Acesso ao Portal do Simples Nacional para consulta",
+    """Plano de fallback quando o LLM não está disponível.
+    
+    Usa templates MEI para gerar planos estruturados sem LLM.
+    """
+    try:
+        from backend.orchestrator.templates import get_template
+        template = get_template(site_hint)
+
+        url = template["site_config"].get("url", "")
+        steps = []
+        step_num = 1
+
+        # Passo 1: Navegar
+        if url:
+            steps.append({
+                "step": step_num, "action": "navigate",
+                "description": f"Abrir {template['site_config']['name']}",
+                "params": {"url": url},
+            })
+            step_num += 1
+
+        # Passo 2: Aguardar
+        steps.append({
+            "step": step_num, "action": "wait",
+            "description": "Aguardar carregamento da página",
+            "params": {"seconds": 2},
+        })
+        step_num += 1
+
+        # Passo 3: Percepção (estilo Comet — capturar estado)
+        steps.append({
+            "step": step_num, "action": "get_page_state",
+            "description": "Capturar estado da página (elementos interativos)",
+            "params": {},
+        })
+        step_num += 1
+
+        # Passo 4: Screenshot
+        steps.append({
+            "step": step_num, "action": "screenshot",
+            "description": "Capturar tela para verificação",
+            "params": {},
+        })
+        step_num += 1
+
+        # Passo 5: Ler texto
+        steps.append({
+            "step": step_num, "action": "read_text",
+            "description": "Ler conteúdo da página para orientar próximos passos",
+            "params": {"selector": "body"},
+        })
+
+        return {
+            "plan_summary": template["goal"],
+            "risk_level": template.get("risk_level", "medium"),
+            "steps": steps,
+        }
+
+    except Exception:
+        # Ultra-fallback se templates falharem
+        return {
+            "plan_summary": f"Automação: {goal[:100]}",
             "risk_level": "medium",
             "steps": [
-                {"step": 1, "action": "navigate", "description": "Abrir Portal do Simples Nacional", "params": {"url": "https://www8.receita.fazenda.gov.br/SimplesNacional/"}},
-                {"step": 2, "action": "wait", "description": "Aguardar carregamento", "params": {"seconds": 2}},
+                {"step": 1, "action": "navigate", "description": "Abrir o site solicitado", "params": {"url": ""}},
+                {"step": 2, "action": "get_page_state", "description": "Capturar estado da página", "params": {}},
                 {"step": 3, "action": "screenshot", "description": "Capturar tela para verificação", "params": {}},
             ],
-        },
-    }
-
-    default_plan = {
-        "plan_summary": f"Automação: {goal[:100]}",
-        "risk_level": "medium",
-        "steps": [
-            {"step": 1, "action": "navigate", "description": "Abrir o site solicitado", "params": {"url": ""}},
-            {"step": 2, "action": "screenshot", "description": "Capturar tela para verificação", "params": {}},
-        ],
-    }
-
-    return plans.get(site_hint, default_plan)
+        }
 
 
 def _format_plan_for_chat(plan: dict[str, Any]) -> str:
@@ -367,28 +422,45 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
         from backend.orchestrator.tools.browser import (
             browser_navigate, browser_click, browser_type,
             browser_wait, browser_screenshot, browser_get_text,
+            browser_scroll, browser_hover, browser_select_option,
+            browser_check_checkbox, browser_submit_form, browser_go_back,
+            browser_go_forward, browser_get_attribute, browser_extract_table,
+            browser_find_by_text, browser_evaluate_js, browser_get_page_state,
             shutdown_browser,
         )
 
         dummy_state = {}  # type: ignore[arg-type]
+
+        # Mapa de ações para funções
+        action_map = {
+            "navigate": browser_navigate,
+            "click": browser_click,
+            "type": browser_type,
+            "wait": lambda params, state: browser_wait({"seconds": params.get("seconds", 2)}, state),
+            "screenshot": browser_screenshot,
+            "read_text": browser_get_text,
+            "scroll": browser_scroll,
+            "hover": browser_hover,
+            "select_option": browser_select_option,
+            "check_checkbox": browser_check_checkbox,
+            "submit_form": browser_submit_form,
+            "go_back": browser_go_back,
+            "go_forward": browser_go_forward,
+            "get_attribute": browser_get_attribute,
+            "extract_table": browser_extract_table,
+            "find_by_text": browser_find_by_text,
+            "evaluate_js": browser_evaluate_js,
+            "get_page_state": browser_get_page_state,
+        }
 
         for step in task.get("steps", []):
             action = step.get("action", "")
             params = step.get("params", {})
 
             try:
-                if action == "navigate":
-                    r = browser_navigate(params, dummy_state)
-                elif action == "click":
-                    r = browser_click(params, dummy_state)
-                elif action == "type":
-                    r = browser_type(params, dummy_state)
-                elif action == "wait":
-                    r = browser_wait({"seconds": params.get("seconds", 2)}, dummy_state)
-                elif action == "screenshot":
-                    r = browser_screenshot(params, dummy_state)
-                elif action == "read_text":
-                    r = browser_get_text(params, dummy_state)
+                handler = action_map.get(action)
+                if handler:
+                    r = handler(params, dummy_state)
                 else:
                     r = {"success": False, "error": f"Ação desconhecida: {action}"}
 

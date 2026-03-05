@@ -28,11 +28,24 @@ ALLOWED_DOMAINS: list[str] = [
     "localhost",
     "127.0.0.1",
     "*.nexus.com",
-    "*.gov.br",             # NFS-e, Receita
+    # Gov.br e Receita Federal
+    "*.gov.br",
     "*.fazenda.gov.br",
+    "*.receita.fazenda.gov.br",
+    # Simples Nacional / PGMEI
+    "*.receita.fazenda.gov.br",
+    # NFS-e (prefeituras usam subdomínios variados)
+    "*.prefeitura.sp.gov.br",
+    "*.pbh.gov.br",
+    "*.rio.rj.gov.br",
+    # Comunicação
     "web.whatsapp.com",
     "calendar.google.com",
     "mail.google.com",
+    # Ferramentas de negócio comuns
+    "*.linkedin.com",
+    "*.google.com",
+    "*.microsoft.com",
 ]
 
 # Ações e suas regras
@@ -53,7 +66,13 @@ ACTION_POLICIES: dict[str, dict[str, Any]] = {
         "risk": ActionRisk.LOW,
         "requires_approval": False,
         "max_per_task": 50,
-        "forbidden_fields": ["password", "senha", "credit_card", "cartao"],
+        "forbidden_fields": [
+            "password", "senha", "credit_card", "cartao",
+            "credit-card", "card-number", "cvv", "cvc",
+            "card_number", "cardnumber", "cc-number",
+            "secret", "token", "api_key", "apikey",
+            "ssn", "social-security",
+        ],
     },
     "browser_wait": {
         "risk": ActionRisk.LOW,
@@ -66,6 +85,99 @@ ACTION_POLICIES: dict[str, dict[str, Any]] = {
         "max_per_task": 20,
     },
     "browser_press_key": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 50,
+    },
+    "browser_wait_selector": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 50,
+    },
+    "browser_get_text": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 50,
+    },
+    "browser_close": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 5,
+    },
+
+    # --- Novas browser actions (Blueprint Comet) ---
+    "browser_scroll": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 100,
+    },
+    "browser_hover": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 50,
+    },
+    "browser_select_option": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 30,
+    },
+    "browser_check_checkbox": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 30,
+    },
+    "browser_submit_form": {
+        "risk": ActionRisk.MEDIUM,
+        "requires_approval": False,
+        "max_per_task": 10,
+    },
+    "browser_upload_file": {
+        "risk": ActionRisk.MEDIUM,
+        "requires_approval": True,
+        "max_per_task": 5,
+    },
+    "browser_go_back": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 20,
+    },
+    "browser_go_forward": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 20,
+    },
+    "browser_get_attribute": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 50,
+    },
+    "browser_extract_table": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 20,
+    },
+    "browser_find_by_text": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 50,
+    },
+    "browser_evaluate_js": {
+        "risk": ActionRisk.MEDIUM,
+        "requires_approval": False,
+        "max_per_task": 20,
+        "blocked_expressions": ["fetch(", "XMLHttpRequest", "eval(", "Function(", "document.cookie"],
+    },
+    "browser_handle_dialog": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 10,
+    },
+    "browser_drag_drop": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 10,
+    },
+    "browser_get_page_state": {
         "risk": ActionRisk.LOW,
         "requires_approval": False,
         "max_per_task": 50,

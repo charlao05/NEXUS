@@ -25,39 +25,65 @@ except ImportError:
 logger = get_logger(__name__)
 
 
-def iniciar_navegador(browser_name: Optional[str] = None) -> Tuple[Any, Any, Any]:
+def iniciar_navegador(
+    browser_name: Optional[str] = None,
+    headless: Optional[bool] = None,
+) -> Tuple[Any, Any, Any]:
     """
     Inicia o Playwright e um navegador (chromium/firefox/webkit)
     e devolve (playwright, browser, page).
 
     - Usa DEFAULT_BROWSER do .env se browser_name não for passado.
-    - headless=False para você VER a janela abrindo.
+    - Usa BROWSER_HEADLESS do .env se headless não for passado.
+      Em produção (ENVIRONMENT=production), default é True.
+      Em dev, default é False para ver a janela.
     """
     browser_name = browser_name or os.getenv("DEFAULT_BROWSER", "chromium")
-    logger.info(f"Iniciando navegador Playwright: {browser_name}")
+
+    if headless is None:
+        env_headless = os.getenv("BROWSER_HEADLESS", "")
+        if env_headless.lower() in ("1", "true", "yes"):
+            headless = True
+        elif env_headless.lower() in ("0", "false", "no"):
+            headless = False
+        else:
+            # Produção = headless; dev = com janela
+            headless = os.getenv("ENVIRONMENT", "development") == "production"
+
+    logger.info(f"Iniciando navegador Playwright: {browser_name} (headless={headless})")
 
     p = sync_playwright().start()
 
+    launch_opts = {"headless": headless}
+
     if browser_name.lower() == "firefox":
-        browser = p.firefox.launch(headless=False)
+        browser = p.firefox.launch(**launch_opts)
     elif browser_name.lower() == "webkit":
-        browser = p.webkit.launch(headless=False)
+        browser = p.webkit.launch(**launch_opts)
     else:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(**launch_opts)
 
     page = browser.new_page()
     return p, browser, page
 
 
-def fechar_navegador(p: Optional[Any], browser: Optional[Any]) -> None:
+def fechar_navegador(
+    p: Optional[Any],
+    browser: Optional[Any],
+    delay_seconds: int = 0,
+) -> None:
     """
     Fecha o browser e o Playwright com segurança.
     Chamado no finally do agente, mesmo se der erro no meio.
-    """
 
-    # ⏱ Tempo que a janela fica aberta DEPOIS de terminar o plano
-    logger.info("Aguardando 15 segundos antes de fechar o navegador para inspeção.")
-    time.sleep(15)  # se quiser mais tempo, aumenta esse número
+    Args:
+        delay_seconds: Tempo de espera antes de fechar (para inspeção manual em dev).
+                       Default 0 (sem delay). Use BROWSER_CLOSE_DELAY env para configurar.
+    """
+    delay = delay_seconds or int(os.getenv("BROWSER_CLOSE_DELAY", "0"))
+    if delay > 0:
+        logger.info(f"Aguardando {delay}s antes de fechar o navegador para inspeção.")
+        time.sleep(delay)
 
     logger.info("Fechando navegador Playwright.")
     try:

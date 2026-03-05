@@ -36,10 +36,18 @@ def sense_node(state: AgentState) -> dict[str, Any]:
             updates["crm_context"] = _get_crm_context(user_id)
             
         elif agent_type == "browser":
-            # Browser sense é feito pelo act_node com screenshot tool
-            # Aqui só preparamos o config
-            site_config = state.get("site_config", {})
-            updates["page_observation"] = f"Configuração do site carregada: {site_config.get('name', 'N/A')}"
+            # Percepção DOM — estilo Steward/Comet
+            # Na primeira iteração, apenas prepara config.
+            # Em iterações subsequentes, captura estado real da página.
+            iteration = state.get("iteration", 0)
+            if iteration > 0:
+                updates["page_observation"] = _get_browser_perception()
+            else:
+                site_config = state.get("site_config", {})
+                updates["page_observation"] = (
+                    f"Configuração do site carregada: {site_config.get('name', 'N/A')}. "
+                    f"Aguardando primeira navegação."
+                )
             
         elif agent_type == "nf":
             updates["crm_context"] = _get_nf_context(user_id)
@@ -131,3 +139,27 @@ def _get_assistant_context(user_id: int) -> str:
     """Contexto resumido para o assistente geral."""
     crm = _get_crm_context(user_id)
     return f"Resumo geral:\n{crm}"
+
+
+def _get_browser_perception() -> str:
+    """Captura percepção DOM da página aberta (se houver browser ativo).
+    
+    Usa a camada de percepção estilo Steward para extrair:
+    - URL e título atuais
+    - Elementos interativos filtrados e numerados
+    - Tipo de página (form, table, login, etc.)
+    """
+    try:
+        from backend.orchestrator.tools.browser import _browser_state
+        from backend.browser.perception import get_compact_observation
+
+        page = _browser_state.get("page")
+        if page is None:
+            return "Browser não está aberto. Navegue para uma URL primeiro."
+
+        observation = get_compact_observation(page)
+        return observation
+
+    except Exception as e:
+        logger.warning(f"Erro na percepção do browser: {e}")
+        return f"Erro ao capturar percepção do browser: {e}"

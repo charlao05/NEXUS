@@ -34,12 +34,17 @@ REGRAS OBRIGATÓRIAS:
 4. NUNCA inclua senhas, tokens ou dados sensíveis nos parâmetros
 5. Prefira ações simples e atômicas (uma ação = uma operação)
 6. Máximo de {max_steps} ações por plano
+7. Para tarefas de browser: use browser_get_page_state após navegação
+   para "enxergar" os elementos da página antes de interagir
 
 TOOLS DISPONÍVEIS:
 {available_tools}
 
 CONTEXTO DO USUÁRIO:
 {crm_context}
+
+OBSERVAÇÃO DA PÁGINA ATUAL:
+{page_observation}
 
 Formato de resposta:
 {{"actions": [{{"tool": "nome", "params": {{}}, "reason": "porquê", "risk": "low"}}]}}
@@ -86,13 +91,51 @@ AGENT_TOOLS: dict[str, str] = {
 - respond_to_user: Responde ao usuário. params: {message}
 """,
     "browser": """
+NAVEGAÇÃO:
 - browser_navigate: Abre URL. params: {url}
+- browser_go_back: Volta à página anterior. params: {}
+- browser_go_forward: Avança para próxima página. params: {}
+- browser_scroll: Rola a página. params: {direction: up|down, amount?: 500}
+
+INTERAÇÃO:
 - browser_click: Clica em elemento. params: {selector}
-- browser_type: Digita em campo. params: {selector, text}
-- browser_wait: Espera elemento. params: {selector, timeout?}
-- browser_screenshot: Captura tela. params: {}
-- browser_press_key: Pressiona tecla. params: {key}
+- browser_type: Digita em campo. params: {selector, text, secret?: false}
+- browser_press_key: Pressiona tecla. params: {key} (Enter, Tab, Escape, etc.)
+- browser_hover: Passa mouse sobre elemento. params: {selector}
+
+FORMULÁRIOS:
+- browser_select_option: Seleciona opção em dropdown. params: {selector, value}
+- browser_check_checkbox: Marca/desmarca checkbox. params: {selector, checked?: true}
+- browser_submit_form: Submete formulário. params: {selector?: "form"}
+- browser_upload_file: Faz upload de arquivo. params: {selector, file_path}
+
+LEITURA/EXTRAÇÃO:
+- browser_get_text: Lê texto de elemento. params: {selector}
+- browser_get_attribute: Lê atributo de elemento. params: {selector, attribute}
+- browser_extract_table: Extrai tabela HTML. params: {selector?: "table"}
+- browser_find_by_text: Encontra elemento por texto. params: {text, tag?: "*"}
+- browser_get_page_state: Captura estado da página (elementos interativos). params: {}
+
+AVANÇADO:
+- browser_screenshot: Captura tela. params: {path?}
+- browser_evaluate_js: Executa JavaScript (apenas leitura). params: {expression}
+- browser_handle_dialog: Configura resposta para diálogos. params: {accept?, prompt_text?}
+- browser_drag_drop: Arrasta elemento. params: {source, target}
+
+UTILIDADE:
+- browser_wait_selector: Espera elemento aparecer. params: {selector, timeout_ms?}
+- browser_wait: Espera N segundos. params: {seconds}
+- browser_close: Fecha o navegador. params: {}
 - respond_to_user: Responde ao usuário. params: {message}
+
+DICAS PARA PLANEJAR AUTOMAÇÃO:
+1. SEMPRE comece com browser_navigate para abrir a URL
+2. Após navegar, use browser_get_page_state para "enxergar" a página
+3. Use os selectors retornados pela percepção para clicar/digitar
+4. Se encontrar formulário, preencha campo por campo
+5. Se encontrar tela de login (page_type=login), PARE e avise o usuário
+6. Use browser_screenshot para capturar evidências
+7. NUNCA inclua senhas ou dados de cartão nos parâmetros
 """,
 }
 
@@ -125,10 +168,12 @@ def plan_node(state: AgentState) -> dict[str, Any]:
         
         # Montar system prompt
         available_tools = AGENT_TOOLS.get(agent_type, AGENT_TOOLS["assistente"])
+        page_observation = state.get("page_observation", "Nenhuma página aberta.")
         system = PLANNER_SYSTEM_PROMPT.format(
             max_steps=max_steps,
             available_tools=available_tools,
             crm_context=crm_context + iteration_context,
+            page_observation=page_observation,
         )
         
         # Chamar LLM

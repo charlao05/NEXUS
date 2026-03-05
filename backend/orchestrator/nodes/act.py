@@ -202,6 +202,19 @@ def _respond_to_user(params: dict, user_id: int) -> Any:
 # Node principal
 # ---------------------------------------------------------------------------
 
+# Tools que recebem state (AgentState) ao invés de user_id
+_BROWSER_TOOLS: set[str] = set()
+
+
+def register_browser_tool(name: str):
+    """Decorator para registrar uma browser tool (recebe state ao invés de user_id)."""
+    def decorator(func):
+        _TOOL_REGISTRY[name] = func
+        _BROWSER_TOOLS.add(name)
+        return func
+    return decorator
+
+
 def act_node(state: AgentState) -> dict[str, Any]:
     """Executa cada ação aprovada sequencialmente."""
     planned = state.get("planned_actions", [])
@@ -230,7 +243,11 @@ def act_node(state: AgentState) -> dict[str, Any]:
                 raise ValueError(f"Tool '{tool_name}' não registrada")
             
             tool_func = _TOOL_REGISTRY[tool_name]
-            output = tool_func(params, user_id)
+            # Browser tools recebem state; CRM tools recebem user_id
+            if tool_name in _BROWSER_TOOLS:
+                output = tool_func(params, state)
+            else:
+                output = tool_func(params, user_id)
             
             duration = int((time.time() - start) * 1000)
             
