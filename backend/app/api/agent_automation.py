@@ -392,8 +392,14 @@ def _format_plan_for_chat(plan: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 async def _execute_automation(task: dict[str, Any]) -> dict[str, Any]:
-    """Executa o plano de automação via orchestrator LangGraph."""
+    """Executa o plano de automação via orchestrator LangGraph.
+    
+    Tenta o orchestrator completo (sense→plan→policy→act→check).
+    Se falhar, usa execução direta dos passos via Playwright.
+    """
     try:
+        # Forçar import das browser tools para registro no act_node
+        import backend.orchestrator.tools.browser  # noqa: F401
         from backend.orchestrator.graph import run_task
 
         result = await run_task(
@@ -406,6 +412,14 @@ async def _execute_automation(task: dict[str, Any]) -> dict[str, Any]:
             site_config=task.get("site_config"),
         )
 
+        # Verificar se o orchestrator realmente executou algo
+        action_results = result.get("action_results", [])
+        browser_actions = [r for r in action_results if r.get("tool", "").startswith("browser_")]
+        
+        if not browser_actions and result.get("status") != "failed":
+            logger.warning("Orchestrador completou sem ações de browser — tentando execução direta")
+            return await _execute_direct(task)
+
         return result
 
     except Exception as e:
@@ -416,93 +430,105 @@ async def _execute_automation(task: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
-    """Fallback: executa passos diretamente via Playwright (sem orchestrator)."""
-    results: list[dict[str, Any]] = []
-    try:
-        from backend.orchestrator.tools.browser import (
-            browser_navigate, browser_click, browser_type,
-            browser_wait, browser_screenshot, browser_get_text,
-            browser_scroll, browser_hover, browser_select_option,
-            browser_check_checkbox, browser_submit_form, browser_go_back,
-            browser_go_forward, browser_get_attribute, browser_extract_table,
-            browser_find_by_text, browser_evaluate_js, browser_get_page_state,
-            shutdown_browser,
-        )
+    """Fallback: executa passos diretamente via Playwright (sem orchestrator).
+    
+    Roda sync Playwright via asyncio.to_thread para não bloquear o event loop.
+    """
+    import asyncio
 
-        dummy_state = {}  # type: ignore[arg-type]
+    def _run_steps_sync() -> tuple[list[dict[str, Any]], bool]:
+        """Execução síncrona dos passos Playwright."""
+        results: list[dict[str, Any]] = []
+        try:
+            from backend.orchestrator.tools.browser import (
+                browser_navigate, browser_click, browser_type,
+                browser_wait, browser_screenshot, browser_get_text,
+                browser_scroll, browser_hover, browser_select_option,
+                browser_check_checkbox, browser_submit_form, browser_go_back,
+                browser_go_forward, browser_get_attribute, browser_extract_table,
+                browser_find_by_text, browser_evaluate_js, browser_get_page_state,
+                shutdown_browser,
+            )
 
-        # Mapa de ações para funções
-        action_map = {
-            "navigate": browser_navigate,
-            "click": browser_click,
-            "type": browser_type,
-            "wait": lambda params, state: browser_wait({"seconds": params.get("seconds", 2)}, state),
-            "screenshot": browser_screenshot,
-            "read_text": browser_get_text,
-            "scroll": browser_scroll,
-            "hover": browser_hover,
-            "select_option": browser_select_option,
-            "check_checkbox": browser_check_checkbox,
-            "submit_form": browser_submit_form,
-            "go_back": browser_go_back,
-            "go_forward": browser_go_forward,
-            "get_attribute": browser_get_attribute,
-            "extract_table": browser_extract_table,
-            "find_by_text": browser_find_by_text,
-            "evaluate_js": browser_evaluate_js,
-            "get_page_state": browser_get_page_state,
-        }
+            # State mínimo para as browser tools
+            minimal_state = {
+                "user_id": task.get("user_id", 1),
+                "goal": task.get("goal", ""),
+                "agent_type": "browser",
+            }
 
-        for step in task.get("steps", []):
-            action = step.get("action", "")
-            params = step.get("params", {})
+            # Mapa de ações para funções
+            action_map = {
+                "navigate": browser_navigate,
+                "click": browser_click,
+                "type": browser_type,
+                "wait": lambda params, state: browser_wait({"seconds": params.get("seconds", 2)}, state),
+                "screenshot": browser_screenshot,
+                "read_text": browser_get_text,
+                "scroll": browser_scroll,
+                "hover": browser_hover,
+                "select_option": browser_select_option,
+                "check_checkbox": browser_check_checkbox,
+                "submit_form": browser_submit_form,
+                "go_back": browser_go_back,
+                "go_forward": browser_go_forward,
+                "get_attribute": browser_get_attribute,
+                "extract_table": browser_extract_table,
+                "find_by_text": browser_find_by_text,
+                "evaluate_js": browser_evaluate_js,
+                "get_page_state": browser_get_page_state,
+            }
 
-            try:
-                handler = action_map.get(action)
-                if handler:
-                    r = handler(params, dummy_state)
-                else:
-                    r = {"success": False, "error": f"Ação desconhecida: {action}"}
+            for step in task.get("steps", []):
+                action = step.get("action", "")
+                params = step.get("params", {})
 
-                results.append({"step": step.get("step"), "action": action, **r})
+                try:
+                    handler = action_map.get(action)
+                    if handler:
+                        r = handler(params, minimal_state)
+                    else:
+                        r = {"success": False, "error": f"Ação desconhecida: {action}"}
 
-                if not r.get("success", False):
+                    results.append({"step": step.get("step"), "action": action, **r})
+
+                    if not r.get("success", False):
+                        break
+
+                except Exception as e:
+                    results.append({"step": step.get("step"), "action": action, "success": False, "error": str(e)})
                     break
 
-            except Exception as e:
-                results.append({"step": step.get("step"), "action": action, "success": False, "error": str(e)})
-                break
+            # Fechar browser ao final
+            try:
+                shutdown_browser()
+            except Exception:
+                pass
 
-        # Fechar browser ao final
-        try:
-            shutdown_browser()
-        except Exception:
-            pass
+            all_ok = all(r.get("success", False) for r in results)
+            return results, all_ok
 
-        all_ok = all(r.get("success", False) for r in results)
-        return {
-            "task_id": task.get("task_id", "unknown"),
-            "status": "completed" if all_ok else "partial",
-            "final_response": _format_results_for_chat(results),
-            "action_results": results,
-        }
+        except ImportError as e:
+            logger.error(f"Playwright não disponível: {e}")
+            return [{"step": 0, "action": "import", "success": False, "error": str(e)}], False
+        except Exception as e:
+            logger.error(f"Erro na execução direta: {e}", exc_info=True)
+            return [{"step": 0, "action": "error", "success": False, "error": str(e)}], False
 
-    except ImportError as e:
-        logger.error(f"Playwright não disponível: {e}")
-        return {
-            "task_id": task.get("task_id", "unknown"),
-            "status": "failed",
-            "final_response": "⚠️ O Playwright não está instalado. Execute: `npx playwright install chromium`",
-            "action_results": [],
-        }
+    # Executar em thread separada para não bloquear o event loop async
+    try:
+        results, all_ok = await asyncio.to_thread(_run_steps_sync)
     except Exception as e:
-        logger.error(f"Erro na execução direta: {e}", exc_info=True)
-        return {
-            "task_id": task.get("task_id", "unknown"),
-            "status": "failed",
-            "final_response": f"⚠️ Erro durante a automação: {str(e)}",
-            "action_results": [],
-        }
+        logger.error(f"Erro ao executar em thread: {e}")
+        results = [{"step": 0, "action": "thread", "success": False, "error": str(e)}]
+        all_ok = False
+
+    return {
+        "task_id": task.get("task_id", "unknown"),
+        "status": "completed" if all_ok else "partial",
+        "final_response": _format_results_for_chat(results),
+        "action_results": results,
+    }
 
 
 def _format_results_for_chat(results: list[dict[str, Any]]) -> str:
@@ -560,6 +586,15 @@ async def _start_automation_core(
     # Formatar para o chat
     chat_message = _format_plan_for_chat(plan)
 
+    # Carregar site_config do template (se disponível)
+    site_config = None
+    try:
+        from backend.orchestrator.templates import get_template
+        template = get_template(site_hint)
+        site_config = template.get("site_config")
+    except Exception:
+        pass
+
     # Salvar estado
     _automation_tasks[task_id] = {
         "task_id": task_id,
@@ -570,6 +605,7 @@ async def _start_automation_core(
         "site_hint": site_hint,
         "plan": plan,
         "steps": plan.get("steps", []),
+        "site_config": site_config,
         "status": "awaiting_approval",
         "created_at": datetime.now().isoformat(),
     }

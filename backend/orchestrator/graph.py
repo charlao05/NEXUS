@@ -191,6 +191,14 @@ async def run_task(
     Returns:
         Dicionário com final_response, status, action_results e metadata.
     """
+    # ── Auto-import browser tools para que fiquem registradas no act_node ──
+    if agent_type == "browser":
+        try:
+            import backend.orchestrator.tools.browser  # noqa: F401 — registra tools via decorators
+            logger.debug("Browser tools importadas para registro no act_node")
+        except Exception as e:
+            logger.warning(f"Falha ao importar browser tools: {e}")
+
     task_id = f"task_{uuid.uuid4().hex[:12]}"
     _thread_id = thread_id or f"thread_{uuid.uuid4().hex[:12]}"
     

@@ -133,9 +133,14 @@ DICAS PARA PLANEJAR AUTOMAÇÃO:
 2. Após navegar, use browser_get_page_state para "enxergar" a página
 3. Use os selectors retornados pela percepção para clicar/digitar
 4. Se encontrar formulário, preencha campo por campo
-5. Se encontrar tela de login (page_type=login), PARE e avise o usuário
+5. Se encontrar tela de login (page_type=login), use respond_to_user para avisar
 6. Use browser_screenshot para capturar evidências
 7. NUNCA inclua senhas ou dados de cartão nos parâmetros
+
+REGRA CRÍTICA: Você DEVE executar browser_navigate + browser_get_page_state
+ANTES de usar respond_to_user. O browser é REAL — não invente que "a página
+foi aberta" sem ter executado browser_navigate primeiro.
+Só use respond_to_user depois de TER NAVEGADO e observado a página real.
 """,
 }
 
@@ -178,6 +183,46 @@ def plan_node(state: AgentState) -> dict[str, Any]:
         
         # Chamar LLM
         actions = _call_llm_planner(system, goal, state.get("messages", []))
+        
+        # ── Validação pós-LLM para browser agent ────────────────
+        # Se é browser agent na iteração 0 e o LLM só gerou respond_to_user
+        # (sem nenhuma ação real de browser), forçar navegação antes.
+        if agent_type == "browser" and iteration == 0:
+            has_browser_action = any(
+                a.tool.startswith("browser_") for a in actions
+            )
+            if not has_browser_action:
+                # O LLM tentou atalhar com respond_to_user sem abrir o browser.
+                # Forçar: navigate + get_page_state + respond_to_user
+                site_config = state.get("site_config") or {}
+                url = site_config.get("url", "")
+                if url:
+                    logger.warning(
+                        f"⚠️ plan_node: LLM não gerou browser actions — "
+                        f"forçando navigate para {url}"
+                    )
+                    forced_actions = [
+                        PlannedAction(
+                            tool="browser_navigate",
+                            params={"url": url},
+                            reason="Navegação forçada — LLM não planejou ações de browser",
+                            risk=ActionRisk.LOW,
+                        ),
+                        PlannedAction(
+                            tool="browser_get_page_state",
+                            params={},
+                            reason="Capturar estado da página após navegação",
+                            risk=ActionRisk.LOW,
+                        ),
+                        PlannedAction(
+                            tool="browser_screenshot",
+                            params={},
+                            reason="Screenshot para evidência",
+                            risk=ActionRisk.LOW,
+                        ),
+                    ]
+                    # Manter o respond_to_user original como última ação
+                    actions = forced_actions + actions
         
         updates["planned_actions"] = [a.model_dump() for a in actions]
         updates["current_step"] = 0
