@@ -266,11 +266,23 @@ def _setup_event_handlers(hub: AgentHub):
     
     hub.subscribe(AgentType.AGENDA, EventType.CLIENTE_CRIADO, on_cliente_criado)
     
-    # Quando pagamento atrasado, cobrança cria lembrete
+    # Quando pagamento atrasado, cobrança cria lembrete + envia email
     def on_pagamento_atrasado(message: AgentMessage):
         dados = message.payload
         logger.info(f"⚠️ Cobrança ativada: {dados.get('valor')} - {dados.get('dias_atraso')} dias")
-        return {"acao": "cobranca_iniciada", "canal": "whatsapp"}
+        # Enviar lembrete por email ao cliente (Lacuna #6)
+        try:
+            from app.api.email_service import send_invoice_reminder
+            email = dados.get("email") or dados.get("client_email", "")
+            nome = dados.get("nome") or dados.get("client_name", "Cliente")
+            valor = float(dados.get("valor", 0))
+            venc = dados.get("vencimento") or dados.get("due_date", "")
+            inv_id = dados.get("invoice_id")
+            if email and valor:
+                send_invoice_reminder(email, nome, valor, venc, inv_id)
+        except Exception as e:
+            logger.debug(f"Email de cobrança não enviado: {e}")
+        return {"acao": "cobranca_iniciada", "canal": "email+whatsapp"}
     
     hub.subscribe(AgentType.COBRANCA, EventType.PAGAMENTO_ATRASADO, on_pagamento_atrasado)
     
@@ -281,6 +293,24 @@ def _setup_event_handlers(hub: AgentHub):
         return {"acao": "nf_registrada"}
     
     hub.subscribe(AgentType.CONTABILIDADE, EventType.NF_EMITIDA, on_nf_emitida)
+
+    # DAS próximo do vencimento — envia email ao MEI (Lacuna #6)
+    def on_das_vencendo(message: AgentMessage):
+        dados = message.payload
+        logger.info(f"📊 DAS vencendo: {dados.get('vencimento') or dados.get('due_date')}")
+        try:
+            from app.api.email_service import send_das_reminder
+            email = dados.get("email") or dados.get("user_email", "")
+            nome = dados.get("nome") or dados.get("user_name", "Empreendedor")
+            venc = dados.get("vencimento") or dados.get("due_date", "")
+            valor = dados.get("valor") or dados.get("estimated_amount")
+            if email:
+                send_das_reminder(email, nome, venc, float(valor) if valor else None)
+        except Exception as e:
+            logger.debug(f"Email DAS não enviado: {e}")
+        return {"acao": "lembrete_das_enviado", "canal": "email"}
+
+    hub.subscribe(AgentType.CONTABILIDADE, EventType.DAS_VENCENDO, on_das_vencendo)
 
 
 # ============================================
@@ -461,23 +491,28 @@ async def execute_agent_action(
     # ── user_id extraído do JWT (autenticado) ────────────────────
     _user_id: int | None = current_user.get("user_id")
 
-    # ── Persistir chat no banco ──────────────────────────────────
+    # ── Persistir chat (Redis + SQLite dual-write) ───────────────
     def _save_chat(user_msg: str, assistant_msg: str, uid: int | None = None) -> None:
-        """Salva par de mensagens no histórico persistente"""
+        """Salva par de mensagens via chat_context (Redis cache + SQLite permanente)"""
+        _uid = uid or _user_id or 0
         try:
-            from database.models import ChatMessage, SessionLocal as _SL  # type: ignore[import]
-            db = _SL()
-            try:
-                _uid = uid or 0
-                if user_msg:
-                    db.add(ChatMessage(user_id=_uid, agent_id=agent_id, role="user", content=user_msg))
-                if assistant_msg:
-                    db.add(ChatMessage(user_id=_uid, agent_id=agent_id, role="assistant", content=assistant_msg))
-                db.commit()
-            finally:
-                db.close()
+            from app.services.chat_context import save_turn
+            save_turn(_uid, agent_id, user_msg, assistant_msg)
         except Exception as ex:
-            logger.debug(f"Chat não persistido: {ex}")
+            # Fallback direto ao SQLite se chat_context falhar
+            try:
+                from database.models import ChatMessage, SessionLocal as _SL  # type: ignore[import]
+                db = _SL()
+                try:
+                    if user_msg:
+                        db.add(ChatMessage(user_id=_uid, agent_id=agent_id, role="user", content=user_msg))
+                    if assistant_msg:
+                        db.add(ChatMessage(user_id=_uid, agent_id=agent_id, role="assistant", content=assistant_msg))
+                    db.commit()
+                finally:
+                    db.close()
+            except Exception as e2:
+                logger.debug(f"Chat não persistido: {e2}")
 
     # ── Detectar intenção de automação web ────────────────────────
     user_message = action.parameters.get("message", "")
@@ -533,27 +568,32 @@ async def execute_agent_action(
     try:
         from app.api.agent_chat import get_llm_response, ACTION_PROMPTS
 
-        # Carregar histórico persistente para contexto
+        # Carregar histórico persistente para contexto (Redis → fallback SQLite)
         chat_history: list[dict] = []
         try:
-            from database.models import ChatMessage as _CM, SessionLocal as _SL2  # type: ignore[import]
-            _db = _SL2()
-            try:
-                _query = _db.query(_CM).filter(_CM.agent_id == agent_id)
-                # Filtrar histórico pelo user_id autenticado
-                if _user_id:
-                    _query = _query.filter(_CM.user_id == _user_id)
-                recent = (
-                    _query
-                    .order_by(_CM.created_at.desc())
-                    .limit(10)
-                    .all()
-                )
-                chat_history = [{"role": m.role, "content": m.content} for m in reversed(recent)]
-            finally:
-                _db.close()
+            from app.services.chat_context import load_chat_history
+            _uid_for_history = _user_id or 0
+            chat_history = load_chat_history(_uid_for_history, agent_id, limit=20)
         except Exception:
-            pass
+            # Fallback direto ao SQLite se chat_context falhar
+            try:
+                from database.models import ChatMessage as _CM, SessionLocal as _SL2  # type: ignore[import]
+                _db = _SL2()
+                try:
+                    _query = _db.query(_CM).filter(_CM.agent_id == agent_id)
+                    if _user_id:
+                        _query = _query.filter(_CM.user_id == _user_id)
+                    recent = (
+                        _query
+                        .order_by(_CM.created_at.desc())
+                        .limit(20)
+                        .all()
+                    )
+                    chat_history = [{"role": m.role, "content": m.content} for m in reversed(recent)]
+                finally:
+                    _db.close()
+            except Exception:
+                pass
 
         # Chat livre: usuário digitou uma mensagem
         if user_message and action.action in ("smart_chat", "chat"):
