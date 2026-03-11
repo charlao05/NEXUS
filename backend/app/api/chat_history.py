@@ -54,11 +54,22 @@ def _get_db():
 async def get_chat_history(
     agent_id: str,
     limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    """Retorna histórico de chat do usuário com um agente específico"""
+    """Retorna histórico de chat do usuário com um agente específico.
+    Suporta paginação via limit/offset (MEDIUM FIX #16)."""
     db = _get_db()
     try:
+        # Contar total de mensagens para paginação
+        total = (
+            db.query(ChatMessage)
+            .filter(
+                ChatMessage.user_id == current_user["user_id"],
+                ChatMessage.agent_id == agent_id,
+            )
+            .count()
+        )
         messages = (
             db.query(ChatMessage)
             .filter(
@@ -66,6 +77,7 @@ async def get_chat_history(
                 ChatMessage.agent_id == agent_id,
             )
             .order_by(ChatMessage.created_at.desc())
+            .offset(offset)
             .limit(limit)
             .all()
         )
@@ -73,7 +85,7 @@ async def get_chat_history(
         msgs = [m.to_dict() for m in reversed(messages)]
         return ChatHistoryResponse(
             messages=msgs,
-            total=len(msgs),
+            total=total,
             agent_id=agent_id,
         )
     finally:

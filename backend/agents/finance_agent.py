@@ -2,11 +2,21 @@
 Agente de Análise Financeira para MEI
 ======================================
 
+⚠️ NOTA DE DEPRECAÇÃO (MEDIUM FIX #12):
+A maioria das funcionalidades deste módulo foi migrada para
+`backend/agents/contabilidade_agent.py` (1156 linhas), que é o
+agente principal de contabilidade e finanças.
+
+Este módulo é mantido como BIBLIOTECA INTERNA para:
+- forecast() — previsão financeira com dados reais (reimplementado)
+- _analyze_month() — análise mensal detalhada
+- _compare_months() — comparação entre meses
+- _health_check() — saúde financeira
+
+Para novos desenvolvimentos, use ContabilidadeAgent.
+
 Análise financeira completa e descomplicada para microempreendedores.
 Linguagem simples, insights práticos, sem jargões técnicos.
-
-IMPORTANTE: Este agente usa linguagem acessível e clara, adequada para
-quem não tem formação em contabilidade ou finanças.
 """
 from __future__ import annotations
 
@@ -284,18 +294,115 @@ class FinanceAgent:
         }
     
     def _forecast(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Faz previsão de faturamento."""
-        
+        """Faz previsão de faturamento baseada no histórico real de transações.
+        HIGH FIX #8: Implementação real de forecast (era STUB)."""
+
         historical_months = parameters.get("historical_months", 3)
-        
+        user_id = parameters.get("user_id")
+
+        # Buscar dados reais dos últimos N meses via CRMService
+        try:
+            from database.crm_service import CRMService
+        except ImportError:
+            CRMService = None
+
+        monthly_data: List[Dict[str, Any]] = []
+        hoje = datetime.now()
+
+        for i in range(historical_months):
+            target = hoje - timedelta(days=30 * i)
+            m, y = target.month, target.year
+            if CRMService:
+                summary = CRMService.get_financial_summary(month=m, year=y, user_id=user_id)
+            else:
+                summary = {"receitas": 0, "despesas": 0, "lucro": 0, "transactions_count": 0}
+            if summary.get("transactions_count", 0) > 0:
+                monthly_data.append({
+                    "month": f"{y}-{m:02d}",
+                    "receitas": summary.get("receitas", 0),
+                    "despesas": summary.get("despesas", 0),
+                    "lucro": summary.get("lucro", 0),
+                })
+
+        if len(monthly_data) < 1:
+            return {
+                "status": "insufficient_data",
+                "previsao_proximo_mes": {
+                    "receitas_estimadas": None,
+                    "confianca": "indisponível",
+                    "base": f"Últimos {historical_months} meses"
+                },
+                "message": "📊 Ainda não tenho dados suficientes para fazer uma previsão confiável. "
+                           "Continue registrando suas vendas e despesas que em breve poderei te ajudar com projeções!"
+            }
+
+        # Média móvel simples (SMA) para previsão
+        receitas = [d["receitas"] for d in monthly_data]
+        despesas = [d["despesas"] for d in monthly_data]
+
+        media_receitas = sum(receitas) / len(receitas)
+        media_despesas = sum(despesas) / len(despesas)
+        media_lucro = media_receitas - media_despesas
+
+        # Tendência: comparar primeiro e último mês se >= 2 meses
+        tendencia = "estável"
+        variacao_pct = 0.0
+        if len(receitas) >= 2:
+            mais_recente = receitas[0]
+            mais_antigo = receitas[-1]
+            if mais_antigo > 0:
+                variacao_pct = ((mais_recente - mais_antigo) / mais_antigo) * 100
+                if variacao_pct > 5:
+                    tendencia = "crescente 📈"
+                elif variacao_pct < -5:
+                    tendencia = "decrescente 📉"
+                else:
+                    tendencia = "estável ➡️"
+
+        # Confiança baseada na quantidade de dados
+        if len(monthly_data) >= 3:
+            confianca = "média"
+        elif len(monthly_data) == 2:
+            confianca = "baixa"
+        else:
+            confianca = "muito baixa (apenas 1 mês)"
+
+        # Projeção = média com ajuste de tendência
+        ajuste = 1 + (variacao_pct / 100 * 0.5) if variacao_pct else 1.0
+        receitas_estimadas = round(media_receitas * ajuste, 2)
+        despesas_estimadas = round(media_despesas, 2)
+        lucro_estimado = round(receitas_estimadas - despesas_estimadas, 2)
+
+        # Limite MEI
+        receita_acumulada_ano = sum(receitas)  # simplificação: meses carregados
+        projecao_anual = round(receitas_estimadas * 12, 2)
+        alerta_mei = projecao_anual > self.LIMITE_ANUAL_MEI
+
         return {
-            "status": "insufficient_data",
+            "status": "forecast_ready",
             "previsao_proximo_mes": {
-                "receitas_estimadas": None,
-                "confianca": "indisponível",
-                "base": f"Últimos {historical_months} meses"
+                "receitas_estimadas": receitas_estimadas,
+                "despesas_estimadas": despesas_estimadas,
+                "lucro_estimado": lucro_estimado,
+                "confianca": confianca,
+                "tendencia": tendencia,
+                "variacao_pct": round(variacao_pct, 1),
+                "base": f"Últimos {len(monthly_data)} meses",
             },
-            "message": "📊 Ainda não tenho dados suficientes para fazer uma previsão confiável. Continue registrando suas vendas e despesas que em breve poderei te ajudar com projeções!"
+            "historico_utilizado": monthly_data,
+            "projecao_anual": projecao_anual,
+            "alerta_limite_mei": alerta_mei,
+            "message": (
+                f"📊 **Previsão para o próximo mês**\n\n"
+                f"💰 Receitas estimadas: R$ {receitas_estimadas:,.2f}\n"
+                f"💸 Despesas estimadas: R$ {despesas_estimadas:,.2f}\n"
+                f"📈 Lucro estimado: R$ {lucro_estimado:,.2f}\n"
+                f"📉 Tendência: {tendencia} ({variacao_pct:+.1f}%)\n"
+                f"🔮 Confiança: {confianca}\n\n"
+                f"Baseado nos últimos {len(monthly_data)} meses."
+                + (f"\n\n⚠️ **ALERTA MEI**: Projeção anual R$ {projecao_anual:,.2f} ultrapassa "
+                   f"o limite de R$ {self.LIMITE_ANUAL_MEI:,.2f}!" if alerta_mei else "")
+            ),
         }
     
     def _health_check(self, parameters: Dict[str, Any]) -> Dict[str, Any]:

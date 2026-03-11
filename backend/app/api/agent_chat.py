@@ -10,6 +10,7 @@ Uso: importado por agent_hub.py para enriquecer respostas dos agentes.
 
 from typing import Any, Optional
 import os
+import json
 import logging
 from datetime import datetime
 
@@ -280,6 +281,431 @@ def get_openai_client():
 
 
 # ============================================================================
+# CRM TOOLS — Function Calling para ações reais no banco de dados
+# ============================================================================
+
+CRM_TOOLS_DEFINITIONS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "create_client",
+            "description": "Cadastra um novo cliente no CRM. Use quando o usuário pedir para cadastrar, registrar ou adicionar um cliente.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Nome completo do cliente"},
+                    "phone": {"type": "string", "description": "Telefone com DDD (ex: 27999887766)"},
+                    "email": {"type": "string", "description": "Email do cliente"},
+                    "cpf_cnpj": {"type": "string", "description": "CPF ou CNPJ"},
+                    "segment": {"type": "string", "enum": ["lead", "prospect", "standard", "premium", "vip"], "description": "Segmento do cliente"},
+                    "notes": {"type": "string", "description": "Observações"},
+                    "address": {"type": "string", "description": "Endereço"},
+                    "city": {"type": "string", "description": "Cidade"},
+                    "state": {"type": "string", "description": "Estado (UF)"},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_appointment",
+            "description": "Cria um agendamento/compromisso. Use quando o usuário pedir para marcar, agendar ou criar reunião, consulta, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Título do compromisso"},
+                    "scheduled_at": {"type": "string", "description": "Data e hora ISO 8601 (ex: 2026-03-20T15:00:00)"},
+                    "description": {"type": "string", "description": "Detalhes do compromisso"},
+                    "duration_minutes": {"type": "integer", "description": "Duração em minutos (padrão: 60)"},
+                    "appointment_type": {"type": "string", "enum": ["reuniao", "ligacao", "consulta", "visita", "outro"], "description": "Tipo"},
+                    "client_id": {"type": "integer", "description": "ID do cliente associado (se houver)"},
+                },
+                "required": ["title", "scheduled_at"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "record_transaction",
+            "description": "Registra transação financeira (receita ou despesa). Use quando o usuário pedir para anotar venda, pagamento, gasto, entrada ou saída.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "enum": ["receita", "despesa"], "description": "receita=entrada, despesa=saída"},
+                    "amount": {"type": "number", "description": "Valor em reais"},
+                    "description": {"type": "string", "description": "Descrição da transação"},
+                    "category": {"type": "string", "description": "Categoria (ex: vendas, material, aluguel)"},
+                    "client_id": {"type": "integer", "description": "ID do cliente associado"},
+                    "notes": {"type": "string", "description": "Observações"},
+                },
+                "required": ["type", "amount", "description"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_invoice",
+            "description": "Cria fatura/cobrança para um cliente. Use quando pedir para criar cobrança ou conta a receber.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "client_id": {"type": "integer", "description": "ID do cliente"},
+                    "description": {"type": "string", "description": "Descrição do serviço/produto"},
+                    "amount": {"type": "number", "description": "Valor em reais"},
+                    "due_date": {"type": "string", "description": "Data de vencimento (YYYY-MM-DD)"},
+                },
+                "required": ["client_id", "description", "amount", "due_date"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_clients",
+            "description": "Busca clientes pelo nome, telefone ou email. Use para procurar ou listar clientes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Texto para buscar (nome, telefone ou email)"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_client",
+            "description": "Atualiza dados de um cliente existente. Use quando pedir para alterar telefone, email, nome ou segmento.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "client_id": {"type": "integer", "description": "ID do cliente a atualizar"},
+                    "name": {"type": "string", "description": "Novo nome"},
+                    "phone": {"type": "string", "description": "Novo telefone"},
+                    "email": {"type": "string", "description": "Novo email"},
+                    "segment": {"type": "string", "description": "Novo segmento"},
+                    "notes": {"type": "string", "description": "Novas observações"},
+                },
+                "required": ["client_id"],
+            },
+        },
+    },
+]
+
+# Ferramentas disponíveis por agente
+AGENT_AVAILABLE_TOOLS: dict[str, list[str]] = {
+    "clientes": ["create_client", "search_clients", "update_client", "create_appointment"],
+    "agenda": ["create_appointment", "create_client"],
+    "contabilidade": ["record_transaction", "create_client", "create_invoice"],
+    "cobranca": ["search_clients", "create_invoice"],
+    "assistente": ["create_client", "create_appointment", "record_transaction", "create_invoice", "search_clients", "update_client"],
+}
+
+_TOOLS_ADDENDUM = """
+
+FERRAMENTAS DISPONÍVEIS (IMPORTANTE):
+Você tem ferramentas que executam ações REAIS no sistema (cadastrar cliente, agendar compromisso, registrar transação, etc.).
+Quando o usuário pedir para FAZER algo (cadastrar, agendar, registrar, anotar, criar):
+1. USE as ferramentas disponíveis para executar a ação de verdade
+2. NUNCA diga que fez algo sem usar a ferramenta — as ferramentas são a ÚNICA forma de executar ações
+3. Se a ferramenta retornar erro, informe o usuário
+4. Se faltar informação obrigatória (como nome do cliente), PERGUNTE antes de usar a ferramenta
+5. Após executar, confirme com os dados reais retornados pela ferramenta"""
+
+
+def _get_agent_tools(agent_id: str) -> list[dict]:
+    """Retorna as definições de ferramentas disponíveis para o agente."""
+    tool_names = AGENT_AVAILABLE_TOOLS.get(agent_id, [])
+    if not tool_names:
+        return []
+    return [t for t in CRM_TOOLS_DEFINITIONS if t["function"]["name"] in tool_names]
+
+
+def _get_raw_openai_client():
+    """Retorna o cliente OpenAI SDK cru para function calling."""
+    wrapper = get_openai_client()
+    if wrapper and hasattr(wrapper, "client"):
+        return wrapper.client
+    return None
+
+
+def _notify_hub_event(event_name: str, payload: dict) -> None:
+    """Dispara evento no Agent Hub (fire-and-forget, não bloqueia).
+    CRITICAL FIX #2: Pub/Sub agora é disparado automaticamente após ações CRM."""
+    try:
+        from agents.agent_hub import hub, EventType, AgentType, AgentMessage
+        import asyncio
+
+        _event_map = {
+            "CLIENTE_CRIADO": (EventType.CLIENTE_CRIADO, AgentType.CLIENTES),
+            "CLIENTE_ATUALIZADO": (EventType.CLIENTE_ATUALIZADO, AgentType.CLIENTES),
+            "COMPROMISSO_CRIADO": (EventType.COMPROMISSO_CRIADO, AgentType.AGENDA),
+            "PAGAMENTO_RECEBIDO": (EventType.PAGAMENTO_RECEBIDO, AgentType.CONTABILIDADE),
+            "NF_EMITIDA": (EventType.NF_EMITIDA, AgentType.CONTABILIDADE),
+        }
+        if event_name not in _event_map:
+            return
+        event_type, from_agent = _event_map[event_name]
+        msg = AgentMessage(
+            from_agent=from_agent,
+            to_agent=None,  # broadcast
+            event_type=event_type,
+            payload=payload,
+            priority=5,
+        )
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(hub.publish(msg))
+        except RuntimeError:
+            pass  # No event loop — skip (non-critical)
+        logger.debug(f"📡 Hub event {event_name} dispatched")
+    except Exception as e:
+        logger.debug(f"Hub notification skipped: {e}")
+
+
+def _log_activity(user_id: int | None, action: str, details: str) -> None:
+    """Registra ação no ActivityLog para audit trail (LOW #22)."""
+    try:
+        from database.models import ActivityLog, SessionLocal
+        if not user_id:
+            return
+        db = SessionLocal()
+        try:
+            log = ActivityLog(
+                user_id=user_id,
+                action=action,
+                details=details,
+            )
+            db.add(log)
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        logger.debug(f"ActivityLog skipped: {e}")
+
+
+def _execute_crm_tool(tool_name: str, arguments: dict, user_id: int | None) -> dict:
+    """Executa uma ferramenta CRM e retorna o resultado.
+    Após cada operação bem-sucedida, dispara evento Pub/Sub e registra no ActivityLog."""
+    try:
+        from database.crm_service import CRMService
+
+        if tool_name == "create_client":
+            result = CRMService.create_client(
+                name=arguments.get("name", ""),
+                user_id=user_id,
+                phone=arguments.get("phone"),
+                email=arguments.get("email"),
+                cpf_cnpj=arguments.get("cpf_cnpj"),
+                segment=arguments.get("segment", "standard"),
+                notes=arguments.get("notes", ""),
+                address=arguments.get("address"),
+                city=arguments.get("city"),
+                state=arguments.get("state"),
+            )
+            if result.get("status") == "created":
+                _notify_hub_event("CLIENTE_CRIADO", result.get("client", {}))
+                _log_activity(user_id, "create_client", f"Cliente '{arguments.get('name')}' cadastrado via chat")
+            return result
+
+        elif tool_name == "create_appointment":
+            scheduled_str = arguments.get("scheduled_at", "")
+            try:
+                scheduled = datetime.fromisoformat(scheduled_str)
+            except (ValueError, TypeError):
+                scheduled = datetime.now()
+            result = CRMService.create_appointment(
+                title=arguments.get("title", "Compromisso"),
+                scheduled_at=scheduled,
+                client_id=arguments.get("client_id"),
+                description=arguments.get("description", ""),
+                duration_minutes=arguments.get("duration_minutes", 60),
+                appointment_type=arguments.get("appointment_type", "reuniao"),
+                user_id=user_id,
+            )
+            if result.get("status") == "created":
+                _notify_hub_event("COMPROMISSO_CRIADO", result.get("appointment", {}))
+                _log_activity(user_id, "create_appointment", f"Compromisso '{arguments.get('title')}' criado via chat")
+            return result
+
+        elif tool_name == "record_transaction":
+            result = CRMService.record_transaction(
+                type=arguments.get("type", "receita"),
+                amount=arguments.get("amount", 0),
+                description=arguments.get("description", ""),
+                category=arguments.get("category", "geral"),
+                client_id=arguments.get("client_id"),
+                notes=arguments.get("notes", ""),
+                user_id=user_id,
+            )
+            if result.get("status") == "created":
+                _notify_hub_event("PAGAMENTO_RECEBIDO", result.get("transaction", {}))
+                _log_activity(user_id, "record_transaction", f"{arguments.get('type', 'receita')} R${arguments.get('amount', 0):.2f} via chat")
+            return result
+
+        elif tool_name == "create_invoice":
+            from datetime import date as _date
+            due_str = arguments.get("due_date", "")
+            try:
+                due = _date.fromisoformat(due_str)
+            except (ValueError, TypeError):
+                due = _date.today()
+            result = CRMService.create_invoice(
+                client_id=arguments.get("client_id", 0),
+                description=arguments.get("description", ""),
+                amount=arguments.get("amount", 0),
+                due_date=due,
+                user_id=user_id,
+            )
+            if result.get("status") == "created":
+                _notify_hub_event("NF_EMITIDA", result.get("invoice", {}))
+                _log_activity(user_id, "create_invoice", f"Fatura R${arguments.get('amount', 0):.2f} criada via chat")
+            return result
+
+        elif tool_name == "search_clients":
+            return CRMService.search_clients(
+                query=arguments.get("query", ""),
+                user_id=user_id,
+            )
+
+        elif tool_name == "update_client":
+            cid = arguments.get("client_id")
+            if not cid:
+                return {"status": "error", "message": "client_id é obrigatório para atualizar"}
+            allowed = {k: v for k, v in arguments.items() if k != "client_id" and v is not None}
+            result = CRMService.update_client(cid, user_id=user_id, **allowed)
+            if result.get("status") == "updated":
+                _notify_hub_event("CLIENTE_ATUALIZADO", {"client_id": cid, **allowed})
+                _log_activity(user_id, "update_client", f"Cliente #{cid} atualizado via chat")
+            return result
+
+        return {"status": "error", "message": f"Ferramenta desconhecida: {tool_name}"}
+
+    except Exception as e:
+        logger.error(f"Erro ao executar tool {tool_name}: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+def _call_with_tools(messages: list[dict], agent_id: str, user_id: int | None) -> str:
+    """Chama OpenAI com function calling e executa as ferramentas CRM.
+    Retorna a resposta final como string, ou string vazia se falhar."""
+    raw_client = _get_raw_openai_client()
+    if not raw_client:
+        return ""
+
+    agent_tools = _get_agent_tools(agent_id)
+    if not agent_tools:
+        return ""
+
+    model = os.getenv("OPENAI_MODEL", "gpt-4.1")
+
+    try:
+        # Primeira chamada com ferramentas
+        response = raw_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            tools=agent_tools,
+            tool_choice="auto",
+            temperature=0.15,
+            max_tokens=800,
+        )
+
+        assistant_msg = response.choices[0].message
+
+        # Se não há tool calls, retorna conteúdo direto
+        if not assistant_msg.tool_calls:
+            return assistant_msg.content or ""
+
+        # Executar cada tool call
+        logger.info(f"🔧 Agent {agent_id}: {len(assistant_msg.tool_calls)} tool call(s)")
+
+        # Adicionar mensagem do assistente com tool_calls ao contexto
+        tool_calls_dicts = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                },
+            }
+            for tc in assistant_msg.tool_calls
+        ]
+        messages.append({
+            "role": "assistant",
+            "content": assistant_msg.content,
+            "tool_calls": tool_calls_dicts,
+        })
+
+        # Executar ferramentas e adicionar resultados
+        for tc in assistant_msg.tool_calls:
+            try:
+                args = json.loads(tc.function.arguments)
+            except json.JSONDecodeError:
+                args = {}
+
+            logger.info(f"  🔧 Executando {tc.function.name}({json.dumps(args, ensure_ascii=False)[:200]})")
+            result = _execute_crm_tool(tc.function.name, args, user_id)
+            logger.info(f"  ✅ Resultado: {result.get('status', 'unknown')}")
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": json.dumps(result, ensure_ascii=False, default=str),
+            })
+
+        # Segunda chamada para resposta natural baseada nos resultados
+        response2 = raw_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.15,
+            max_tokens=800,
+        )
+
+        final_msg = response2.choices[0].message
+
+        # Tratar caso raro de tool calls encadeados (máximo 1 rodada extra)
+        if final_msg.tool_calls:
+            tc_dicts2 = [
+                {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                for tc in final_msg.tool_calls
+            ]
+            messages.append({"role": "assistant", "content": final_msg.content, "tool_calls": tc_dicts2})
+
+            for tc in final_msg.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    args = {}
+                logger.info(f"  🔧 Executando (round 2) {tc.function.name}")
+                result = _execute_crm_tool(tc.function.name, args, user_id)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": json.dumps(result, ensure_ascii=False, default=str),
+                })
+
+            response3 = raw_client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.15,
+                max_tokens=800,
+            )
+            return response3.choices[0].message.content or ""
+
+        return final_msg.content or ""
+
+    except Exception as e:
+        logger.warning(f"⚠️ Function calling falhou para {agent_id}: {e}", exc_info=True)
+        return ""  # Fallback para chamada sem ferramentas
+
+
+# ============================================================================
 # CHAT INTELIGENTE COM LLM
 # ============================================================================
 
@@ -287,16 +713,12 @@ async def get_llm_response(agent_id: str, user_message: str, history: list[dict]
     """
     Gera resposta inteligente usando OpenAI GPT-4.1
     com system prompt especializado por agente.
-    Enriquece prompts do CRM e Assistente com dados reais do banco.
+    Suporta function calling para ações reais (cadastrar, agendar, etc.).
     Filtra dados pelo user_id autenticado.
     """
     # Resolver aliases legados (financeiro/documentos → contabilidade)
     _alias = {"financeiro": "contabilidade", "documentos": "contabilidade"}
     agent_id = _alias.get(agent_id, agent_id)
-
-    client = get_openai_client()
-    if not client:
-        return ""
 
     # Buscar contexto real do CRM para enriquecer prompts (filtrado por user_id)
     crm_context = _get_crm_context(user_id=user_id)
@@ -319,6 +741,11 @@ async def get_llm_response(agent_id: str, user_message: str, history: list[dict]
         crm_context=crm_context,
     )
 
+    # Adicionar instruções de ferramentas se o agente tem tools
+    agent_tool_names = AGENT_AVAILABLE_TOOLS.get(agent_id, [])
+    if agent_tool_names:
+        system_prompt += _TOOLS_ADDENDUM
+
     messages: list[dict] = [
         {"role": "system", "content": system_prompt}
     ]
@@ -332,6 +759,17 @@ async def get_llm_response(agent_id: str, user_message: str, history: list[dict]
 
     # Adicionar mensagem atual
     messages.append({"role": "user", "content": user_message})
+
+    # ── Tentar com function calling (permite ações reais) ─────────
+    if agent_tool_names:
+        tool_response = _call_with_tools(messages, agent_id, user_id)
+        if tool_response:
+            return tool_response
+
+    # ── Fallback: chamada sem ferramentas ─────────────────────────
+    client = get_openai_client()
+    if not client:
+        return ""
 
     try:
         response = client.chat_completion(

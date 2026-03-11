@@ -17,6 +17,44 @@ router = APIRouter(prefix="/api/crm", tags=["crm"])
 automation_router = APIRouter(prefix="/api/automation", tags=["automation"])
 
 
+# ============================================================================
+# PUB/SUB HELPER — Dispara eventos automaticamente no Agent Hub
+# ============================================================================
+
+def _fire_hub_event(event_name: str, payload: dict) -> None:
+    """Dispara evento no Agent Hub (fire-and-forget, non-blocking).
+    CRITICAL FIX #2: Pub/Sub é disparado automaticamente após ações CRM REST."""
+    try:
+        from agents.agent_hub import hub, EventType, AgentType, AgentMessage
+        import asyncio
+
+        _event_map = {
+            "CLIENTE_CRIADO": (EventType.CLIENTE_CRIADO, AgentType.CLIENTES),
+            "CLIENTE_ATUALIZADO": (EventType.CLIENTE_ATUALIZADO, AgentType.CLIENTES),
+            "COMPROMISSO_CRIADO": (EventType.COMPROMISSO_CRIADO, AgentType.AGENDA),
+            "PAGAMENTO_RECEBIDO": (EventType.PAGAMENTO_RECEBIDO, AgentType.CONTABILIDADE),
+            "NF_EMITIDA": (EventType.NF_EMITIDA, AgentType.CONTABILIDADE),
+        }
+        if event_name not in _event_map:
+            return
+        event_type, from_agent = _event_map[event_name]
+        msg = AgentMessage(
+            from_agent=from_agent,
+            to_agent=None,
+            event_type=event_type,
+            payload=payload,
+            priority=5,
+        )
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(hub.publish(msg))
+        except RuntimeError:
+            pass
+        logger.debug(f"📡 Hub event {event_name} dispatched via REST")
+    except Exception as e:
+        logger.debug(f"Hub event skipped: {e}")
+
+
 # Import auth dependency
 def _get_current_user_dep():
     from app.api.auth import get_current_user
@@ -135,6 +173,9 @@ async def create_client(data: ClientCreate, user: dict = Depends(_get_current_us
         segment=data.segment, source=data.source,
         tags=data.tags, notes=data.notes,
     )
+    # Pub/Sub: notifica hub sobre novo cliente
+    if result.get("status") == "created":
+        _fire_hub_event("CLIENTE_CRIADO", result.get("client", {}))
     return result
 
 
@@ -176,7 +217,10 @@ async def get_client(client_id: int, user: dict = Depends(_get_current_user_dep(
 async def update_client(client_id: int, data: ClientUpdate, user: dict = Depends(_get_current_user_dep())):
     from database.crm_service import CRMService
     fields = {k: v for k, v in data.model_dump().items() if v is not None}
-    return CRMService.update_client(client_id, user_id=_user_id_from(user), **fields)
+    result = CRMService.update_client(client_id, user_id=_user_id_from(user), **fields)
+    if result.get("status") == "updated":
+        _fire_hub_event("CLIENTE_ATUALIZADO", {"client_id": client_id, **fields})
+    return result
 
 
 @router.delete("/clients/{client_id}")
@@ -245,11 +289,14 @@ async def create_appointment(data: AppointmentCreate, user: dict = Depends(_get_
         dt = datetime.fromisoformat(data.scheduled_at)
     except ValueError:
         raise HTTPException(400, "scheduled_at deve ser formato ISO")
-    return CRMService.create_appointment(
+    result = CRMService.create_appointment(
         data.title, dt, data.client_id,
         data.description, data.duration_minutes, data.type,
         user_id=_user_id_from(user),
     )
+    if result.get("status") == "created":
+        _fire_hub_event("COMPROMISSO_CRIADO", result.get("appointment", {}))
+    return result
 
 
 @router.get("/appointments")
@@ -269,11 +316,14 @@ async def list_appointments(
 async def create_transaction(data: TransactionCreate, user: dict = Depends(_get_current_user_dep())):
     from database.crm_service import CRMService
     tx_date = date.fromisoformat(data.date) if data.date else None
-    return CRMService.record_transaction(
+    result = CRMService.record_transaction(
         data.type, data.amount, data.description,
         data.category, tx_date, data.client_id, data.notes,
         user_id=_user_id_from(user),
     )
+    if result.get("status") == "created":
+        _fire_hub_event("PAGAMENTO_RECEBIDO", result.get("transaction", {}))
+    return result
 
 
 @router.get("/financial-summary")
@@ -288,11 +338,14 @@ async def create_invoice(data: InvoiceCreate, user: dict = Depends(_get_current_
     from app.services.limit_service import check_invoice_limit
     check_invoice_limit(user)
     from database.crm_service import CRMService
-    return CRMService.create_invoice(
+    result = CRMService.create_invoice(
         data.client_id, data.description,
         data.amount, date.fromisoformat(data.due_date),
         user_id=_user_id_from(user),
     )
+    if result.get("status") == "created":
+        _fire_hub_event("NF_EMITIDA", result.get("invoice", {}))
+    return result
 
 
 @router.get("/invoices/overdue")
@@ -312,6 +365,82 @@ async def upcoming_invoices(days: int = 7, user: dict = Depends(_get_current_use
 async def crm_dashboard(user: dict = Depends(_get_current_user_dep())):
     from database.crm_service import CRMService
     return CRMService.get_crm_dashboard(user_id=_user_id_from(user))
+
+
+# ============================================================================
+# DATA EXPORT — MEDIUM FIX #14
+# ============================================================================
+
+@router.get("/export/clients")
+async def export_clients_csv(user: dict = Depends(_get_current_user_dep())):
+    """Exporta todos os clientes do usuário em formato CSV."""
+    import csv
+    import io
+    from starlette.responses import StreamingResponse
+    from database.crm_service import CRMService
+
+    uid = _user_id_from(user)
+    result = CRMService.search_clients(query="", user_id=uid, limit=10000)
+    clients = result.get("clients", []) if isinstance(result, dict) else result
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["ID", "Nome", "Telefone", "Email", "Segmento", "Ativo", "Criado em"])
+    for c in clients:
+        writer.writerow([
+            c.get("id", ""), c.get("name", ""), c.get("phone", ""),
+            c.get("email", ""), c.get("segment", ""), c.get("is_active", ""),
+            c.get("created_at", ""),
+        ])
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=clientes.csv"},
+    )
+
+
+@router.get("/export/transactions")
+async def export_transactions_csv(
+    month: int = None, year: int = None,
+    user: dict = Depends(_get_current_user_dep()),
+):
+    """Exporta transações financeiras em formato CSV."""
+    import csv
+    import io
+    from starlette.responses import StreamingResponse
+    from database.crm_service import CRMService
+    from database.models import Transaction, SessionLocal
+
+    uid = _user_id_from(user)
+    db = SessionLocal()
+    try:
+        query = db.query(Transaction).filter(Transaction.user_id == uid)
+        if month and year:
+            from datetime import date as _date
+            start = _date(year, month, 1)
+            end_month = month + 1 if month < 12 else 1
+            end_year = year if month < 12 else year + 1
+            end = _date(end_year, end_month, 1)
+            query = query.filter(Transaction.created_at >= start, Transaction.created_at < end)
+        transactions = query.order_by(Transaction.created_at.desc()).limit(5000).all()
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["ID", "Tipo", "Valor", "Descrição", "Categoria", "Data"])
+        for t in transactions:
+            writer.writerow([
+                t.id, t.type, f"{t.amount:.2f}", t.description,
+                t.category, t.created_at.isoformat() if t.created_at else "",
+            ])
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=transacoes.csv"},
+        )
+    finally:
+        db.close()
 
 
 # ============================================================================

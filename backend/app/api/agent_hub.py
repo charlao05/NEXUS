@@ -41,18 +41,32 @@ logger = logging.getLogger(__name__)
 # ============================================
 
 class CollectionsAgent:
-    """Wrapper para o módulo collections_agent"""
+    """Wrapper para cobranças — usa CRMService em vez de JSON."""
     def __init__(self):
         self.name = "collections_agent"
         self.display_name = "🔔 Cobrança Automatizada"
     
     def execute(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         action = parameters.get("action", "list_overdue")
+        user_id = parameters.get("user_id")
         try:
             if action == "list_overdue":
-                path = parameters.get("path", "data/collections.json")
-                overdue = collections_module.find_overdue(path)
-                return {"status": "ok", "overdue_count": len(overdue), "items": overdue}
+                try:
+                    from database.crm_service import CRMService
+                    overdue = CRMService.get_overdue_invoices(user_id=user_id)
+                    return {"status": "ok", "overdue_count": len(overdue), "items": overdue}
+                except Exception:
+                    # Fallback para JSON legado
+                    path = parameters.get("path", "data/collections.json")
+                    overdue = collections_module.find_overdue(path)
+                    return {"status": "ok", "overdue_count": len(overdue), "items": overdue}
+            elif action == "list_upcoming":
+                try:
+                    from database.crm_service import CRMService
+                    upcoming = CRMService.get_upcoming_invoices(days=7, user_id=user_id)
+                    return {"status": "ok", "upcoming_count": len(upcoming), "items": upcoming}
+                except Exception:
+                    return {"status": "ok", "upcoming_count": 0, "items": []}
             elif action == "generate_message":
                 invoice = parameters.get("invoice", {})
                 message = collections_module.generate_collection_message(invoice)
@@ -605,7 +619,7 @@ async def execute_agent_action(
 
 
 @router.get("/{agent_id}/status")
-async def get_agent_status(agent_id: str):
+async def get_agent_status(agent_id: str, user: dict = Depends(get_current_user)):
     """Retorna status detalhado de um agente"""
     agent_id = _resolve_agent_id(agent_id)
     hub = get_hub()

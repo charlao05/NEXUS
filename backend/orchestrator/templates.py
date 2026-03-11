@@ -145,8 +145,10 @@ TASK_TEMPLATES: dict[str, dict[str, Any]] = {
         "goal": "Acessar sistema de NFS-e da Prefeitura para emissão de nota fiscal de serviço",
         "site_config": {
             "name": "Prefeitura — NFS-e",
-            "url": "",  # Varia por cidade — será preenchido via dados do usuário
-            "domain": "",
+            "url": "https://www.gov.br/nfse/pt-br",  # Portal Nacional NFS-e (padrão ABRASF)
+            "url_fallback": "",  # URL específica da prefeitura do MEI (preenchido via dados do usuário)
+            "domain": "gov.br",
+            "note": "Se a cidade do MEI tiver sistema próprio, usar url_fallback. Caso contrário, usar o Portal Nacional NFS-e.",
         },
         "constraints": [
             "URL varia conforme cidade do MEI",

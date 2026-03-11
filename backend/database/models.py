@@ -119,8 +119,11 @@ class Base(DeclarativeBase):
 
 class UserPlan(str, enum.Enum):
     FREE = "free"
-    PRO = "pro"
-    ENTERPRISE = "enterprise"
+    ESSENCIAL = "essencial"
+    PRO = "pro"            # alias legado → essencial
+    PROFISSIONAL = "profissional"
+    COMPLETO = "completo"
+    ENTERPRISE = "enterprise"  # alias legado → completo
 
 
 class UserStatus(str, enum.Enum):

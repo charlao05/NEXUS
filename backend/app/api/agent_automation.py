@@ -38,6 +38,30 @@ except ImportError:
 # ---------------------------------------------------------------------------
 _automation_tasks: dict[str, dict[str, Any]] = {}
 
+# Rate limit para automações (por user_id)
+_automation_rate: dict[int, list[float]] = {}  # user_id -> [timestamps]
+_AUTOMATION_MAX_PER_HOUR = 10
+_AUTOMATION_WINDOW_SECONDS = 3600
+
+
+def _check_automation_rate_limit(user_id: int) -> None:
+    """Verifica rate limit de automações por usuário. Máx 10/hora."""
+    import time
+    now = time.time()
+    window = now - _AUTOMATION_WINDOW_SECONDS
+    timestamps = _automation_rate.get(user_id, [])
+    timestamps = [t for t in timestamps if t > window]
+    if len(timestamps) >= _AUTOMATION_MAX_PER_HOUR:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "AUTOMATION_RATE_LIMIT",
+                "message": f"Limite de {_AUTOMATION_MAX_PER_HOUR} automações por hora atingido. Tente novamente em alguns minutos.",
+            },
+        )
+    timestamps.append(now)
+    _automation_rate[user_id] = timestamps
+
 
 # ---------------------------------------------------------------------------
 # Schemas
@@ -574,6 +598,9 @@ async def _start_automation_core(
     user_id: int,
 ) -> AutomationStartResponse:
     """Core logic para iniciar automação — chamável tanto pelo endpoint quanto por agent_hub."""
+    # Rate limit: máximo 10 automações/hora por usuário
+    _check_automation_rate_limit(user_id)
+
     task_id = f"auto_{uuid.uuid4().hex[:12]}"
 
     # Detectar site/serviço
