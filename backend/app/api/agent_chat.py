@@ -223,6 +223,8 @@ O QUE VOCÊ FAZ:
 - Sugerir o que fazer de mais importante
 - Avisar sobre prazos e pendências
 - Responder dúvidas gerais sobre o negócio
+- Listar e buscar clientes (use a ferramenta search_clients)
+- Cadastrar clientes novos (use a ferramenta create_client)
 
 AUTOMAÇÃO WEB (IMPORTANTE — leia com atenção):
 O sistema NEXUS possui automação web integrada com Playwright.
@@ -366,11 +368,11 @@ CRM_TOOLS_DEFINITIONS: list[dict] = [
         "type": "function",
         "function": {
             "name": "search_clients",
-            "description": "Busca clientes pelo nome, telefone ou email. Use para procurar ou listar clientes.",
+            "description": "Busca clientes pelo nome, telefone ou email. Use SEMPRE que o usuário perguntar sobre clientes: listar todos, buscar por nome, ver quem tem cadastrado. Para listar TODOS, use query vazio ('').",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Texto para buscar (nome, telefone ou email)"},
+                    "query": {"type": "string", "description": "Texto para buscar (nome, telefone ou email). Use '' (vazio) para listar todos os clientes."},
                 },
                 "required": ["query"],
             },
@@ -409,13 +411,22 @@ AGENT_AVAILABLE_TOOLS: dict[str, list[str]] = {
 _TOOLS_ADDENDUM = """
 
 FERRAMENTAS DISPONÍVEIS (IMPORTANTE):
-Você tem ferramentas que executam ações REAIS no sistema (cadastrar cliente, agendar compromisso, registrar transação, etc.).
-Quando o usuário pedir para FAZER algo (cadastrar, agendar, registrar, anotar, criar):
+Você tem ferramentas que executam ações REAIS no sistema.
+
+Para CONSULTAR dados (listar, buscar, ver, mostrar clientes, procurar):
+- USE a ferramenta search_clients para listar ou buscar clientes
+- Com query="" (vazio) para listar TODOS os clientes
+- Com query="nome" para buscar um específico
+- SEMPRE use a ferramenta ao invés de responder com base apenas no resumo do sistema
+
+Para AÇÕES (cadastrar, agendar, registrar, anotar, criar):
 1. USE as ferramentas disponíveis para executar a ação de verdade
 2. NUNCA diga que fez algo sem usar a ferramenta — as ferramentas são a ÚNICA forma de executar ações
 3. Se a ferramenta retornar erro, informe o usuário
 4. Se faltar informação obrigatória (como nome do cliente), PERGUNTE antes de usar a ferramenta
-5. Após executar, confirme com os dados reais retornados pela ferramenta"""
+5. Após executar, confirme com os dados reais retornados pela ferramenta
+
+REGRA: Quando o usuário perguntar sobre clientes (quem são, quantos, nomes, buscar), SEMPRE use search_clients."""
 
 
 def _get_agent_tools(agent_id: str) -> list[dict]:
@@ -924,6 +935,16 @@ def _get_crm_context(user_id: int | None = None) -> str:
 
         if total_cl > 0:
             lines.append(f"👥 Você tem {total_cl} cliente(s) ({active_cl} ativo(s))")
+            # Incluir nomes dos clientes no contexto para o LLM
+            try:
+                from database.crm_service import CRMService as _CRM2
+                _search = _CRM2.search_clients(query="", user_id=user_id, limit=10)
+                _cl_list = _search.get("clients", [])
+                if _cl_list:
+                    _cl_names = [f"  - {c.get('name', '?')} | {c.get('phone', 'sem tel')} | {'Ativo' if c.get('is_active') else 'Inativo'}" for c in _cl_list[:10]]
+                    lines.append("Lista de clientes:\n" + "\n".join(_cl_names))
+            except Exception:
+                pass
             need_fu = clients_info.get("need_followup", 0)
             if need_fu > 0:
                 lines.append(f"⚠️ {need_fu} cliente(s) sem contato há mais de 7 dias")
