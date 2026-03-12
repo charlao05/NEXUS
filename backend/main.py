@@ -58,15 +58,19 @@ if not (backend_dir.parent / 'backend').exists():
     sys.modules['backend'] = _backend_mod
 
 # Carregar variáveis de ambiente (.env) — .env.local tem prioridade (carrega por último)
-dotenv_paths = [
-    backend_dir / '.env',                 # backend/.env (base)
-    backend_dir.parent / '.env',          # NEXUS/.env (base)
-    backend_dir / '.env.local',           # backend/.env.local (override local)
-    backend_dir.parent / '.env.local',    # NEXUS/.env.local (override principal)
-]
-for dotenv_path in dotenv_paths:
-    if dotenv_path.exists():
-        load_dotenv(dotenv_path, override=True)
+# Em testes (NEXUS_SKIP_DOTENV=1), pular load_dotenv para não sobrescrever env vars de teste.
+if not os.getenv("NEXUS_SKIP_DOTENV"):
+    dotenv_paths = [
+        backend_dir / '.env',                 # backend/.env (base)
+        backend_dir.parent / '.env',          # NEXUS/.env (base)
+        backend_dir / '.env.local',           # backend/.env.local (override local)
+        backend_dir.parent / '.env.local',    # NEXUS/.env.local (override principal)
+    ]
+    for dotenv_path in dotenv_paths:
+        if dotenv_path.exists():
+            load_dotenv(dotenv_path, override=True)
+else:
+    logging.info("⏭️ NEXUS_SKIP_DOTENV=1 — load_dotenv ignorado (modo teste)")
 
 # Verificar se OPENAI_API_KEY está disponível
 _oai_key = os.getenv("OPENAI_API_KEY", "")

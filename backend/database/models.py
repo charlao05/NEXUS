@@ -14,6 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import (
     DeclarativeBase, relationship, Session, sessionmaker
 )
+from sqlalchemy.pool import StaticPool
 from pathlib import Path
 import enum
 import os
@@ -66,11 +67,18 @@ if DATABASE_URL:
         logger.info("✅ Database: PostgreSQL (produção)")
     else:
         # Outra URL SQL (ex: sqlite absoluto, mysql, etc)
+        _is_memory = ":memory:" in DATABASE_URL
+        _extra_kw: dict = {}
+        if _is_memory:
+            # :memory: precisa de StaticPool para compartilhar o banco entre threads
+            _extra_kw = {"poolclass": StaticPool, "pool_pre_ping": False}
+        else:
+            _extra_kw = {"pool_pre_ping": True}
         engine = create_engine(
             DATABASE_URL,
             echo=False,
-            pool_pre_ping=True,
             connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+            **_extra_kw,
         )
         logger.info(f"✅ Database: {DATABASE_URL.split('://')[0]}")
 else:
