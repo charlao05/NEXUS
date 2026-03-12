@@ -637,6 +637,96 @@ class WebTask(Base):
 
 
 # ============================================================================
+# MODELOS DE INVENTÁRIO / ESTOQUE
+# ============================================================================
+
+class Product(Base):
+    """Produto ou material — funciona para comércio, serviço e indústria"""
+    __tablename__ = "products"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(200), nullable=False, index=True)
+    sku = Column(String(50), nullable=True)           # código do produto
+    category = Column(String(100), nullable=True)     # categoria livre
+    unit = Column(String(20), default="un")           # un, kg, lt, m, cx
+    cost_price = Column(Float, default=0.0)           # preço de custo
+    sale_price = Column(Float, default=0.0)           # preço de venda
+    current_stock = Column(Float, default=0.0)        # saldo atual
+    min_stock = Column(Float, default=0.0)            # estoque mínimo (alerta)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    # Relacionamento
+    movements = relationship("StockMovement", back_populates="product", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_products_user", "user_id"),
+        Index("ix_products_category", "category"),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "name": self.name,
+            "sku": self.sku,
+            "category": self.category,
+            "unit": self.unit,
+            "cost_price": self.cost_price,
+            "sale_price": self.sale_price,
+            "current_stock": self.current_stock,
+            "min_stock": self.min_stock,
+            "is_active": self.is_active,
+            "needs_reorder": self.current_stock <= self.min_stock and self.min_stock > 0,
+            "stock_value": round(self.current_stock * self.cost_price, 2),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class StockMovement(Base):
+    """Movimentação de estoque — entrada ou saída"""
+    __tablename__ = "stock_movements"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    type = Column(String(10), nullable=False)   # "entrada" ou "saida"
+    quantity = Column(Float, nullable=False)
+    unit_price = Column(Float, default=0.0)     # preço unitário na movimentação
+    total_value = Column(Float, default=0.0)    # quantity * unit_price
+    reason = Column(String(200), nullable=True) # venda, compra, ajuste, uso, perda
+    notes = Column(Text, nullable=True)
+    reference_id = Column(String(100), nullable=True)  # id de invoice ou pedido
+    created_at = Column(DateTime, default=_utcnow)
+
+    product = relationship("Product", back_populates="movements")
+
+    __table_args__ = (
+        Index("ix_stock_movements_user", "user_id"),
+        Index("ix_stock_movements_product", "product_id"),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "product_id": self.product_id,
+            "product_name": self.product.name if self.product else None,
+            "type": self.type,
+            "quantity": self.quantity,
+            "unit_price": self.unit_price,
+            "total_value": self.total_value,
+            "reason": self.reason,
+            "notes": self.notes,
+            "reference_id": self.reference_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+# ============================================================================
 # INICIALIZAÇÃO
 # ============================================================================
 

@@ -737,3 +737,92 @@ class CRMService:
             return result
         finally:
             session.close()
+
+    # ========================================================================
+    # FLUXO DE CAIXA — Visão diária / semanal / range
+    # ========================================================================
+
+    @staticmethod
+    def get_financial_summary_by_range(
+        start_date, end_date, user_id: int = None
+    ) -> dict:
+        """Resumo financeiro para qualquer range de datas.
+        start_date/end_date: objetos date ou string ISO (YYYY-MM-DD).
+        Retorna receitas, despesas, saldo, agrupamento diário e melhor dia.
+        """
+        from datetime import date as date_type
+
+        session = get_session()
+        try:
+            # Normaliza strings para date
+            if isinstance(start_date, str):
+                start_date = date_type.fromisoformat(start_date)
+            if isinstance(end_date, str):
+                end_date = date_type.fromisoformat(end_date)
+
+            # Transaction.date é Column(Date), então comparamos date com date
+            q = session.query(Transaction).filter(
+                Transaction.date >= start_date,
+                Transaction.date <= end_date,
+            )
+            if user_id:
+                q = q.filter(Transaction.user_id == user_id)
+
+            txs = q.all()
+
+            receitas = sum(t.amount for t in txs if t.type == "receita")
+            despesas = sum(t.amount for t in txs if t.type == "despesa")
+
+            # Agrupamento por dia — Transaction.date é date (não datetime)
+            by_day: dict = {}
+            for t in txs:
+                if t.date is None:
+                    day_key = "sem_data"
+                elif hasattr(t.date, "date") and callable(t.date.date):
+                    day_key = t.date.date().isoformat()
+                else:
+                    day_key = t.date.isoformat()
+                if day_key not in by_day:
+                    by_day[day_key] = {"receitas": 0.0, "despesas": 0.0, "saldo": 0.0, "count": 0}
+                if t.type == "receita":
+                    by_day[day_key]["receitas"] += t.amount
+                else:
+                    by_day[day_key]["despesas"] += t.amount
+                by_day[day_key]["count"] += 1
+
+            for day in by_day.values():
+                day["saldo"] = round(day["receitas"] - day["despesas"], 2)
+                day["receitas"] = round(day["receitas"], 2)
+                day["despesas"] = round(day["despesas"], 2)
+
+            # Melhor dia por receita
+            best_day = max(by_day.items(), key=lambda x: x[1]["receitas"]) if by_day else None
+
+            return {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "receitas": round(receitas, 2),
+                "despesas": round(despesas, 2),
+                "saldo": round(receitas - despesas, 2),
+                "transactions_count": len(txs),
+                "by_day": by_day,
+                "best_day": {
+                    "date": best_day[0],
+                    "receitas": best_day[1]["receitas"],
+                } if best_day else None,
+            }
+        finally:
+            session.close()
+
+    @staticmethod
+    def get_daily_summary(user_id: int = None) -> dict:
+        """Atalho: resumo financeiro do dia atual."""
+        today = date.today()
+        return CRMService.get_financial_summary_by_range(today, today, user_id=user_id)
+
+    @staticmethod
+    def get_weekly_summary(user_id: int = None) -> dict:
+        """Atalho: resumo da semana atual (segunda-feira até hoje)."""
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())
+        return CRMService.get_financial_summary_by_range(week_start, today, user_id=user_id)

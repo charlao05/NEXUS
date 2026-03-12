@@ -332,6 +332,38 @@ async def financial_summary(month: int = None, year: int = None, user: dict = De
     return CRMService.get_financial_summary(month, year, user_id=_user_id_from(user))
 
 
+@router.get("/financial-summary/today")
+async def financial_summary_today(user: dict = Depends(_get_current_user_dep())):
+    """Fluxo de caixa do dia atual."""
+    from database.crm_service import CRMService
+    return CRMService.get_daily_summary(user_id=_user_id_from(user))
+
+
+@router.get("/financial-summary/week")
+async def financial_summary_week(user: dict = Depends(_get_current_user_dep())):
+    """Fluxo de caixa da semana atual (segunda a hoje)."""
+    from database.crm_service import CRMService
+    return CRMService.get_weekly_summary(user_id=_user_id_from(user))
+
+
+@router.get("/financial-summary/range")
+async def financial_summary_range(
+    start: str = Query(..., description="Data início ISO (YYYY-MM-DD)"),
+    end: str = Query(..., description="Data fim ISO (YYYY-MM-DD)"),
+    user: dict = Depends(_get_current_user_dep()),
+):
+    """Fluxo de caixa por período personalizado."""
+    from database.crm_service import CRMService
+    try:
+        start_d = date.fromisoformat(start)
+        end_d = date.fromisoformat(end)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Formato de data inválido. Use YYYY-MM-DD")
+    if start_d > end_d:
+        raise HTTPException(status_code=400, detail="start deve ser <= end")
+    return CRMService.get_financial_summary_by_range(start_d, end_d, user_id=_user_id_from(user))
+
+
 # Cobranças
 @router.post("/invoices")
 async def create_invoice(data: InvoiceCreate, user: dict = Depends(_get_current_user_dep())):

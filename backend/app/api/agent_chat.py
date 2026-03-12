@@ -397,15 +397,108 @@ CRM_TOOLS_DEFINITIONS: list[dict] = [
             },
         },
     },
+    # ── Ferramentas de Fluxo de Caixa ──
+    {
+        "type": "function",
+        "function": {
+            "name": "get_daily_cashflow",
+            "description": "Use SEMPRE que o usuário perguntar sobre hoje: 'quanto entrou hoje', 'quanto saiu hoje', 'saldo do dia', 'como foi hoje'. Retorna entradas, saídas e saldo do dia atual.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weekly_cashflow",
+            "description": "Use quando o usuário perguntar sobre a semana: 'como foi essa semana', 'total da semana', 'melhor dia da semana', 'quanto entrei essa semana'.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_cashflow_by_range",
+            "description": "Use quando o usuário especificar um período personalizado: 'últimos 15 dias', 'de segunda a sexta', 'entre dia X e Y'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string", "description": "Data início ISO: YYYY-MM-DD"},
+                    "end_date": {"type": "string", "description": "Data fim ISO: YYYY-MM-DD"},
+                },
+                "required": ["start_date", "end_date"],
+            },
+        },
+    },
+    # ── Ferramentas de Estoque / Inventário ──
+    {
+        "type": "function",
+        "function": {
+            "name": "get_stock_summary",
+            "description": "Retorna resumo do estoque: total de produtos, valor total, alertas de estoque baixo, movimentações do dia e da semana. Use quando o usuário perguntar sobre estoque, inventário, produtos em estoque.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_products",
+            "description": "Busca produtos no estoque por nome, SKU ou categoria. Use '' para listar todos. Use quando perguntar sobre produtos, estoque de itens, listar produtos.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Texto para buscar (nome, SKU ou categoria). Use '' para listar todos."},
+                    "low_stock": {"type": "boolean", "description": "Se true, retorna apenas produtos abaixo do estoque mínimo"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "register_stock_entry",
+            "description": "Registra entrada de estoque (compra, produção, devolução). Use quando o usuário disser que comprou, recebeu ou entrou mercadoria.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product_id": {"type": "integer", "description": "ID do produto"},
+                    "quantity": {"type": "number", "description": "Quantidade que entrou"},
+                    "unit_price": {"type": "number", "description": "Preço unitário de compra"},
+                    "reason": {"type": "string", "description": "Motivo: compra, producao, devolucao, ajuste"},
+                    "notes": {"type": "string", "description": "Observações"},
+                },
+                "required": ["product_id", "quantity"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "register_stock_exit",
+            "description": "Registra saída de estoque (venda, uso, perda). Use quando o usuário disser que vendeu, usou ou saiu mercadoria.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product_id": {"type": "integer", "description": "ID do produto"},
+                    "quantity": {"type": "number", "description": "Quantidade que saiu"},
+                    "unit_price": {"type": "number", "description": "Preço de venda unitário"},
+                    "reason": {"type": "string", "description": "Motivo: venda, uso, perda, ajuste"},
+                    "notes": {"type": "string", "description": "Observações"},
+                },
+                "required": ["product_id", "quantity"],
+            },
+        },
+    },
 ]
 
 # Ferramentas disponíveis por agente
 AGENT_AVAILABLE_TOOLS: dict[str, list[str]] = {
-    "clientes": ["create_client", "search_clients", "update_client", "create_appointment"],
+    "clientes": ["create_client", "search_clients", "update_client", "create_appointment", "search_products", "get_stock_summary"],
     "agenda": ["create_appointment", "create_client"],
-    "contabilidade": ["record_transaction", "create_client", "create_invoice"],
+    "contabilidade": ["record_transaction", "create_client", "create_invoice", "get_stock_summary", "get_daily_cashflow", "get_weekly_cashflow", "get_cashflow_by_range"],
+    "financeiro": ["record_transaction", "get_daily_cashflow", "get_weekly_cashflow", "get_cashflow_by_range", "get_stock_summary"],
     "cobranca": ["search_clients", "create_invoice"],
-    "assistente": ["create_client", "create_appointment", "record_transaction", "create_invoice", "search_clients", "update_client"],
+    "assistente": ["create_client", "create_appointment", "record_transaction", "create_invoice", "search_clients", "update_client", "get_stock_summary", "search_products", "register_stock_entry", "register_stock_exit", "get_daily_cashflow", "get_weekly_cashflow", "get_cashflow_by_range"],
 }
 
 _TOOLS_ADDENDUM = """
@@ -426,7 +519,20 @@ Para AÇÕES (cadastrar, agendar, registrar, anotar, criar):
 4. Se faltar informação obrigatória (como nome do cliente), PERGUNTE antes de usar a ferramenta
 5. Após executar, confirme com os dados reais retornados pela ferramenta
 
-REGRA: Quando o usuário perguntar sobre clientes (quem são, quantos, nomes, buscar), SEMPRE use search_clients."""
+REGRA: Quando o usuário perguntar sobre clientes (quem são, quantos, nomes, buscar), SEMPRE use search_clients.
+
+Para ESTOQUE/INVENTÁRIO (produtos, mercadoria, material, quantidade):
+- get_stock_summary: resumo geral do estoque (valor, alertas, movimentações)
+- search_products: buscar ou listar produtos no estoque
+- register_stock_entry: registrar compra/entrada de mercadoria
+- register_stock_exit: registrar venda/saída de mercadoria
+REGRA: Quando o usuário perguntar sobre estoque, produtos ou inventário, use as ferramentas de estoque.
+
+Para FLUXO DE CAIXA (quanto entrou/saiu hoje, essa semana, período):
+- get_daily_cashflow: entradas, saídas e saldo do dia atual
+- get_weekly_cashflow: resumo da semana (segunda a hoje) + melhor dia
+- get_cashflow_by_range: período personalizado com agrupamento diário
+REGRA: Quando o usuário perguntar sobre entradas/saídas de dinheiro hoje ou na semana, use as ferramentas de cashflow."""
 
 
 def _get_agent_tools(agent_id: str) -> list[dict]:
@@ -593,6 +699,71 @@ def _execute_crm_tool(tool_name: str, arguments: dict, user_id: int | None) -> d
             if result.get("status") == "updated":
                 _notify_hub_event("CLIENTE_ATUALIZADO", {"client_id": cid, **allowed})
                 _log_activity(user_id, "update_client", f"Cliente #{cid} atualizado via chat")
+            return result
+
+        # ── Ferramentas de Fluxo de Caixa ──
+        elif tool_name == "get_daily_cashflow":
+            result = CRMService.get_daily_summary(user_id=user_id)
+            _log_activity(user_id, "daily_cashflow", "Consultou fluxo de caixa do dia via chat")
+            return result
+
+        elif tool_name == "get_weekly_cashflow":
+            result = CRMService.get_weekly_summary(user_id=user_id)
+            _log_activity(user_id, "weekly_cashflow", "Consultou fluxo de caixa da semana via chat")
+            return result
+
+        elif tool_name == "get_cashflow_by_range":
+            from datetime import date as _date
+            start_str = arguments.get("start_date", "")
+            end_str = arguments.get("end_date", "")
+            try:
+                s = _date.fromisoformat(start_str)
+                e = _date.fromisoformat(end_str)
+            except (ValueError, TypeError):
+                return {"status": "error", "message": "Datas inválidas. Use formato YYYY-MM-DD"}
+            result = CRMService.get_financial_summary_by_range(s, e, user_id=user_id)
+            _log_activity(user_id, "range_cashflow", f"Consultou fluxo de caixa {start_str} a {end_str} via chat")
+            return result
+
+        # ── Ferramentas de Estoque / Inventário ──
+        elif tool_name == "get_stock_summary":
+            from database.inventory_service import InventoryService
+            return InventoryService.get_stock_summary(user_id)
+
+        elif tool_name == "search_products":
+            from database.inventory_service import InventoryService
+            return InventoryService.get_products(
+                user_id=user_id,
+                search=arguments.get("query", ""),
+                low_stock_only=arguments.get("low_stock", False),
+            )
+
+        elif tool_name == "register_stock_entry":
+            from database.inventory_service import InventoryService
+            result = InventoryService.register_entry(
+                user_id=user_id,
+                product_id=arguments.get("product_id", 0),
+                quantity=arguments.get("quantity", 0),
+                unit_price=arguments.get("unit_price"),
+                reason=arguments.get("reason", "compra"),
+                notes=arguments.get("notes"),
+            )
+            if result.get("status") == "created":
+                _log_activity(user_id, "stock_entry", f"Entrada de {arguments.get('quantity', 0)} unidades do produto #{arguments.get('product_id')} via chat")
+            return result
+
+        elif tool_name == "register_stock_exit":
+            from database.inventory_service import InventoryService
+            result = InventoryService.register_exit(
+                user_id=user_id,
+                product_id=arguments.get("product_id", 0),
+                quantity=arguments.get("quantity", 0),
+                unit_price=arguments.get("unit_price"),
+                reason=arguments.get("reason", "venda"),
+                notes=arguments.get("notes"),
+            )
+            if result.get("status") == "created":
+                _log_activity(user_id, "stock_exit", f"Saída de {arguments.get('quantity', 0)} unidades do produto #{arguments.get('product_id')} via chat")
             return result
 
         return {"status": "error", "message": f"Ferramenta desconhecida: {tool_name}"}
@@ -980,10 +1151,58 @@ def _get_crm_context(user_id: int | None = None) -> str:
         if receitas > 0 or despesas > 0:
             lines.append(f"💵 Este mês: Entrou R$ {receitas:,.2f} | Saiu R$ {despesas:,.2f} | Sobrou R$ {lucro:,.2f}")
 
+        # Fluxo de caixa do dia
+        try:
+            daily = CRMService.get_daily_summary(user_id=user_id)
+            if daily["transactions_count"] > 0:
+                lines.append(
+                    f"💵 Hoje: Entrou R$ {daily['receitas']:,.2f} | "
+                    f"Saiu R$ {daily['despesas']:,.2f} | "
+                    f"Saldo R$ {daily['saldo']:,.2f}"
+                )
+            else:
+                lines.append("💵 Hoje: nenhuma transação registrada ainda")
+        except Exception:
+            pass
+
+        # Fluxo de caixa da semana
+        try:
+            weekly = CRMService.get_weekly_summary(user_id=user_id)
+            if weekly["transactions_count"] > 0:
+                lines.append(
+                    f"📅 Esta semana: Entrou R$ {weekly['receitas']:,.2f} | "
+                    f"Saiu R$ {weekly['despesas']:,.2f}"
+                )
+                if weekly["best_day"]:
+                    lines.append(
+                        f"🏆 Melhor dia: {weekly['best_day']['date']} "
+                        f"(R$ {weekly['best_day']['receitas']:,.2f})"
+                    )
+        except Exception:
+            pass
+
         # Agendamentos hoje
         appts_today = dashboard.get("appointments_today", 0)
         if appts_today > 0:
             lines.append(f"📆 {appts_today} compromisso(s) pra hoje")
+
+        # Estoque / Inventário
+        try:
+            from database.inventory_service import InventoryService
+            stock = InventoryService.get_stock_summary(user_id)
+            total_prods = stock.get("total_products", 0)
+            if total_prods > 0:
+                stock_val = stock.get("total_stock_value", 0)
+                lines.append(f"📦 Estoque: {total_prods} produto(s) | Valor total: R$ {stock_val:,.2f}")
+                alerts = stock.get("low_stock_alerts", [])
+                if alerts:
+                    alert_names = [a.get("name", "?") for a in alerts[:3]]
+                    lines.append(f"⚠️ Estoque baixo ({len(alerts)}): {', '.join(alert_names)}")
+                mov_today = stock.get("movements_today", {})
+                if mov_today.get("total", 0) > 0:
+                    lines.append(f"📊 Movimentações hoje: {mov_today.get('entradas', 0)} entrada(s), {mov_today.get('saidas', 0)} saída(s)")
+        except Exception:
+            pass
 
         return "\n".join(lines) if lines else "Sem dados cadastrados ainda."
 

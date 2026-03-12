@@ -324,6 +324,14 @@ try:
 except ImportError as e:
     logging.warning(f"Não foi possível importar gov_integrations routes: {e}")
 
+# Importar rotas de Inventário / Estoque
+try:
+    from app.api.inventory_routes import router as inventory_router  # type: ignore[import]
+    app.include_router(inventory_router)  # type: ignore[arg-type]
+    logging.info("✅ Rotas de Inventário/Estoque carregadas")
+except ImportError as e:
+    logging.warning(f"Não foi possível importar inventory routes: {e}")
+
 # Pré-carregar módulo de inteligência dos agentes (OpenAI GPT-4.1)
 try:
     from app.api.agent_chat import get_llm_response  # type: ignore[import]  # noqa: F401
