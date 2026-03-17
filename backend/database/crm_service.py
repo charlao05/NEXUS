@@ -43,8 +43,9 @@ class CRMService:
         source: str = "manual",
         tags: list = None,
         notes: str = "",
+        contact_type: str = "client",
     ) -> dict:
-        """Cria cliente com validação e deduplicação (filtrado por user_id)"""
+        """Cria cliente ou fornecedor com validação e deduplicação (filtrado por user_id)"""
         session = get_session()
         try:
             # Deduplicação por telefone ou CPF/CNPJ DENTRO do mesmo tenant
@@ -68,6 +69,7 @@ class CRMService:
                 cpf_cnpj=cpf_cnpj, birth_date=birth_date, address=address,
                 city=city, state=state, segment=segment, source=source,
                 tags=tags or [], notes=notes,
+                contact_type=contact_type or "client",
                 last_interaction=datetime.now(timezone.utc),
             )
             session.add(client)
@@ -608,15 +610,16 @@ class CRMService:
         type: str, amount: float, description: str,
         category: str = "geral", transaction_date: date = None,
         client_id: int = None, notes: str = "",
-        user_id: int = None,
+        user_id: int = None, payment_method: str = "nao_informado",
     ) -> dict:
-        """Registra receita ou despesa (com user_id)"""
+        """Registra receita ou despesa (com user_id e forma de pagamento)"""
         session = get_session()
         try:
             tx = Transaction(
                 type=type, amount=amount, description=description,
                 category=category, date=transaction_date or date.today(),
                 client_id=client_id, notes=notes, user_id=user_id,
+                payment_method=payment_method or "nao_informado",
             )
             session.add(tx)
             session.commit()
@@ -826,3 +829,75 @@ class CRMService:
         today = date.today()
         week_start = today - timedelta(days=today.weekday())
         return CRMService.get_financial_summary_by_range(week_start, today, user_id=user_id)
+
+    # ========================================================================
+    # BREAKDOWN POR FORMA DE PAGAMENTO
+    # ========================================================================
+
+    _PAYMENT_METHOD_LABELS = {
+        "pix": "PIX",
+        "dinheiro": "Dinheiro",
+        "cartao_debito": "Cartão de Débito",
+        "cartao_credito": "Cartão de Crédito",
+        "credito_proprio": "Crédito Próprio / Crediário",
+        "fiado": "Fiado",
+        "boleto": "Boleto",
+        "transferencia": "Transferência Bancária",
+        "parcelado": "Parcelado",
+        "entrada_parcelado": "Entrada + Parcelado",
+        "cheque": "Cheque",
+        "nao_informado": "Não informado",
+    }
+
+    @staticmethod
+    def get_payment_breakdown(
+        start_date=None, end_date=None, user_id: int = None,
+    ) -> dict:
+        """Breakdown de transações por forma de pagamento.
+        Retorna receitas agrupadas por payment_method para o período.
+        """
+        session = get_session()
+        try:
+            today = date.today()
+            if start_date is None:
+                start_date = date(today.year, today.month, 1)
+            if end_date is None:
+                end_date = today
+            if isinstance(start_date, str):
+                start_date = date.fromisoformat(start_date)
+            if isinstance(end_date, str):
+                end_date = date.fromisoformat(end_date)
+
+            q = session.query(Transaction).filter(
+                Transaction.date >= start_date,
+                Transaction.date <= end_date,
+                Transaction.type == "receita",
+            )
+            if user_id:
+                q = q.filter(Transaction.user_id == user_id)
+
+            txs = q.all()
+            by_method: dict = {}
+            total = 0.0
+            for t in txs:
+                method = getattr(t, "payment_method", None) or "nao_informado"
+                label = CRMService._PAYMENT_METHOD_LABELS.get(method, method)
+                if label not in by_method:
+                    by_method[label] = {"total": 0.0, "count": 0}
+                by_method[label]["total"] += t.amount
+                by_method[label]["count"] += 1
+                total += t.amount
+
+            # Adicionar percentual
+            for v in by_method.values():
+                v["total"] = round(v["total"], 2)
+                v["percent"] = round(v["total"] / max(total, 0.01) * 100, 1)
+
+            return {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "total_receitas": round(total, 2),
+                "by_payment_method": by_method,
+            }
+        finally:
+            session.close()

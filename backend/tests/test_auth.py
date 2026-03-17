@@ -43,7 +43,7 @@ class TestSignup:
     def test_signup_success(self, client: TestClient):
         resp = client.post("/api/auth/signup", json={
             "email": "teste@nexus.com",
-            "password": "senha123",
+            "password": "Senha@123",
             "full_name": "Teste NEXUS",
         })
         assert resp.status_code == 201
@@ -56,7 +56,7 @@ class TestSignup:
     def test_signup_duplicate_email(self, client: TestClient):
         payload = {
             "email": "dup@nexus.com",
-            "password": "senha123",
+            "password": "Senha@123",
             "full_name": "Dup User",
         }
         resp1 = client.post("/api/auth/signup", json=payload)
@@ -78,7 +78,7 @@ class TestSignup:
     def test_signup_invalid_email(self, client: TestClient):
         resp = client.post("/api/auth/signup", json={
             "email": "not-an-email",
-            "password": "senha123",
+            "password": "Senha@123",
             "full_name": "Bad Email",
         })
         assert resp.status_code == 422  # Pydantic validation
@@ -86,7 +86,7 @@ class TestSignup:
     def test_signup_saves_to_db(self, client: TestClient):
         client.post("/api/auth/signup", json={
             "email": "db@nexus.com",
-            "password": "senha123",
+            "password": "Senha@123",
             "full_name": "DB Test",
         })
         db = SessionLocal()
@@ -95,7 +95,7 @@ class TestSignup:
         assert user is not None
         assert user.full_name == "DB Test"
         assert user.plan == "free"
-        assert user.password_hash != "senha123"  # Deve ser hash, não plaintext
+        assert user.password_hash != "Senha@123"  # Deve ser hash, não plaintext
 
 
 # ============================================================================
@@ -106,7 +106,7 @@ class TestLogin:
     def _create_user(self, client: TestClient):
         client.post("/api/auth/signup", json={
             "email": "login@nexus.com",
-            "password": "senha123",
+            "password": "Senha@123",
             "full_name": "Login User",
         })
 
@@ -114,7 +114,7 @@ class TestLogin:
         self._create_user(client)
         resp = client.post("/api/auth/login", json={
             "email": "login@nexus.com",
-            "password": "senha123",
+            "password": "Senha@123",
         })
         assert resp.status_code == 200
         data = resp.json()
@@ -141,7 +141,7 @@ class TestLogin:
         self._create_user(client)
         client.post("/api/auth/login", json={
             "email": "login@nexus.com",
-            "password": "senha123",
+            "password": "Senha@123",
         })
         db = SessionLocal()
         user = db.query(User).filter(User.email == "login@nexus.com").first()
@@ -158,7 +158,7 @@ class TestProfile:
     def _get_token(self, client: TestClient) -> str:
         resp = client.post("/api/auth/signup", json={
             "email": "me@nexus.com",
-            "password": "senha123",
+            "password": "Senha@123",
             "full_name": "Me User",
         })
         return resp.json()["access_token"]
@@ -205,13 +205,13 @@ class TestCRM:
         # Com auth, deve funcionar
         signup = client.post("/api/auth/signup", json={
             "email": "crm_dash@nexus.com",
-            "password": "senha123",
+            "password": "Senha@123",
             "full_name": "CRM Dash Test",
         })
         assert signup.status_code in (200, 201)
         login_r = client.post("/api/auth/login", json={
             "email": "crm_dash@nexus.com",
-            "password": "senha123",
+            "password": "Senha@123",
         })
         token = login_r.json()["access_token"]
         resp = client.get("/api/crm/dashboard", headers={"Authorization": f"Bearer {token}"})

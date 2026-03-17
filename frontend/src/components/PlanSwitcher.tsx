@@ -105,7 +105,7 @@ export default function PlanSwitcher({ currentPlan, isAdmin, token, isDark, onPl
           hover:opacity-90 transition-all duration-200
           ${open ? 'ring-2 ring-white/30' : ''}
         `}
-        title={isAdmin ? 'Trocar plano (admin)' : 'Ver planos'}
+        title={isAdmin ? 'Trocar plano (admin)' : 'Ver Planos'}
       >
         <span className="text-xs">{planInfo.icon}</span>
         <span>{planInfo.displayName}</span>

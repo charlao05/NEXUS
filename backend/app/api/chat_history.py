@@ -21,6 +21,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat-history"])
 analytics_router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
+# IDs de agentes válidos para cross-agent queries
+_VALID_AGENTS = {"agenda", "clientes", "contabilidade", "cobranca", "assistente"}
+
+# Aliases: o frontend usa "financeiro" mas o backend armazena como "contabilidade"
+_CHAT_AGENT_ALIAS: dict[str, str] = {
+    "financeiro": "contabilidade",
+    "documentos": "contabilidade",
+}
+
+# Mapeamento inverso para exibição no Dashboard
+_DISPLAY_AGENT_NAME: dict[str, str] = {
+    "contabilidade": "financeiro",
+}
+
+
+def _resolve_chat_agent_id(agent_id: str) -> str:
+    """Resolve aliases de agente para o ID canônico usado no banco."""
+    return _CHAT_AGENT_ALIAS.get(agent_id, agent_id)
+
 
 # ============================================================================
 # SCHEMAS
@@ -50,6 +69,44 @@ def _get_db():
 # CHAT HISTORY ENDPOINTS
 # ============================================================================
 
+
+class CrossAgentHistoryResponse(BaseModel):
+    """Resposta com histórico de todos os agentes."""
+    agents: dict[str, list[dict[str, Any]]]
+    total: int
+
+
+@router.get("/history-all", response_model=CrossAgentHistoryResponse)
+async def get_all_agents_history(
+    limit: int = Query(default=10, le=50, description="Mensagens por agente"),
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Retorna as últimas mensagens de TODOS os agentes do usuário.
+    Usado para dar contexto cross-agent (cada agente sabe o que foi discutido nos outros)."""
+    db = _get_db()
+    try:
+        agents_data: dict[str, list[dict[str, Any]]] = {}
+        total = 0
+        for agent_id in _VALID_AGENTS:
+            messages = (
+                db.query(ChatMessage)
+                .filter(
+                    ChatMessage.user_id == current_user["user_id"],
+                    ChatMessage.agent_id == agent_id,
+                )
+                .order_by(ChatMessage.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+            if messages:
+                msgs = [m.to_dict() for m in reversed(messages)]
+                agents_data[agent_id] = msgs
+                total += len(msgs)
+        return CrossAgentHistoryResponse(agents=agents_data, total=total)
+    finally:
+        db.close()
+
+
 @router.get("/history/{agent_id}", response_model=ChatHistoryResponse)
 async def get_chat_history(
     agent_id: str,
@@ -59,6 +116,8 @@ async def get_chat_history(
 ):
     """Retorna histórico de chat do usuário com um agente específico.
     Suporta paginação via limit/offset (MEDIUM FIX #16)."""
+    original_id = agent_id
+    agent_id = _resolve_chat_agent_id(agent_id)
     db = _get_db()
     try:
         # Contar total de mensagens para paginação
@@ -86,7 +145,7 @@ async def get_chat_history(
         return ChatHistoryResponse(
             messages=msgs,
             total=total,
-            agent_id=agent_id,
+            agent_id=original_id,
         )
     finally:
         db.close()
@@ -101,11 +160,12 @@ async def save_chat_message(
     if msg.role not in ("user", "assistant"):
         raise HTTPException(status_code=400, detail="role deve ser 'user' ou 'assistant'")
 
+    resolved_agent_id = _resolve_chat_agent_id(msg.agent_id)
     db = _get_db()
     try:
         chat_msg = ChatMessage(
             user_id=current_user["user_id"],
-            agent_id=msg.agent_id,
+            agent_id=resolved_agent_id,
             role=msg.role,
             content=msg.content,
         )
@@ -126,7 +186,8 @@ async def clear_chat_history(
     agent_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    """Limpa histórico de chat com um agente"""
+    """Limpa histórico de chat com um agente (SQLite + Redis)"""
+    agent_id = _resolve_chat_agent_id(agent_id)
     db = _get_db()
     try:
         deleted = (
@@ -138,6 +199,14 @@ async def clear_chat_history(
             .delete()
         )
         db.commit()
+
+        # Limpar cache Redis também
+        try:
+            from app.services.chat_context import clear_context
+            clear_context(current_user["user_id"], agent_id)
+        except Exception:
+            pass  # Redis indisponível não é bloqueante
+
         return {"cleared": True, "messages_deleted": deleted}
     finally:
         db.close()
@@ -259,7 +328,10 @@ async def analytics_dashboard(
             .group_by(ChatMessage.agent_id)
             .all()
         )
-        chat_by_agent = {row.agent_id: row.count for row in agent_chats}
+        chat_by_agent = {
+            _DISPLAY_AGENT_NAME.get(row.agent_id, row.agent_id): row.count
+            for row in agent_chats
+        }
 
         # 7) Receita por dia (últimos 30 dias) para gráfico
         thirty_days_ago = now - timedelta(days=30)

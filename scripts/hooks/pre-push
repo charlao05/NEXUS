@@ -1,0 +1,41 @@
+#!/bin/sh
+#
+# NEXUS — Git pre-push hook
+# Executa testes de segurança antes de permitir push.
+# Se falhar, o push é bloqueado.
+#
+# Instalação automática via: python scripts/install_hooks.py
+#
+
+echo ""
+echo "========================================"
+echo "  NEXUS — Validação pré-push"
+echo "========================================"
+echo ""
+
+# Detecta SO
+if [ -f ".venv/Scripts/python.exe" ]; then
+    PYTHON=".venv/Scripts/python.exe"
+else
+    PYTHON=".venv/bin/python"
+fi
+
+# Roda validação rápida (typecheck + security + secrets)
+echo "[1/1] Rodando validação rápida (--quick)..."
+$PYTHON scripts/pre_deploy_validation.py --quick
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "========================================="
+    echo "  PUSH BLOQUEADO — corrija os problemas"
+    echo "========================================="
+    echo ""
+    exit 1
+fi
+
+echo ""
+echo "========================================="
+echo "  Push aprovado!"
+echo "========================================="
+echo ""
+exit 0

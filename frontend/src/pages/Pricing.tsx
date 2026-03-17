@@ -5,8 +5,9 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createCheckout } from '../services/authService';
-import { Check, Zap, Crown, Gift, Rocket, ArrowLeft, Star } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { createCheckout, createAddonCheckout } from '../services/authService';
+import { Check, Zap, Crown, Gift, Rocket, ArrowLeft, Star, Users } from 'lucide-react';
 import axios from 'axios';
 
 interface Plan {
@@ -35,10 +36,11 @@ const plans: Plan[] = [
     features: [
       '10 mensagens/dia com IA',
       '1 agente: Fiscal (contabilidade)',
-      'Até 5 clientes no CRM',
+      'Até 5 clientes e 5 fornecedores',
       '3 notas fiscais/mês',
       'Suporte por email',
       'Sem cartão de crédito',
+      'Opção: +10 clientes/fornecedores por R$ 12,90 (compra única)',
     ],
   },
   {
@@ -51,8 +53,8 @@ const plans: Plan[] = [
     buttonText: 'Assinar Essencial',
     features: [
       '200 mensagens/dia com IA',
-      '3 agentes: Fiscal, CRM e Cobranças',
-      'Até 100 clientes no CRM',
+      '3 agentes: Fiscal, Clientes e Cobranças',
+      'Até 100 clientes e 100 fornecedores',
       'Notas fiscais ilimitadas',
       'Lembretes automáticos',
       'Suporte prioritário',
@@ -70,7 +72,7 @@ const plans: Plan[] = [
     features: [
       '1.000 mensagens/dia com IA',
       'Todos os 5 agentes de IA',
-      'Até 500 clientes no CRM',
+      'Até 500 clientes e 500 fornecedores',
       'Tudo ilimitado',
       'Automação completa',
       'Relatórios avançados',
@@ -88,23 +90,24 @@ const plans: Plan[] = [
     features: [
       'Mensagens ilimitadas',
       'Todos os agentes + futuros',
-      'Clientes ilimitados',
-      'API de integração',
-      'Webhooks personalizados',
+      'Clientes e fornecedores ilimitados',
+      'Integração com outros sistemas',
+      'Notificações automáticas personalizadas',
       'Suporte 24/7 dedicado',
       'Gerente de conta',
-      'SLA garantido 99.9%',
+      'Garantia de disponibilidade 99,9%',
     ],
   },
 ];
 
 export default function Pricing() {
   const navigate = useNavigate();
+  const { userPlan, userEmail } = useAuth();
   const [isLoading, setIsLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   
-  // Ler plano atual do usuário
-  const currentPlan = (localStorage.getItem('user_plan') || 'free').toLowerCase();
+  // Usar plano do AuthContext (validado pelo backend) em vez de localStorage
+  const currentPlan = (userPlan || 'free').toLowerCase();
   // Normalizar aliases legados
   const normalizedPlan = currentPlan === 'pro' ? 'essencial' : currentPlan === 'enterprise' ? 'completo' : currentPlan;
 
@@ -123,7 +126,7 @@ export default function Pricing() {
     setError(null);
 
     try {
-      const email = localStorage.getItem('user_email');
+      const email = userEmail || localStorage.getItem('user_email');
       console.log('📧 Email:', email);
       
       if (!email) {
@@ -179,10 +182,10 @@ export default function Pricing() {
           </div>
           
           <h2 className="text-2xl md:text-3xl font-bold text-white mb-2">
-            Escolha seu plano
+            Escolha Seu Plano
           </h2>
           <p className="text-lg text-indigo-200">
-            <span className="text-green-400 font-semibold">Plano gratuito para sempre</span> • Faça upgrade quando quiser
+            <span className="text-green-400 font-semibold">Plano Gratuito para Sempre</span> • Faça upgrade quando quiser
           </p>
         </div>
       </div>
@@ -203,7 +206,7 @@ export default function Pricing() {
             key={plan.id}
             className={`relative bg-white/10 backdrop-blur-sm rounded-2xl p-5 border flex flex-col ${
               plan.popular 
-                ? 'border-blue-400 shadow-xl shadow-blue-500/20 md:-mt-2 md:mb-2' 
+                ? 'border-blue-400 shadow-xl shadow-blue-500/20' 
                 : plan.free
                 ? 'border-green-400/50'
                 : 'border-white/20'
@@ -252,12 +255,21 @@ export default function Pricing() {
 
             {/* Features */}
             <ul className="space-y-2 mb-4 flex-grow">
-              {plan.features.map((feature, index) => (
-                <li key={index} className="flex items-start gap-2">
-                  <Check className="w-4 h-4 flex-shrink-0 mt-0.5 text-green-400" />
-                  <span className="text-indigo-100 text-sm">{feature}</span>
-                </li>
-              ))}
+              {plan.features.map((feature, index) => {
+                const isExpansionOption = feature.startsWith('Opção:');
+                return (
+                  <li key={index} className={`flex items-start gap-2 ${isExpansionOption ? 'mt-3 pt-3 border-t border-white/10' : ''}`}>
+                    {isExpansionOption ? (
+                      <Zap className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-400" />
+                    ) : (
+                      <Check className="w-4 h-4 flex-shrink-0 mt-0.5 text-green-400" />
+                    )}
+                    <span className={`text-sm ${isExpansionOption ? 'text-amber-300 font-medium' : 'text-indigo-100'}`}>
+                      {isExpansionOption ? feature.replace('Opção: ', '') : feature}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
 
             {/* CTA Button - Cores diferenciadas por plano */}
@@ -298,20 +310,82 @@ export default function Pricing() {
         ))}
       </div>
 
+      {/* Addon: Pacote Extra de Clientes */}
+      {normalizedPlan === 'free' && (
+        <div className="max-w-6xl mx-auto mt-6">
+          <div className="bg-gradient-to-r from-amber-500/10 to-orange-500/10 backdrop-blur-sm border border-amber-400/30 rounded-2xl p-5">
+            <div className="flex flex-col md:flex-row items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center flex-shrink-0">
+                <Users className="w-6 h-6 text-white" />
+              </div>
+              <div className="flex-1 text-center md:text-left">
+                <h3 className="text-white font-bold text-base">Precisa de Mais Clientes Sem Mudar de Plano?</h3>
+                <p className="text-indigo-200 text-sm mt-1">
+                  Adicione <span className="text-amber-300 font-semibold">+10 clientes e +10 fornecedores</span> ao seu plano gratuito por apenas{' '}
+                  <span className="text-amber-300 font-semibold">R$ 12,90 (compra única)</span>. Mensagens proporcionais inclusas.
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  setIsLoading('addon');
+                  setError(null);
+                  try {
+                    const email = userEmail || localStorage.getItem('user_email');
+                    if (!email) { navigate('/login'); return; }
+                    const response = await createAddonCheckout(email);
+                    if (response.checkout_url) {
+                      window.location.href = response.checkout_url;
+                    } else {
+                      setError('Erro ao criar sessão de pagamento');
+                    }
+                  } catch (err) {
+                    const detail = axios.isAxiosError(err) ? (err.response?.data?.detail || '') : '';
+                    const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+                    if (detail === 'Stripe não configurado' || status === 503) {
+                      setError('Sistema de pagamento em manutenção. Tente novamente mais tarde.');
+                    } else {
+                      setError(detail || 'Não foi possível iniciar o pagamento. Tente novamente.');
+                    }
+                  } finally {
+                    setIsLoading(null);
+                  }
+                }}
+                disabled={isLoading !== null}
+                className={`px-6 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-bold text-sm transition-all whitespace-nowrap flex items-center gap-2 ${
+                  isLoading === 'addon' ? 'opacity-70 cursor-wait' : ''
+                }`}
+              >
+                {isLoading === 'addon' ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Processando...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4" />
+                    Adicionar +10 Clientes/Fornecedores
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Trust Badges */}
       <div className="max-w-4xl mx-auto mt-8 text-center">
         <div className="flex flex-wrap justify-center gap-4 text-indigo-300 text-xs">
           <div className="flex items-center gap-1">
             <Check className="w-4 h-4 text-green-400" />
-            Pagamento seguro via Stripe
+            Pagamento Seguro via Stripe
           </div>
           <div className="flex items-center gap-1">
             <Check className="w-4 h-4 text-green-400" />
-            Cancele quando quiser
+            Cancele Quando Quiser
           </div>
           <div className="flex items-center gap-1">
             <Check className="w-4 h-4 text-green-400" />
-            Garantia de 7 dias
+            Garantia de 7 Dias
           </div>
         </div>
       </div>

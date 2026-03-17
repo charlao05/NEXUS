@@ -8,6 +8,8 @@
 
 ## Índice
 
+![Diagrama do Hub de Agentes](image.png)
+
 1. [Inventário Completo dos Agentes](#1-inventário-completo-dos-agentes)
 2. [Capacidades Individuais por Agente](#2-capacidades-individuais-por-agente)
 3. [Capacidades Integradas (Fluxos Inter-Agentes)](#3-capacidades-integradas)
@@ -43,7 +45,7 @@ Todos os agentes compartilham os mesmos endpoints sob `/api/agents`:
 | POST | `/{agent_id}/execute` | **Endpoint principal** — executa ação (chat, quick action, automação) | JWT |
 | GET | `/{agent_id}/config` | Configuração do agente | JWT |
 | PUT | `/{agent_id}/config` | Atualiza configuração | JWT |
-| GET | `/{agent_id}/status` | Status detalhado | ⚠️ Sem auth |
+| GET | `/{agent_id}/status` | Status detalhado | JWT |
 | GET | `/list` | Lista os 5 agentes | JWT |
 
 **Endpoints do Hub (inter-agentes)**:
@@ -619,7 +621,7 @@ Usar com agentes `assistente`, `contabilidade` ou `agenda`.
 |---|--------|---------|-------------------|
 | 1 | **Agentes não escrevem no banco via chat** | Quando o LLM responde "cadastrei o cliente João", o cadastro **não acontece** de fato. O LLM gera texto mas não executa `CRMService.create_client()`. | `agent_hub.py` (router) deveria parsear intenções de escrita e executar via CRMService |
 | 2 | **Pub/Sub não é disparado automaticamente** | Criar um cliente via CRM endpoint não publica `CLIENTE_CRIADO`. Os eventos só existem quando chamados manualmente via `/hub/workflow`. | `crm_routes.py` deveria chamar `hub.notify_cliente_criado()` após cada operação |
-| 3 | **Endpoint `/{agent_id}/status` sem autenticação** | Qualquer pessoa pode consultar status dos agentes sem JWT. | Adicionar `Depends(get_current_user)` |
+| 3 | ~~**Endpoint `/{agent_id}/status` sem autenticação**~~ | ✅ **RESOLVIDO** — endpoint já possui `Depends(get_current_user)`. Verificado por testes de segurança automatizados. | — |
 | 4 | **Template NFS-e sem URL** | `prefeitura_nfse` tem URL vazia — a automação web não sabe para onde navegar. | Precisa de URL por cidade ou input do usuário |
 
 ### 5.2 Lacunas ALTAS

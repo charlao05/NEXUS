@@ -69,25 +69,25 @@ export function PaymentSuccess() {
             </p>
 
             <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6 mb-8">
-              <h3 className="text-lg font-semibold text-white mb-4">O que você pode fazer agora:</h3>
+              <h3 className="text-lg font-semibold text-white mb-4">O que Você Pode Fazer Agora:</h3>
               <ul className="space-y-3 text-left">
                 <li className="flex items-start gap-3 text-slate-300">
                   <svg className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
-                  Acessar todas as APIs avançadas
+                  Acessar todas as funcionalidades avançadas
                 </li>
                 <li className="flex items-start gap-3 text-slate-300">
                   <svg className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
-                  Configurar webhooks em tempo real
+                  Configurar notificações automáticas em tempo real
                 </li>
                 <li className="flex items-start gap-3 text-slate-300">
                   <svg className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
-                  Usar limites expandidos de requisições
+                  Usar o sistema sem limitações
                 </li>
                 <li className="flex items-start gap-3 text-slate-300">
                   <svg className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -102,7 +102,7 @@ export function PaymentSuccess() {
               onClick={() => navigate('/dashboard')}
               className="w-full py-4 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-400 hover:to-emerald-400 text-white rounded-xl font-bold text-lg transition shadow-lg shadow-green-500/30"
             >
-              Ir para o Dashboard
+              Ir para o Painel
             </button>
           </div>
         )}
@@ -116,7 +116,7 @@ export function PaymentSuccess() {
             </div>
             
             <h2 className="text-3xl font-bold text-white mb-4">
-              Ops! Algo deu errado
+              Ops! Algo Deu Errado
             </h2>
             
             <p className="text-slate-300 mb-8">
@@ -128,7 +128,7 @@ export function PaymentSuccess() {
                 onClick={() => navigate('/pricing')}
                 className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-medium transition"
               >
-                Tentar novamente
+                Tentar Novamente
               </button>
               <button
                 onClick={() => navigate('/dashboard')}

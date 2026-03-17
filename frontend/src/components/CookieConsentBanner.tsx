@@ -58,7 +58,7 @@ export default function CookieConsentBanner() {
             onClick={accept}
             className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors"
           >
-            Aceitar cookies
+            Aceitar Cookies
           </button>
           <button
             onClick={decline}

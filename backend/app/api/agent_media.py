@@ -121,7 +121,7 @@ async def transcribe_audio(
 
     except Exception as e:
         logger.error(f"Erro na transcrição Whisper: {e}")
-        raise HTTPException(500, f"Erro ao transcrever áudio: {str(e)[:200]}")
+        raise HTTPException(500, "Erro ao transcrever áudio. Tente novamente.")
 
     if not transcription_text:
         return {
@@ -244,7 +244,7 @@ async def upload_and_process(
                 except Exception as e:
                     logger.error(f"Erro Vision API para {filename}: {e}")
                     extracted_texts.append(f"[Imagem: {filename}] Não consegui analisar a imagem.")
-                    processed_files.append({"name": filename, "status": "error", "detail": str(e)[:100]})
+                    processed_files.append({"name": filename, "status": "error", "detail": "Erro ao processar imagem"})
             else:
                 extracted_texts.append(f"[Imagem: {filename}] Recebi a imagem mas o serviço de visão não está disponível.")
                 processed_files.append({"name": filename, "status": "no_vision", "type": "image"})

@@ -11,6 +11,7 @@ Vocabulário completo do browser agent seguindo o Blueprint Comet:
 
 from __future__ import annotations
 
+import random
 from typing import Any
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
@@ -27,10 +28,14 @@ logger = get_logger("browser.actions")
 # Navegação
 # ---------------------------------------------------------------------------
 
-def abrir_url(page: Page, url: str) -> None:
+def abrir_url(page: Page, url: str, wait_until: str = "load") -> None:
     logger.info("Abrindo URL: %s", url)
     try:
-        page.goto(url, wait_until="load")
+        page.goto(url, wait_until=wait_until)
+        # Delay pós-navegação: permite que scripts anti-bot (tokens,
+        # honeypots, fingerprinting JS) inicializem antes de qualquer
+        # interação com a página.
+        page.wait_for_timeout(random.randint(1200, 2500))
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"Falha ao abrir URL {url}: {exc}") from exc
 
@@ -86,20 +91,36 @@ def clicar(page: Page, selector: str) -> None:
         raise RuntimeError(f"Falha ao clicar no seletor {selector}: {exc}") from exc
 
 
-def digitar(page: Page, selector: str, texto: str, secret: bool = False) -> None:
+def digitar(page: Page, selector: str, texto: str, secret: bool = False, humanize: bool = True) -> None:
     visivel = "***" if secret else texto
     logger.info("Digitando no seletor %s -> %s", selector, visivel)
     try:
-        page.fill(selector, texto)
+        if humanize and len(texto) <= 120:
+            # Digitação humanizada: limpa campo e depois digita caractere
+            # por caractere com delay aleatório (~60-80 WPM humano).
+            # Isso evita detecção de page.fill() instantâneo por anti-bot.
+            page.fill(selector, "")                        # Limpa o campo
+            page.wait_for_timeout(random.randint(200, 500)) # Pausa humana
+            delay_ms = random.randint(55, 140)
+            page.type(selector, texto, delay=delay_ms)
+            page.wait_for_timeout(random.randint(150, 400)) # Pausa pós-digitação
+        else:
+            page.fill(selector, texto)
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"Falha ao digitar no seletor {selector}: {exc}") from exc
 
 
-def type_text(page: Page, selector: str, text: str) -> None:
+def type_text(page: Page, selector: str, text: str, humanize: bool = True) -> None:
     """Digita texto em um campo (alias para digitar)."""
     logger.info("Digitando em %s", selector)
     try:
-        page.fill(selector, text)
+        if humanize and len(text) <= 120:
+            page.fill(selector, "")
+            page.wait_for_timeout(random.randint(200, 500))
+            page.type(selector, text, delay=random.randint(55, 140))
+            page.wait_for_timeout(random.randint(150, 400))
+        else:
+            page.fill(selector, text)
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"Falha ao digitar em {selector}: {exc}") from exc
 

@@ -27,6 +27,7 @@ PLAN_LIMITS: dict[Plan, dict[str, Any]] = {
     Plan.FREE: {
         "agent_messages_per_day": 10,
         "crm_clients": 5,
+        "crm_suppliers": 5,  # equiparado a clientes
         "invoices_per_month": 3,
         "available_agents": ["contabilidade"],
         "notifications": "basic",
@@ -37,6 +38,7 @@ PLAN_LIMITS: dict[Plan, dict[str, Any]] = {
     Plan.ESSENCIAL: {
         "agent_messages_per_day": 200,
         "crm_clients": 100,
+        "crm_suppliers": 100,  # equiparado a clientes
         "invoices_per_month": -1,
         "available_agents": ["contabilidade", "clientes", "cobranca"],
         "notifications": "full",
@@ -47,6 +49,7 @@ PLAN_LIMITS: dict[Plan, dict[str, Any]] = {
     Plan.PROFISSIONAL: {
         "agent_messages_per_day": 1000,
         "crm_clients": 500,
+        "crm_suppliers": 500,  # equiparado a clientes
         "invoices_per_month": -1,
         "available_agents": ["contabilidade", "clientes", "cobranca",
                              "agenda", "assistente"],
@@ -58,6 +61,7 @@ PLAN_LIMITS: dict[Plan, dict[str, Any]] = {
     Plan.COMPLETO: {
         "agent_messages_per_day": -1,
         "crm_clients": -1,
+        "crm_suppliers": -1,  # equiparado a clientes
         "invoices_per_month": -1,
         "available_agents": "__all__",
         "notifications": "full",

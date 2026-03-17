@@ -57,18 +57,27 @@ if not (backend_dir.parent / 'backend').exists():
     _backend_mod.__path__ = [str(backend_dir)]  # type: ignore[attr-defined]
     sys.modules['backend'] = _backend_mod
 
-# Carregar variáveis de ambiente (.env) — .env.local tem prioridade (carrega por último)
+# Carregar variáveis de ambiente (.env) — ordem de prioridade (último vence):
+#   1. .env (base)
+#   2. .env.{ENVIRONMENT} (específico do ambiente: development, staging, production)
+#   3. .env.local (override local, nunca commitado)
 # Em testes (NEXUS_SKIP_DOTENV=1), pular load_dotenv para não sobrescrever env vars de teste.
 if not os.getenv("NEXUS_SKIP_DOTENV"):
+    # Detectar ambiente ANTES de carregar .env (pode vir do SO/container)
+    _env_name = os.getenv("ENVIRONMENT", "development")
+
     dotenv_paths = [
-        backend_dir / '.env',                 # backend/.env (base)
-        backend_dir.parent / '.env',          # NEXUS/.env (base)
-        backend_dir / '.env.local',           # backend/.env.local (override local)
-        backend_dir.parent / '.env.local',    # NEXUS/.env.local (override principal)
+        backend_dir / '.env',                           # backend/.env (base)
+        backend_dir.parent / '.env',                    # NEXUS/.env (base)
+        backend_dir / f'.env.{_env_name}',              # backend/.env.development (específico)
+        backend_dir.parent / f'.env.{_env_name}',       # NEXUS/.env.development (específico)
+        backend_dir / '.env.local',                     # backend/.env.local (override local)
+        backend_dir.parent / '.env.local',              # NEXUS/.env.local (override principal)
     ]
     for dotenv_path in dotenv_paths:
         if dotenv_path.exists():
             load_dotenv(dotenv_path, override=True)
+            logging.debug(f"📄 .env carregado: {dotenv_path.name}")
 else:
     logging.info("⏭️ NEXUS_SKIP_DOTENV=1 — load_dotenv ignorado (modo teste)")
 
@@ -135,6 +144,7 @@ app = FastAPI(
     license_info={"name": "Proprietário"},
     docs_url="/docs" if os.getenv("ENVIRONMENT") != "production" else None,
     redoc_url="/redoc" if os.getenv("ENVIRONMENT") != "production" else None,
+    openapi_url="/openapi.json" if os.getenv("ENVIRONMENT") != "production" else None,
     lifespan=lifespan,
 )
 
@@ -173,27 +183,51 @@ from starlette.responses import Response as StarletteResponse  # type: ignore[im
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Security headers padrão enterprise (OpenAI/Anthropic/Google-grade)."""
+
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
         response: StarletteResponse = await call_next(request)
+
+        # ── Headers universais (dev + prod) ──
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["X-XSS-Protection"] = "0"  # desativado em favor de CSP (OWASP recomenda)
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=()"
+        response.headers["Permissions-Policy"] = (
+            "camera=(self), microphone=(self), geolocation=(), "
+            "payment=(self), usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
+        )
+        response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+
+        # ── Cache-Control para endpoints de API (nunca cachear dados sensíveis) ──
+        path = request.url.path
+        if path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+            response.headers["Pragma"] = "no-cache"
+
+        # ── Headers adicionais em produção ──
         if os.getenv("ENVIRONMENT") == "production":
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=63072000; includeSubDomains; preload"
+            )
+            _frontend = os.getenv("FRONTEND_URL", "https://nexus.app").rstrip("/")
             csp = (
                 "default-src 'self'; "
                 "script-src 'self'; "
                 "style-src 'self' 'unsafe-inline'; "
                 "img-src 'self' data: https:; "
                 "font-src 'self'; "
-                "connect-src 'self' https://api.stripe.com; "
+                f"connect-src 'self' https://api.stripe.com {_frontend}; "
                 "frame-src https://js.stripe.com https://hooks.stripe.com; "
+                "frame-ancestors 'none'; "
                 "object-src 'none'; "
-                "base-uri 'self'"
+                "base-uri 'self'; "
+                "form-action 'self' https://accounts.google.com https://www.facebook.com https://checkout.stripe.com"
             )
             response.headers["Content-Security-Policy"] = csp
+
         return response
 
 
@@ -221,7 +255,8 @@ async def health():
         db.close()
         health_info["database"] = "connected"
     except Exception as e:
-        health_info["database"] = f"error: {str(e)[:80]}"
+        logger.error(f"Health check DB error: {e}")
+        health_info["database"] = "error"
         health_info["status"] = "degraded"
 
     # Redis check

@@ -66,7 +66,7 @@ export function UpgradeBanner({ resource, label }: Props) {
           whiteSpace: 'nowrap',
         }}
       >
-        Ver planos
+        Ver Planos
       </button>
       <button
         onClick={() => {

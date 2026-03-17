@@ -24,7 +24,7 @@ const agents: Agent[] = [
   {
     id: 'clientes',
     name: 'Clientes e Agenda',
-    description: 'Cadastre clientes, organize compromissos, veja quem precisa de atenção e acompanhe suas vendas',
+    description: 'Cadastre Clientes, Organize Compromissos, Veja Quem Precisa de Atenção e Acompanhe Suas Vendas',
     icon: Users,
     color: 'from-green-500 to-emerald-500',
     backendId: 'clientes'
@@ -32,7 +32,7 @@ const agents: Agent[] = [
   {
     id: 'financeiro',
     name: 'Financeiro',
-    description: 'Controle seu dinheiro, cobranças, notas fiscais, DAS e limite do MEI — tudo num lugar só',
+    description: 'Controle Seu Dinheiro, Cobranças, Notas Fiscais, Boleto Mensal do MEI e Limite de Faturamento — Tudo num Lugar Só',
     icon: DollarSign,
     color: 'from-emerald-500 to-teal-500',
     backendId: 'contabilidade'
@@ -40,7 +40,7 @@ const agents: Agent[] = [
   {
     id: 'assistente',
     name: 'Assistente Pessoal',
-    description: 'Seu ajudante de IA — resumo do dia, alertas, sugestões e automações inteligentes',
+    description: 'Seu Ajudante de IA — Resumo do Dia, Alertas, Sugestões e Automações Inteligentes',
     icon: Bot,
     color: 'from-blue-500 to-indigo-500',
     backendId: 'assistente'
@@ -104,7 +104,7 @@ export default function Agents() {
                   <div className={`absolute inset-0 rounded-2xl flex items-center justify-center z-10 ${isDark ? 'bg-slate-900/60' : 'bg-white/60 backdrop-blur-[2px]'}`}>
                     <div className="text-center">
                       <Lock className={`w-8 h-8 mx-auto mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
-                      <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Fazer upgrade</span>
+                      <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Fazer Upgrade</span>
                     </div>
                   </div>
                 )}
@@ -146,7 +146,7 @@ export default function Agents() {
                 <Sparkles className="w-6 h-6 text-white" />
               </div>
               <div className="flex-1">
-                <h3 className={`font-semibold text-lg ${isDark ? 'text-white' : 'text-slate-900'}`}>Desbloqueie mais agentes</h3>
+                <h3 className={`font-semibold text-lg ${isDark ? 'text-white' : 'text-slate-900'}`}>Desbloqueie Mais Agentes</h3>
                 <p className={`text-base ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                   A partir de R$ 39,90/mês, acesse até 3 agentes com o plano Essencial
                 </p>

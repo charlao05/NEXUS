@@ -203,7 +203,7 @@ export default function NexusCodexLogin() {
       {showForgotPassword && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-8 shadow-2xl">
-            <h3 className="text-xl font-bold text-gray-800 mb-2">Recuperar senha</h3>
+            <h3 className="text-xl font-bold text-gray-800 mb-2">Recuperar Senha</h3>
             <p className="text-gray-500 text-sm mb-6">Informe seu email e enviaremos um link para redefinir sua senha.</p>
             <input
               type="email"
@@ -220,7 +220,7 @@ export default function NexusCodexLogin() {
               <button
                 onClick={handleSendRecovery}
                 className="flex-1 py-3 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition"
-              >Enviar link</button>
+              >Enviar Link</button>
             </div>
           </div>
         </div>
@@ -277,7 +277,7 @@ export default function NexusCodexLogin() {
                 <Clock className="w-6 h-6 text-blue-400" />
               </div>
               <div>
-                <p className="font-bold text-lg mb-1">Economize tempo</p>
+                <p className="font-bold text-lg mb-1">Economize Tempo</p>
                 <p className="text-indigo-300 text-sm leading-relaxed">
                   Automação de agenda, lembretes de cobrança e geração de notas fiscais. Foque no que importa: crescer seu negócio.
                 </p>
@@ -289,9 +289,9 @@ export default function NexusCodexLogin() {
                 <TrendingUp className="w-6 h-6 text-green-400" />
               </div>
               <div>
-                <p className="font-bold text-lg mb-1">Aumente sua receita</p>
+                <p className="font-bold text-lg mb-1">Aumente Sua Receita</p>
                 <p className="text-indigo-300 text-sm leading-relaxed">
-                  Nunca mais perca um cliente. Sistema de CRM completo com follow-up automatizado e análise financeira em tempo real.
+                  Nunca mais perca um cliente. Gestão de clientes completa com acompanhamento automático e análise financeira em tempo real.
                 </p>
               </div>
             </div>
@@ -301,7 +301,7 @@ export default function NexusCodexLogin() {
                 <Shield className="w-6 h-6 text-purple-400" />
               </div>
               <div>
-                <p className="font-bold text-lg mb-1">100% seguro e confiável</p>
+                <p className="font-bold text-lg mb-1">100% Seguro e Confiável</p>
                 <p className="text-indigo-300 text-sm leading-relaxed">
                   Seus dados protegidos com criptografia de nível empresarial. Backup automático e disponibilidade 24/7.
                 </p>
@@ -329,7 +329,7 @@ export default function NexusCodexLogin() {
           {/* Header */}
           <div className="mb-8">
             <h3 className="text-3xl font-black text-gray-900 mb-2">
-              {isSignupMode ? 'Criar conta no NEXUS' : 'Entrar no NEXUS'}
+              {isSignupMode ? 'Criar Conta no NEXUS' : 'Entrar no NEXUS'}
             </h3>
             <p className="text-gray-600 text-sm">
               {isSignupMode 
@@ -351,7 +351,7 @@ export default function NexusCodexLogin() {
             {isSignupMode && (
               <div>
                 <label htmlFor="fullName" className="block text-sm font-semibold text-gray-700 mb-2">
-                  Nome completo
+                  Nome Completo
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -445,7 +445,7 @@ export default function NexusCodexLogin() {
                 onClick={handleForgotPassword}
                 className="text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors"
               >
-                Esqueceu a senha?
+                Esqueceu a Senha?
               </button>
             </div>
 
@@ -455,7 +455,7 @@ export default function NexusCodexLogin() {
                 {/* Preferência de comunicação */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Como prefere se comunicar?
+                    Como Prefere se Comunicar?
                   </label>
                   <div className="grid grid-cols-3 gap-2">
                     {[
@@ -521,7 +521,7 @@ export default function NexusCodexLogin() {
               ) : (
                 <>
                   <Zap className="w-5 h-5" />
-                  <span>{isSignupMode ? 'Criar minha conta' : 'Entrar no NEXUS'}</span>
+                  <span>{isSignupMode ? 'Criar Minha Conta' : 'Entrar no NEXUS'}</span>
                 </>
               )}
             </button>
@@ -567,7 +567,7 @@ export default function NexusCodexLogin() {
                 }}
                 className="font-bold text-blue-600 hover:text-blue-700 hover:underline transition-colors"
               >
-                {isSignupMode ? 'Fazer login' : 'Criar conta grátis'}
+                {isSignupMode ? 'Fazer Login' : 'Criar Conta Grátis'}
               </button>
             </p>
           </div>
@@ -577,7 +577,7 @@ export default function NexusCodexLogin() {
             <div className="flex items-center justify-center gap-2 text-sm">
               <Shield className="w-4 h-4 text-green-600" />
               <span className="text-gray-700">
-                <span className="font-bold text-green-700">Comece grátis — para sempre</span> • Sem cartão de crédito
+                <span className="font-bold text-green-700">Comece Grátis — para Sempre</span> • Sem cartão de crédito
               </span>
             </div>
           </div>

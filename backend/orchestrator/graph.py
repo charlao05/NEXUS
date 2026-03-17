@@ -272,4 +272,8 @@ async def run_task(
         "policy_decisions": full_state.get("policy_decisions", []),
         "requires_approval": full_state.get("requires_approval", False),
         "approval_message": full_state.get("approval_message", ""),
+        # Human-in-the-loop state
+        "awaiting_user_input": full_state.get("awaiting_user_input", False),
+        "awaiting_user_reason": full_state.get("awaiting_user_reason", ""),
+        "resume_hint": full_state.get("resume_hint", ""),
     }

@@ -9,7 +9,8 @@ import {
   ArrowLeft, Send, Sparkles, CheckCircle2, Clock, 
   Calendar, Users, DollarSign, FileText, Bot, Bell,
   Plus, Search, TrendingUp, AlertTriangle, Globe, BarChart3,
-  Paperclip, Camera, Mic, MicOff, X, ShieldCheck, ShieldX
+  Paperclip, Camera, Mic, MicOff, X, ShieldCheck, ShieldX, Lock, RotateCw, Trash2,
+  Eye, EyeOff, Package, Truck, Filter, CreditCard, Banknote,
 } from 'lucide-react';
 import axios from 'axios';
 import type { LucideIcon } from 'lucide-react';
@@ -31,6 +32,14 @@ interface Message {
     risk_level?: string;
     status?: string;  // awaiting_approval, approved, rejected, executing, completed
   };
+  confirmation?: {
+    tool_name: string;
+    arguments: Record<string, unknown>;
+    description: string;
+    original_message: string;
+    status?: string;  // awaiting_password, confirmed, cancelled
+    pending_actions?: { tool_name: string; arguments: Record<string, unknown>; description: string }[];
+  };
 }
 
 interface QuickAction {
@@ -51,99 +60,106 @@ const agentMeta: Record<string, {
 }> = {
   agenda: {
     name: 'Clientes e Agenda',
-    description: 'Cadastro de clientes, compromissos, lembretes e acompanhamento de vendas',
+    description: 'Cadastro de Clientes, Compromissos, Lembretes e Acompanhamento de Vendas',
     icon: Calendar,
     gradient: 'from-green-500 to-emerald-500',
     endpoint: apiUrl('/api/agents/agenda/execute'),
     quickActions: [
-      { id: 'today', label: 'Compromissos de hoje', icon: Clock, action: 'list_today' },
-      { id: 'week', label: 'Agenda da semana', icon: Calendar, action: 'list_week' },
-      { id: 'add', label: 'Novo compromisso', icon: Plus, action: 'add_appointment' },
-      { id: 'clients', label: 'Meus clientes', icon: Users, action: 'list_clients' },
-      { id: 'addclient', label: 'Novo cliente', icon: Plus, action: 'add_client' },
-      { id: 'followup', label: 'Quem precisa de atenção', icon: Bell, action: 'list_followup' },
+      { id: 'today', label: 'Compromissos de Hoje', icon: Clock, action: 'list_today' },
+      { id: 'week', label: 'Agenda da Semana', icon: Calendar, action: 'list_week' },
+      { id: 'add', label: 'Novo Compromisso', icon: Plus, action: 'add_appointment' },
+      { id: 'clients', label: 'Meus Clientes', icon: Users, action: 'list_clients' },
+      { id: 'addclient', label: 'Novo Cliente', icon: Plus, action: 'add_client' },
+      { id: 'followup', label: 'Quem Precisa de Atenção', icon: Bell, action: 'list_followup' },
+      { id: 'suppliers', label: 'Meus Fornecedores', icon: Truck, action: 'list_suppliers' },
+      { id: 'stock', label: 'Meu Estoque', icon: Package, action: 'stock_summary' },
     ]
   },
   clientes: {
     name: 'Clientes e Agenda',
-    description: 'Cadastro de clientes, compromissos, lembretes e acompanhamento de vendas',
+    description: 'Cadastro de Clientes, Compromissos, Lembretes e Acompanhamento de Vendas',
     icon: Users,
     gradient: 'from-green-500 to-emerald-500',
     endpoint: apiUrl('/api/agents/clientes/execute'),
     quickActions: [
-      { id: 'list', label: 'Meus clientes', icon: Users, action: 'list_clients' },
-      { id: 'add', label: 'Novo cliente', icon: Plus, action: 'add_client' },
-      { id: 'followup', label: 'Quem precisa de atenção', icon: Bell, action: 'list_followup' },
-      { id: 'today', label: 'Compromissos de hoje', icon: Clock, action: 'list_today' },
-      { id: 'addappt', label: 'Novo compromisso', icon: Calendar, action: 'add_appointment' },
-      { id: 'pipeline', label: 'Resumo de vendas', icon: BarChart3, action: 'pipeline_summary' },
+      { id: 'list', label: 'Meus Clientes', icon: Users, action: 'list_clients' },
+      { id: 'add', label: 'Novo Cliente', icon: Plus, action: 'add_client' },
+      { id: 'followup', label: 'Quem Precisa de Atenção', icon: Bell, action: 'list_followup' },
+      { id: 'today', label: 'Compromissos de Hoje', icon: Clock, action: 'list_today' },
+      { id: 'addappt', label: 'Novo Compromisso', icon: Calendar, action: 'add_appointment' },
+      { id: 'pipeline', label: 'Resumo de Vendas', icon: BarChart3, action: 'pipeline_summary' },
+      { id: 'suppliers', label: 'Meus Fornecedores', icon: Truck, action: 'list_suppliers' },
+      { id: 'stock', label: 'Meu Estoque', icon: Package, action: 'stock_summary' },
     ]
   },
   financeiro: {
     name: 'Financeiro',
-    description: 'Seu dinheiro, cobranças, notas fiscais, DAS e limite do MEI — tudo num lugar só',
+    description: 'Seu Dinheiro, Cobranças, Notas Fiscais, Boleto Mensal do MEI e Limite de Faturamento — Tudo num Lugar Só',
     icon: DollarSign,
     gradient: 'from-emerald-500 to-teal-500',
     endpoint: apiUrl('/api/agents/contabilidade/execute'),
     quickActions: [
-      { id: 'summary', label: 'Resumo do mês', icon: TrendingUp, action: 'monthly_summary' },
-      { id: 'das', label: 'Próximo DAS', icon: Calendar, action: 'das_status' },
+      { id: 'summary', label: 'Resumo do Mês', icon: TrendingUp, action: 'monthly_summary' },
+      { id: 'daily', label: 'Resumo de Hoje', icon: Banknote, action: 'daily_summary_fin' },
+      { id: 'weekly', label: 'Resumo da Semana', icon: Filter, action: 'weekly_summary_fin' },
+      { id: 'payment_breakdown', label: 'Vendas por Forma de Pgto', icon: CreditCard, action: 'payment_breakdown' },
+      { id: 'das', label: 'Próximo Boleto MEI', icon: Calendar, action: 'das_status' },
       { id: 'mei', label: 'Limite MEI', icon: AlertTriangle, action: 'mei_status' },
-      { id: 'overdue', label: 'Quem tá devendo', icon: Bell, action: 'list_overdue' },
-      { id: 'pending', label: 'Contas a vencer', icon: Clock, action: 'list_pending' },
-      { id: 'nf', label: 'Emitir nota fiscal', icon: FileText, action: 'emit_nf' },
+      { id: 'overdue', label: 'Quem Tá Devendo', icon: Bell, action: 'list_overdue' },
+      { id: 'pending', label: 'Contas a Vencer', icon: Clock, action: 'list_pending' },
+      { id: 'nf', label: 'Emitir Nota Fiscal', icon: FileText, action: 'emit_nf' },
     ]
   },
   contabilidade: {
     name: 'Financeiro',
-    description: 'Seu dinheiro, cobranças, notas fiscais, DAS e limite do MEI — tudo num lugar só',
+    description: 'Seu Dinheiro, Cobranças, Notas Fiscais, Boleto Mensal do MEI e Limite de Faturamento — Tudo num Lugar Só',
     icon: DollarSign,
     gradient: 'from-emerald-500 to-teal-500',
     endpoint: apiUrl('/api/agents/contabilidade/execute'),
     quickActions: [
-      { id: 'summary', label: 'Resumo do mês', icon: TrendingUp, action: 'monthly_summary' },
-      { id: 'das', label: 'Próximo DAS', icon: Calendar, action: 'das_status' },
+      { id: 'summary', label: 'Resumo do Mês', icon: TrendingUp, action: 'monthly_summary' },
+      { id: 'das', label: 'Próximo Boleto MEI', icon: Calendar, action: 'das_status' },
       { id: 'mei', label: 'Limite MEI', icon: AlertTriangle, action: 'mei_status' },
-      { id: 'checklist', label: 'O que falta fazer', icon: CheckCircle2, action: 'checklist_mensal' },
+      { id: 'checklist', label: 'O Que Falta Fazer', icon: CheckCircle2, action: 'checklist_mensal' },
     ]
   },
   cobranca: {
     name: 'Financeiro',
-    description: 'Seu dinheiro, cobranças, notas fiscais, DAS e limite do MEI — tudo num lugar só',
+    description: 'Seu Dinheiro, Cobranças, Notas Fiscais, Boleto Mensal do MEI e Limite de Faturamento — Tudo num Lugar Só',
     icon: Bell,
     gradient: 'from-emerald-500 to-teal-500',
     endpoint: apiUrl('/api/agents/cobranca/execute'),
     quickActions: [
-      { id: 'overdue', label: 'Quem tá devendo', icon: AlertTriangle, action: 'list_overdue' },
-      { id: 'pending', label: 'Contas a vencer', icon: Clock, action: 'list_pending' },
-      { id: 'send', label: 'Mandar lembrete', icon: Send, action: 'send_reminder' },
-      { id: 'total', label: 'Total em aberto', icon: DollarSign, action: 'total_open' },
+      { id: 'overdue', label: 'Quem Tá Devendo', icon: AlertTriangle, action: 'list_overdue' },
+      { id: 'pending', label: 'Contas a Vencer', icon: Clock, action: 'list_pending' },
+      { id: 'send', label: 'Mandar Lembrete', icon: Send, action: 'send_reminder' },
+      { id: 'total', label: 'Total em Aberto', icon: DollarSign, action: 'total_open' },
     ]
   },
   documentos: {
     name: 'Financeiro',
-    description: 'Seu dinheiro, cobranças, notas fiscais, DAS e limite do MEI — tudo num lugar só',
+    description: 'Seu Dinheiro, Cobranças, Notas Fiscais, Boleto Mensal do MEI e Limite de Faturamento — Tudo num Lugar Só',
     icon: FileText,
     gradient: 'from-emerald-500 to-teal-500',
     endpoint: apiUrl('/api/agents/contabilidade/execute'),
     quickActions: [
-      { id: 'nf', label: 'Emitir nota fiscal', icon: FileText, action: 'emit_nf' },
-      { id: 'list', label: 'Ver notas fiscais', icon: Search, action: 'list_nf' },
+      { id: 'nf', label: 'Emitir Nota Fiscal', icon: FileText, action: 'emit_nf' },
+      { id: 'list', label: 'Ver Notas Fiscais', icon: Search, action: 'list_nf' },
       { id: 'report', label: 'Relatório', icon: TrendingUp, action: 'generate_report' },
       { id: 'contract', label: 'Contrato', icon: FileText, action: 'generate_contract' },
     ]
   },
   assistente: {
     name: 'Assistente Pessoal',
-    description: 'Seu ajudante de IA — resumo do dia, alertas, sugestões e automações',
+    description: 'Seu Ajudante de IA — Resumo do Dia, Alertas, Sugestões e Automações',
     icon: Bot,
     gradient: 'from-blue-500 to-indigo-500',
     endpoint: apiUrl('/api/agents/assistente/execute'),
     quickActions: [
-      { id: 'summary', label: 'Resumo do dia', icon: Sparkles, action: 'daily_summary' },
-      { id: 'tasks', label: 'O que fazer agora?', icon: CheckCircle2, action: 'suggest_tasks' },
-      { id: 'alerts', label: 'Alertas importantes', icon: AlertTriangle, action: 'get_alerts' },
-      { id: 'web', label: 'Automação Web', icon: Globe, action: 'web_automation' },
+      { id: 'summary', label: 'Resumo do Dia', icon: Sparkles, action: 'daily_summary' },
+      { id: 'tasks', label: 'O Que Fazer Agora?', icon: CheckCircle2, action: 'suggest_tasks' },
+      { id: 'alerts', label: 'Alertas Importantes', icon: AlertTriangle, action: 'get_alerts' },
+      { id: 'web', label: 'Executar Tarefa no Site', icon: Globe, action: 'web_automation' },
     ]
   }
 };
@@ -174,6 +190,28 @@ function AgentConfig() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
 
+  // Password confirmation state (for sensitive actions like delete)
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [confirmError, setConfirmError] = useState('');
+  const [hasConfirmationPin, setHasConfirmationPin] = useState<boolean | null>(null);
+  const [showPinSetup, setShowPinSetup] = useState(false);
+  const [pinSetupData, setPinSetupData] = useState({ loginPassword: '', newPin: '', newPinConfirm: '' });
+  const [pinSetupError, setPinSetupError] = useState('');
+  const [pinSetupSuccess, setPinSetupSuccess] = useState('');
+  const [showConfirmPwVisible, setShowConfirmPwVisible] = useState(false);
+  const [showPinLoginPw, setShowPinLoginPw] = useState(false);
+  const [showPinNew, setShowPinNew] = useState(false);
+  const [showPinConfirm, setShowPinConfirm] = useState(false);
+  const [pendingConfirmation, setPendingConfirmation] = useState<{
+    tool_name: string;
+    arguments: Record<string, unknown>;
+    description: string;
+    original_message: string;
+    messageId: string;
+    pending_actions?: { tool_name: string; arguments: Record<string, unknown>; description: string }[];
+  } | null>(null);
+
   // Automation approval state
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_pendingAutomation, setPendingAutomation] = useState<string | null>(null);
@@ -196,6 +234,11 @@ function AgentConfig() {
         })
         .catch(() => { /* usar valor do localStorage */ })
         .finally(() => setCheckedAccess(true));
+
+      // Verificar se tem PIN de confirmação configurado
+      axios.get(apiUrl('/api/auth/has-confirmation-pin'), { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => setHasConfirmationPin(res.data.has_pin ?? false))
+        .catch(() => setHasConfirmationPin(false));
     } else {
       setCheckedAccess(true);
     }
@@ -225,26 +268,51 @@ function AgentConfig() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Mensagem inicial — linguagem simples e acessível
+  // Mensagem inicial + carregar histórico persistido do backend
   useEffect(() => {
     const welcomeMessages: Record<string, string> = {
       agenda: 'Olá! Eu cuido dos seus **Clientes e Agenda**.\n\nPosso te ajudar a:\n• Ver seus compromissos do dia\n• Cadastrar e acompanhar clientes\n• Marcar reuniões e lembretes\n• Ver quem precisa de atenção\n\nÉ só me dizer o que precisa! Pode digitar, enviar uma foto ou gravar um áudio.',
-      clientes: 'Olá! Eu cuido dos seus **Clientes e Agenda**.\n\nPosso te ajudar a:\n• Cadastrar e acompanhar clientes\n• Ver quem precisa de atenção\n• Acompanhar suas vendas\n• Marcar compromissos e lembretes\n\nMe conta o que você precisa!',
-      financeiro: 'Olá! Sou seu assistente **Financeiro**.\n\nCuido de tudo sobre seu dinheiro:\n• Quanto entrou e saiu no mês\n• Cobranças e quem tá devendo\n• Notas fiscais\n• DAS e limite do MEI\n\nPergunte o que quiser!',
-      contabilidade: 'Olá! Sou seu assistente **Financeiro**.\n\nCuido de tudo sobre seu dinheiro:\n• DAS e obrigações do MEI\n• Notas fiscais\n• Limite de faturamento\n\nÉ só perguntar!',
+      clientes: 'Olá! Eu cuido dos seus **Clientes e Agenda**.\n\nPosso te ajudar a:\n• Cadastrar e acompanhar clientes\n• Ver quem precisa de atenção\n• Acompanhar suas vendas\n• Marcar compromissos e lembretes\n• 🚚 Gerenciar seus **fornecedores**\n• 📦 Consultar seu **estoque**\n\nMe conta o que você precisa!',
+      financeiro: 'Olá! Sou seu assistente **Financeiro**.\n\nCuido de tudo sobre seu dinheiro:\n• Quanto entrou e saiu (dia, semana ou mês)\n• Vendas por forma de pagamento (PIX, cartão, dinheiro...)\n• Cobranças e quem tá devendo\n• Notas fiscais\n• Boleto mensal e limite do MEI\n\nPergunte o que quiser!',
+      contabilidade: 'Olá! Sou seu assistente **Financeiro**.\n\nCuido de tudo sobre seu dinheiro:\n• Boleto mensal e contas do MEI\n• Notas fiscais\n• Limite de faturamento\n\nÉ só perguntar!',
       cobranca: 'Olá! Cuido das suas **Cobranças**.\n\nPosso te ajudar a:\n• Ver quem tá devendo\n• Mandar lembretes de pagamento\n• Controlar valores em aberto\n\nMe diga como posso ajudar!',
       documentos: 'Olá! Sou o assistente de **Documentos**.\n\nPosso te ajudar com:\n• Notas fiscais\n• Contratos\n• Relatórios\n\nVocê também pode enviar uma foto de um documento para eu analisar!',
       assistente: 'Olá! Sou seu **Assistente Pessoal**.\n\nPosso te ajudar com qualquer coisa:\n• Resumo do seu dia\n• Sugestões do que fazer primeiro\n• Alertas importantes\n\nPode falar comigo por texto, foto ou áudio!'
     };
-    
-    setMessages([{
-      id: '1',
+
+    const welcomeMsg: Message = {
+      id: 'welcome',
       role: 'agent',
       content: welcomeMessages[id || 'assistente'] || welcomeMessages.assistente,
-      timestamp: new Date()
-    }]);
+      timestamp: new Date(),
+    };
+
+    // Mostrar welcome imediatamente (sem esperar rede)
+    setMessages([welcomeMsg]);
     setAttachedFiles([]);
-  }, [id]);
+
+    // Carregar histórico persistido do backend (se existir)
+    const agentId = id || 'assistente';
+    if (token) {
+      axios.get(apiUrl(`/api/chat/history/${agentId}?limit=50`), {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(res => {
+          const history: { id: number; role: string; content: string; created_at: string }[] = res.data?.messages || [];
+          if (history.length > 0) {
+            const restored: Message[] = history.map((m, i) => ({
+              id: `hist-${m.id || i}`,
+              role: m.role === 'user' ? 'user' as const : 'agent' as const,
+              content: m.content,
+              timestamp: m.created_at ? new Date(m.created_at) : new Date(),
+            }));
+            // Welcome como primeira msg, depois o histórico restaurado
+            setMessages([welcomeMsg, ...restored]);
+          }
+        })
+        .catch(() => { /* mantém apenas a welcome msg */ });
+    }
+  }, [id, token]);
 
   // Função para formatar texto (converte **texto** em negrito)
   const formatMessage = (text: string) => {
@@ -449,9 +517,13 @@ function AgentConfig() {
       return response.data;
     } catch (err) {
       // Tentar extrair mensagem de erro real do backend
-      const backendMsg = axios.isAxiosError(err)
+      const rawDetail = axios.isAxiosError(err)
         ? (err.response?.data?.detail || err.response?.data?.message)
         : undefined;
+      // detail pode ser string ou objeto {code, message, ...} — normalizar
+      const backendMsg = typeof rawDetail === 'string'
+        ? rawDetail
+        : (rawDetail?.message || rawDetail?.detail || undefined);
       if (backendMsg) {
         return { status: 'error', action, message: `⚠️ ${backendMsg}` };
       }
@@ -528,8 +600,8 @@ function AgentConfig() {
             id: (Date.now() + 1).toString(),
             role: 'agent',
             content: isImage 
-              ? `Recebi sua foto (${fileNames})! 📸\n\nAnalisei a imagem. ${text ? `Sobre "${text}": ` : ''}Me conta mais detalhes sobre o que você precisa que eu faça com isso.`
-              : `Recebi seu arquivo (${fileNames})! 📄\n\n${text ? `Entendi que você quer: "${text}". ` : ''}Vou processar esse documento. Me avise se precisar de algo específico.`,
+              ? `Não consegui enviar sua foto (${fileNames}). 😕\n\nTente novamente ou envie em outro formato.`
+              : `Não consegui enviar seu arquivo (${fileNames}). 😕\n\nTente novamente ou envie em outro formato.`,
             timestamp: new Date()
           };
           setMessages(prev => [...prev, agentResponse]);
@@ -540,6 +612,31 @@ function AgentConfig() {
       // Mensagem normal de texto
       const result = await executeAction('smart_chat', { message: text });
       
+      // Verificar se ação requer confirmação com senha
+      if (result.status === 'requires_confirmation' && result.confirmation) {
+        const msgId = (Date.now() + 1).toString();
+        const agentResponse: Message = {
+          id: msgId,
+          role: 'agent',
+          content: result.message || '🔒 Ação requer confirmação com senha.',
+          timestamp: new Date(),
+          confirmation: {
+            ...result.confirmation,
+            status: 'awaiting_password',
+          },
+        };
+        setMessages(prev => [...prev, agentResponse]);
+        // Abrir modal de senha automaticamente
+        setPendingConfirmation({
+          ...result.confirmation,
+          messageId: msgId,
+        });
+        setShowPasswordModal(true);
+        setConfirmPassword('');
+        setConfirmError('');
+        return;
+      }
+
       const agentResponse: Message = {
         id: (Date.now() + 1).toString(),
         role: 'agent',
@@ -565,6 +662,139 @@ function AgentConfig() {
         timestamp: new Date()
       };
       setMessages(prev => [...prev, agentResponse]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // --- Confirmação com senha para ações sensíveis ---
+  const handlePasswordConfirm = async () => {
+    if (!pendingConfirmation || !confirmPassword.trim()) return;
+
+    setIsLoading(true);
+    setConfirmError('');
+
+    try {
+      // Se temos pending_actions (batch), enviar todas; senão single (retrocompatível)
+      const payload: Record<string, unknown> = {
+        password: confirmPassword,
+        tool_name: pendingConfirmation.tool_name,
+        arguments: pendingConfirmation.arguments,
+        original_message: pendingConfirmation.original_message,
+      };
+      if (pendingConfirmation.pending_actions && pendingConfirmation.pending_actions.length > 0) {
+        payload.actions = pendingConfirmation.pending_actions.map(a => ({
+          tool_name: a.tool_name,
+          arguments: a.arguments,
+        }));
+      }
+      const response = await axios.post(
+        apiUrl(`/api/agents/${id || 'assistente'}/confirm-action`),
+        payload,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Atualizar mensagem de confirmação para "confirmed"
+      setMessages(prev => prev.map(msg => {
+        if (msg.id === pendingConfirmation.messageId && msg.confirmation) {
+          return { ...msg, confirmation: { ...msg.confirmation, status: 'confirmed' } };
+        }
+        return msg;
+      }));
+
+      // Adicionar resposta do agente
+      const agentResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'agent',
+        content: response.data.message || '✅ Ação executada com sucesso.',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, agentResponse]);
+
+      // Fechar modal
+      setShowPasswordModal(false);
+      setPendingConfirmation(null);
+      setConfirmPassword('');
+    } catch (err) {
+      const detail = axios.isAxiosError(err) ? (err.response?.data?.detail || '') : '';
+      setConfirmError(detail || 'Erro ao verificar senha. Tente novamente.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handlePasswordCancel = () => {
+    // Atualizar mensagem para "cancelled"
+    if (pendingConfirmation) {
+      setMessages(prev => prev.map(msg => {
+        if (msg.id === pendingConfirmation.messageId && msg.confirmation) {
+          return { ...msg, confirmation: { ...msg.confirmation, status: 'cancelled' } };
+        }
+        return msg;
+      }));
+    }
+    setShowPasswordModal(false);
+    setPendingConfirmation(null);
+    setConfirmPassword('');
+    setConfirmError('');
+  };
+
+  // --- Configuração de PIN de confirmação ---
+  const handlePinSetup = async () => {
+    if (!pinSetupData.loginPassword.trim() || !pinSetupData.newPin.trim()) return;
+    if (pinSetupData.newPin.length < 4) {
+      setPinSetupError('PIN deve ter pelo menos 4 caracteres.');
+      return;
+    }
+    if (pinSetupData.newPin !== pinSetupData.newPinConfirm) {
+      setPinSetupError('Os PINs não coincidem.');
+      return;
+    }
+
+    setIsLoading(true);
+    setPinSetupError('');
+    setPinSetupSuccess('');
+
+    try {
+      await axios.post(
+        apiUrl('/api/auth/set-confirmation-pin'),
+        { login_password: pinSetupData.loginPassword, new_pin: pinSetupData.newPin },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setHasConfirmationPin(true);
+      setPinSetupSuccess('PIN configurado com sucesso!');
+      setPinSetupData({ loginPassword: '', newPin: '', newPinConfirm: '' });
+      setTimeout(() => setShowPinSetup(false), 1200);
+    } catch (err) {
+      const detail = axios.isAxiosError(err) ? (err.response?.data?.detail || '') : '';
+      setPinSetupError(detail || 'Erro ao configurar PIN.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handlePinRemove = async () => {
+    if (!pinSetupData.loginPassword.trim()) {
+      setPinSetupError('Informe sua senha de login para remover o PIN.');
+      return;
+    }
+
+    setIsLoading(true);
+    setPinSetupError('');
+    setPinSetupSuccess('');
+
+    try {
+      await axios.delete(
+        apiUrl('/api/auth/confirmation-pin'),
+        { headers: { Authorization: `Bearer ${token}` }, data: { login_password: pinSetupData.loginPassword } }
+      );
+      setHasConfirmationPin(false);
+      setPinSetupSuccess('PIN removido. Será usada a senha de login.');
+      setPinSetupData({ loginPassword: '', newPin: '', newPinConfirm: '' });
+      setTimeout(() => setShowPinSetup(false), 1200);
+    } catch (err) {
+      const detail = axios.isAxiosError(err) ? (err.response?.data?.detail || '') : '';
+      setPinSetupError(detail || 'Erro ao remover PIN.');
     } finally {
       setIsLoading(false);
     }
@@ -617,10 +847,11 @@ function AgentConfig() {
       };
       setMessages(prev => [...prev, agentResponse]);
 
-      // Atualizar msg original
+      // Atualizar msg original — usar status real da resposta
+      const finalStatus = response.data.status || (approved ? 'completed' : 'rejected');
       setMessages(prev => prev.map(msg => {
         if (msg.automation?.task_id === taskId && msg.automation.status === 'executing') {
-          return { ...msg, automation: { ...msg.automation, status: 'completed' } };
+          return { ...msg, automation: { ...msg.automation, status: finalStatus } };
         }
         return msg;
       }));
@@ -629,6 +860,74 @@ function AgentConfig() {
       const errorMsg = axios.isAxiosError(err)
         ? (err.response?.data?.detail || 'Erro ao processar automação')
         : 'Erro ao processar automação';
+      const agentResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'agent',
+        content: `⚠️ ${errorMsg}`,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, agentResponse]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // --- Continuação de Automação (após user inserir creds no browser) ---
+  const handleAutomationContinue = async (taskId: string) => {
+    setIsLoading(true);
+
+    // Atualizar status visualmente
+    setMessages(prev => prev.map(msg => {
+      if (msg.automation?.task_id === taskId) {
+        return {
+          ...msg,
+          automation: { ...msg.automation, status: 'executing' },
+        };
+      }
+      return msg;
+    }));
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: '✅ Pronto, já preenchi meus dados no site. Pode continuar!',
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMsg]);
+
+    try {
+      const response = await axios.post(apiUrl('/api/agents/automation/continue'), {
+        task_id: taskId,
+      }, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const agentResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'agent',
+        content: response.data.message || '✅ Automação concluída.',
+        timestamp: new Date(),
+        automation: {
+          task_id: taskId,
+          requires_approval: false,
+          status: response.data.status || 'completed',
+        },
+      };
+      setMessages(prev => [...prev, agentResponse]);
+
+      // Atualizar todas as mensagens desta task
+      const newStatus = response.data.status || 'completed';
+      setMessages(prev => prev.map(msg => {
+        if (msg.automation?.task_id === taskId && msg.automation.status === 'executing') {
+          return { ...msg, automation: { ...msg.automation, status: newStatus } };
+        }
+        return msg;
+      }));
+
+    } catch (err) {
+      const errorMsg = axios.isAxiosError(err)
+        ? (err.response?.data?.detail || 'Erro ao continuar automação')
+        : 'Erro ao continuar automação';
       const agentResponse: Message = {
         id: (Date.now() + 1).toString(),
         role: 'agent',
@@ -654,6 +953,30 @@ function AgentConfig() {
     try {
       const result = await executeAction(action.action, action.params || {});
       
+      // Verificar se ação requer confirmação com senha (ex: excluir cliente via quick action)
+      if (result.status === 'requires_confirmation' && result.confirmation) {
+        const msgId = (Date.now() + 1).toString();
+        const agentResponse: Message = {
+          id: msgId,
+          role: 'agent',
+          content: result.message || '🔒 Ação requer confirmação com senha.',
+          timestamp: new Date(),
+          confirmation: {
+            ...result.confirmation,
+            status: 'awaiting_password',
+          },
+        };
+        setMessages(prev => [...prev, agentResponse]);
+        setPendingConfirmation({
+          ...result.confirmation,
+          messageId: msgId,
+        });
+        setShowPasswordModal(true);
+        setConfirmPassword('');
+        setConfirmError('');
+        return;
+      }
+
       const agentResponse: Message = {
         id: (Date.now() + 1).toString(),
         role: 'agent',
@@ -690,7 +1013,8 @@ function AgentConfig() {
             <span>Voltar</span>
           </button>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4 flex-1">
             <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${agent.gradient} flex items-center justify-center`}>
               <IconComponent className="w-6 h-6 text-white" />
             </div>
@@ -698,6 +1022,26 @@ function AgentConfig() {
               <h1 className="text-xl font-bold text-white">{agent.name}</h1>
               <p className="text-slate-400 text-base">{agent.description}</p>
             </div>
+          </div>
+          {/* Limpar Conversa */}
+          <button
+            onClick={async () => {
+              if (!token || !id) return;
+              if (!confirm('Tem certeza que deseja limpar todo o histórico desta conversa?')) return;
+              try {
+                await axios.delete(apiUrl(`/api/chat/history/${id}`), {
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                // Reset para welcome msg
+                setMessages(prev => prev.length > 0 ? [prev[0]] : []);
+              } catch { /* ignore */ }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-slate-800/50 transition text-sm"
+            title="Limpar conversa"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span className="hidden sm:inline">Limpar</span>
+          </button>
           </div>
         </div>
       </header>
@@ -791,7 +1135,7 @@ function AgentConfig() {
                             }`}>
                               {msg.automation.risk_level === 'low' ? '🟢 Baixo' :
                                msg.automation.risk_level === 'medium' ? '🟡 Médio' :
-                               msg.automation.risk_level === 'high' ? '🟠 Alto' : '🔴 Crítico'} risco
+                               msg.automation.risk_level === 'high' ? '🟠 Alto' : '🔴 Crítico'} Risco
                             </span>
                           )}
                         </div>
@@ -837,19 +1181,112 @@ function AgentConfig() {
                     {msg.automation?.status === 'executing' && (
                       <div className="mt-2 flex items-center gap-2 text-blue-400 text-sm">
                         <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                        Executando automação...
+                        Executando Automação...
                       </div>
                     )}
                     {msg.automation?.status === 'completed' && !msg.automation.requires_approval && (
                       <div className="mt-2 flex items-center gap-1 text-green-400 text-sm">
                         <CheckCircle2 className="w-4 h-4" />
-                        Automação concluída
+                        Automação Concluída
                       </div>
                     )}
                     {msg.automation?.status === 'rejected' && (
                       <div className="mt-2 flex items-center gap-1 text-slate-400 text-sm">
                         <ShieldX className="w-4 h-4" />
-                        Automação cancelada
+                        Automação Cancelada
+                      </div>
+                    )}
+                    {/* Botão Continuar Automação (após inserir credenciais) */}
+                    {msg.automation?.status === 'waiting_for_user' && (
+                      <div className="mt-3 space-y-3">
+                        {/* Card informativo */}
+                        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Lock className="w-4 h-4 text-amber-400" />
+                            <span className="text-amber-300 text-sm font-medium">Sua vez de agir</span>
+                          </div>
+                          <p className="text-slate-300 text-xs leading-relaxed">
+                            Preencha seus dados na tela do site que abrimos (CPF, senha, etc.) e clique no botão do site.
+                            <br />
+                            Quando a próxima tela aparecer, clique no botão abaixo.
+                          </p>
+                          <p className="text-slate-500 text-xs mt-1.5 italic">
+                            🔒 O robô não vê nem guarda seus dados. Isso é só entre você e o site.
+                          </p>
+                        </div>
+                        {/* Botão de continuar */}
+                        <button
+                          onClick={() => handleAutomationContinue(msg.automation!.task_id)}
+                          disabled={isLoading}
+                          className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition disabled:opacity-50 w-full justify-center"
+                        >
+                          {isLoading ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              Retomando...
+                            </>
+                          ) : (
+                            <>
+                              <RotateCw className="w-4 h-4" />
+                              Pronto, pode continuar a automação
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                    {/* Indicadores de ação sensível que requer senha/PIN */}
+                    {msg.confirmation?.status === 'awaiting_password' && (
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          onClick={() => {
+                            setPendingConfirmation({
+                              tool_name: msg.confirmation!.tool_name,
+                              arguments: msg.confirmation!.arguments,
+                              description: msg.confirmation!.description,
+                              original_message: msg.confirmation!.original_message,
+                              messageId: msg.id,
+                              pending_actions: msg.confirmation!.pending_actions,
+                            });
+                            setShowPasswordModal(true);
+                            setConfirmPassword('');
+                            setConfirmError('');
+                          }}
+                          disabled={isLoading}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium transition disabled:opacity-50"
+                        >
+                          <Lock className="w-4 h-4" />
+                          {hasConfirmationPin ? 'Confirmar com PIN' : 'Confirmar com Senha'}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setPendingConfirmation({
+                              tool_name: msg.confirmation!.tool_name,
+                              arguments: msg.confirmation!.arguments,
+                              description: msg.confirmation!.description,
+                              original_message: msg.confirmation!.original_message,
+                              messageId: msg.id,
+                              pending_actions: msg.confirmation!.pending_actions,
+                            });
+                            handlePasswordCancel();
+                          }}
+                          disabled={isLoading}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-white text-sm font-medium transition disabled:opacity-50"
+                        >
+                          <ShieldX className="w-4 h-4" />
+                          Cancelar
+                        </button>
+                      </div>
+                    )}
+                    {msg.confirmation?.status === 'confirmed' && (
+                      <div className="mt-2 flex items-center gap-1 text-green-400 text-sm">
+                        <CheckCircle2 className="w-4 h-4" />
+                        Ação Confirmada e Executada
+                      </div>
+                    )}
+                    {msg.confirmation?.status === 'cancelled' && (
+                      <div className="mt-2 flex items-center gap-1 text-slate-400 text-sm">
+                        <ShieldX className="w-4 h-4" />
+                        Ação Cancelada pelo Usuário
                       </div>
                     )}
                     <span className="text-xs opacity-50 mt-2 block">
@@ -1025,6 +1462,219 @@ function AgentConfig() {
                 className="px-8 py-3 rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white hover:from-green-400 hover:to-emerald-400 transition font-semibold shadow-lg shadow-green-500/25"
               >
                 📸 Capturar Foto
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmação com senha / PIN */}
+      {showPasswordModal && pendingConfirmation && !showPinSetup && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) handlePasswordCancel(); }}>
+          <div className="bg-slate-800 rounded-2xl border border-slate-600 shadow-2xl w-full max-w-md p-6 animate-in fade-in zoom-in-95">
+            {/* Header */}
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center">
+                <Lock className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Confirmação de Segurança</h3>
+                <p className="text-sm text-slate-400">
+                  {hasConfirmationPin ? 'Digite Seu PIN de Confirmação' : 'Digite Sua Senha de Login'}
+                </p>
+              </div>
+            </div>
+
+            {/* Descrição da(s) ação(ões) */}
+            {pendingConfirmation.pending_actions && pendingConfirmation.pending_actions.length > 1 ? (
+              <div className="bg-red-500/10 border-red-500/30 rounded-lg p-3 mb-4 border">
+                <p className="text-sm text-red-400 font-semibold mb-2">
+                  ⚠️ {pendingConfirmation.pending_actions.length} Ações Pendentes:
+                </p>
+                <ul className="space-y-1">
+                  {pendingConfirmation.pending_actions.map((act, i) => (
+                    <li key={i} className="text-sm text-slate-300 flex items-start gap-1.5">
+                      <span className="text-slate-500 mt-0.5">•</span>
+                      {act.description}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className={`${pendingConfirmation.tool_name === 'delete_client' ? 'bg-red-500/10 border-red-500/30' : 'bg-amber-500/10 border-amber-500/30'} rounded-lg p-3 mb-4 border`}>
+                <p className="text-sm text-slate-300">
+                  <span className={`${pendingConfirmation.tool_name === 'delete_client' ? 'text-red-400' : 'text-amber-400'} font-semibold`}>
+                    {pendingConfirmation.tool_name === 'delete_client' ? '⚠️ Ação Irreversível:' : '🔐 Confirmação Necessária:'}
+                  </span> {pendingConfirmation.description}
+                </p>
+              </div>
+            )}
+
+            {/* Input de senha/PIN */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                {hasConfirmationPin ? 'PIN de Confirmação' : 'Senha de Login'}
+              </label>
+              <div className="relative">
+                <input
+                  type={showConfirmPwVisible ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={e => { setConfirmPassword(e.target.value); setConfirmError(''); }}
+                  onKeyDown={e => { if (e.key === 'Enter' && confirmPassword.trim()) handlePasswordConfirm(); }}
+                  placeholder={hasConfirmationPin ? 'Seu PIN de Confirmação' : 'Sua Senha de Login'}
+                  autoFocus
+                  className="w-full px-3 py-2.5 pr-10 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                />
+                <button type="button" onClick={() => setShowConfirmPwVisible(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition">
+                  {showConfirmPwVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              {confirmError && (
+                <p className="text-red-400 text-sm mt-1.5">{confirmError}</p>
+              )}
+            </div>
+
+            {/* Info sobre PIN */}
+            <div className="mb-4 text-xs text-slate-500">
+              {hasConfirmationPin ? (
+                <p>Usando PIN de confirmação. <button onClick={() => { setShowPinSetup(true); setPinSetupData({ loginPassword: '', newPin: '', newPinConfirm: '' }); setPinSetupError(''); setPinSetupSuccess(''); }} className="text-amber-400 hover:text-amber-300 underline">Alterar ou Remover PIN</button></p>
+              ) : (
+                <p>Usando senha de login. <button onClick={() => { setShowPinSetup(true); setPinSetupData({ loginPassword: '', newPin: '', newPinConfirm: '' }); setPinSetupError(''); setPinSetupSuccess(''); }} className="text-amber-400 hover:text-amber-300 underline">Cadastrar um PIN Separado</button></p>
+              )}
+            </div>
+
+            {/* Botões */}
+            <div className="flex gap-3">
+              <button
+                onClick={handlePasswordCancel}
+                disabled={isLoading}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-slate-600 hover:bg-slate-500 text-white font-medium transition disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handlePasswordConfirm}
+                disabled={isLoading || !confirmPassword.trim()}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-medium transition disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Verificando...
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-4 h-4" />
+                    Confirmar
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de configuração de PIN de confirmação */}
+      {showPinSetup && (
+        <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowPinSetup(false); }}>
+          <div className="bg-slate-800 rounded-2xl border border-slate-600 shadow-2xl w-full max-w-md p-6 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center">
+                <ShieldCheck className="w-5 h-5 text-blue-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">
+                  {hasConfirmationPin ? 'Gerenciar PIN' : 'Cadastrar PIN de Confirmação'}
+                </h3>
+                <p className="text-sm text-slate-400">PIN Separado para Ações Sensíveis</p>
+              </div>
+            </div>
+
+            <div className="bg-blue-500/10 rounded-lg p-3 mb-4 border border-blue-500/20">
+              <p className="text-xs text-blue-300">
+                O PIN é uma senha curta (mín. 4 caracteres) usada exclusivamente para confirmar
+                exclusões e edições críticas. Se não quiser, pode continuar usando sua senha de login.
+              </p>
+            </div>
+
+            <div className="space-y-3 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Senha de Login (para Autenticar)</label>
+                <div className="relative">
+                  <input
+                    type={showPinLoginPw ? 'text' : 'password'}
+                    value={pinSetupData.loginPassword}
+                    onChange={e => { setPinSetupData(p => ({ ...p, loginPassword: e.target.value })); setPinSetupError(''); setPinSetupSuccess(''); }}
+                    placeholder="Sua senha de login atual"
+                    className="w-full px-3 py-2 pr-10 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  />
+                  <button type="button" onClick={() => setShowPinLoginPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition">
+                    {showPinLoginPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Novo PIN de Confirmação</label>
+                <div className="relative">
+                  <input
+                    type={showPinNew ? 'text' : 'password'}
+                    value={pinSetupData.newPin}
+                    onChange={e => { setPinSetupData(p => ({ ...p, newPin: e.target.value })); setPinSetupError(''); setPinSetupSuccess(''); }}
+                    placeholder="Mínimo 4 caracteres"
+                    className="w-full px-3 py-2 pr-10 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  />
+                  <button type="button" onClick={() => setShowPinNew(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition">
+                    {showPinNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Confirmar PIN</label>
+                <div className="relative">
+                  <input
+                    type={showPinConfirm ? 'text' : 'password'}
+                    value={pinSetupData.newPinConfirm}
+                    onChange={e => { setPinSetupData(p => ({ ...p, newPinConfirm: e.target.value })); setPinSetupError(''); setPinSetupSuccess(''); }}
+                    onKeyDown={e => { if (e.key === 'Enter') handlePinSetup(); }}
+                    placeholder="Repita o PIN"
+                    className="w-full px-3 py-2 pr-10 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  />
+                  <button type="button" onClick={() => setShowPinConfirm(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition">
+                    {showPinConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {pinSetupError && <p className="text-red-400 text-sm">{pinSetupError}</p>}
+              {pinSetupSuccess && <p className="text-green-400 text-sm">{pinSetupSuccess}</p>}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowPinSetup(false)}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-slate-600 hover:bg-slate-500 text-white font-medium transition text-sm"
+              >
+                Voltar
+              </button>
+              {hasConfirmationPin && (
+                <button
+                  onClick={handlePinRemove}
+                  disabled={isLoading}
+                  className="px-4 py-2.5 rounded-lg bg-red-600/30 hover:bg-red-600/50 text-red-300 font-medium transition text-sm disabled:opacity-50 border border-red-500/30"
+                >
+                  Remover PIN
+                </button>
+              )}
+              <button
+                onClick={handlePinSetup}
+                disabled={isLoading || !pinSetupData.loginPassword.trim() || !pinSetupData.newPin.trim()}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium transition text-sm disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isLoading ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  'Salvar PIN'
+                )}
               </button>
             </div>
           </div>

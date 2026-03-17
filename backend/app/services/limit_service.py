@@ -19,33 +19,52 @@ def _get_session():
     return get_session()
 
 
-def check_crm_limit(user: dict) -> None:
-    """Verifica se o usuário pode criar mais clientes."""
+def check_crm_limit(user: dict, contact_type: str | None = None) -> None:
+    """Verifica se o usuário pode criar mais clientes ou fornecedores.
+    Considera extra_client_slots (addon +10 por R$12,90 compra única).
+    contact_type: None=conta todos, 'client'=só clientes, 'supplier'=só fornecedores."""
     from app.core.plan_limits import get_limit, is_unlimited
-    from database.models import Client
+    from database.models import Client, User
+    from sqlalchemy import or_
 
     plan = user.get("plan", "free")
-    limit = get_limit(plan, "crm_clients")
+    limit_key = "crm_suppliers" if contact_type == "supplier" else "crm_clients"
+    limit = get_limit(plan, limit_key)
     if is_unlimited(limit):
         return
 
     uid = user.get("user_id", 0)
     session = _get_session()
     try:
-        count = session.query(Client).filter(
+        # Somar slots extras do addon (aplica a clientes E fornecedores)
+        db_user = session.query(User).filter(User.id == uid).first()
+        extra = getattr(db_user, 'extra_client_slots', 0) or 0
+        effective_limit = limit + extra
+
+        query = session.query(Client).filter(
             Client.user_id == uid,
             Client.is_active == True,  # noqa: E712
-        ).count()
-        if count >= limit:
+        )
+        if contact_type == "supplier":
+            query = query.filter(Client.contact_type == "supplier")
+        elif contact_type == "client":
+            query = query.filter(
+                or_(Client.contact_type == "client", Client.contact_type.is_(None))
+            )
+        # Se contact_type=None, conta TODOS (backward compatible)
+
+        count = query.count()
+        label = "fornecedores" if contact_type == "supplier" else "clientes"
+        if count >= effective_limit:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "code": "LIMIT_REACHED",
-                    "resource": "crm_clients",
-                    "limit": limit,
+                    "resource": limit_key,
+                    "limit": effective_limit,
                     "current": count,
-                    "message": f"Plano gratuito permite até {limit} clientes. "
-                               f"Faça upgrade para continuar.",
+                    "message": f"Seu plano permite até {effective_limit} {label}. "
+                               f"Faça upgrade ou adicione mais por R$ 12,90 (compra única).",
                     "upgrade_url": "/pricing",
                 },
             )
@@ -125,9 +144,10 @@ def check_agent_access(user: dict, agent_id: str) -> None:
 
 
 def check_agent_message_limit(user: dict) -> None:
-    """Verifica se o usuário atingiu o limite de mensagens diárias."""
+    """Verifica se o usuário atingiu o limite de mensagens diárias.
+    Considera bônus proporcional do addon de clientes extras."""
     from app.core.plan_limits import get_limit, is_unlimited
-    from database.models import ChatMessage
+    from database.models import ChatMessage, User
 
     # Admins são isentos
     role = user.get("role", "user")
@@ -145,20 +165,33 @@ def check_agent_message_limit(user: dict) -> None:
     )
     session = _get_session()
     try:
+        # Calcular limite efetivo com addon (proporcional a clientes extras)
+        db_user = session.query(User).filter(User.id == uid).first()
+        extra_slots = getattr(db_user, 'extra_client_slots', 0) or 0
+        if extra_slots > 0:
+            base_clients = get_limit(plan, "crm_clients")
+            if base_clients and base_clients > 0:
+                ratio = limit / base_clients  # ex: 10msgs / 5clients = 2
+                effective_limit = limit + int(extra_slots * ratio)
+            else:
+                effective_limit = limit
+        else:
+            effective_limit = limit
+
         count = session.query(ChatMessage).filter(
             ChatMessage.user_id == uid,
             ChatMessage.role == "user",
             ChatMessage.created_at >= start,
         ).count()
-        if count >= limit:
+        if count >= effective_limit:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "code": "LIMIT_REACHED",
                     "resource": "agent_messages_per_day",
-                    "limit": limit,
+                    "limit": effective_limit,
                     "current": count,
-                    "message": f"Você atingiu o limite de {limit} mensagens "
+                    "message": f"Você atingiu o limite de {effective_limit} mensagens "
                                f"por dia. Faça upgrade ou aguarde amanhã.",
                     "upgrade_url": "/pricing",
                 },

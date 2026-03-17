@@ -254,3 +254,65 @@ def clear_context(user_id: int, agent_id: str) -> None:
         r.delete(_redis_key(user_id, agent_id))
     except Exception:
         pass
+
+
+# ============================================================================
+# CROSS-AGENT CONTEXT — Resumo de conversas de outros agentes
+# ============================================================================
+
+_AGENT_LABELS: dict[str, str] = {
+    "agenda": "Agenda",
+    "clientes": "Clientes",
+    "contabilidade": "Financeiro",
+    "cobranca": "Cobranças",
+    "assistente": "Assistente Pessoal",
+    "financeiro": "Financeiro",
+}
+
+
+def load_cross_agent_summary(
+    user_id: int,
+    current_agent_id: str,
+    msgs_per_agent: int = 4,
+) -> str:
+    """Carrega resumo de conversas RECENTES de OUTROS agentes.
+
+    Retorna string formatada pronta para injetar no system prompt.
+    Inclui apenas as últimas `msgs_per_agent` mensagens de cada agente
+    diferente do agente atual, para dar contexto cross-agent sem
+    sobrecarregar o token window.
+
+    Retorna string vazia se não houver contexto relevante.
+    """
+    _ALL_AGENTS = ["agenda", "clientes", "contabilidade", "cobranca", "assistente"]
+    other_agents = [a for a in _ALL_AGENTS if a != current_agent_id]
+
+    # Resolve alias: financeiro → contabilidade já está na mesma chave
+    _alias = {"financeiro": "contabilidade", "documentos": "contabilidade"}
+    resolved_current = _alias.get(current_agent_id, current_agent_id)
+    other_agents = [a for a in _ALL_AGENTS if a != resolved_current]
+
+    sections: list[str] = []
+    for agent_id in other_agents:
+        try:
+            history = load_chat_history(user_id, agent_id, limit=msgs_per_agent)
+        except Exception:
+            history = []
+        if not history:
+            continue
+        label = _AGENT_LABELS.get(agent_id, agent_id.title())
+        lines = []
+        for msg in history:
+            role = "Usuário" if msg.get("role") == "user" else "Agente"
+            content = msg.get("content", "")[:200]  # Truncar mensagens longas
+            lines.append(f"  {role}: {content}")
+        sections.append(f"[{label}]\n" + "\n".join(lines))
+
+    if not sections:
+        return ""
+
+    return (
+        "\n\nCONTEXTO DE OUTROS AGENTES (resumo das últimas conversas — use para manter continuidade):\n"
+        + "\n\n".join(sections)
+        + "\n"
+    )

@@ -62,6 +62,12 @@ def policy_node(state: AgentState) -> dict[str, Any]:
                 f"🚫 {len(blocked)} ações bloqueadas: "
                 + ", ".join(f"{d.action.tool}: {d.reason}" for d in blocked)
             )
+            # Registrar ações bloqueadas no estado para o planner ter feedback
+            updates["blocked_actions_info"] = "; ".join(
+                f"{d.action.tool}: {d.reason}" for d in blocked
+            )
+        else:
+            updates["blocked_actions_info"] = ""
         
         # Filtrar plano para apenas ações permitidas
         allowed_actions = []

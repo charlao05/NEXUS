@@ -100,6 +100,56 @@ class AutomationResultResponse(BaseModel):
     action_results: list[dict[str, Any]] = []
 
 
+class AutomationContinueRequest(BaseModel):
+    """Requisição para continuar automação após input do usuário."""
+    task_id: str
+
+
+# ---------------------------------------------------------------------------
+# Detecção de necessidade de input do usuário
+# ---------------------------------------------------------------------------
+
+_WAITING_KEYWORDS = [
+    "credenciais", "login", "senha", "autenticação", "autenticar",
+    "entrar com", "fazer login", "insira", "digite seus",
+    "preencha seus", "usuário e senha", "faça login",
+    "dados de acesso", "identificação", "seus dados", "efetuar login",
+    "realizar login", "acesse com", "entre com", "tela de login",
+    "formulário de login", "página de login",
+    # HIL — human-in-the-loop
+    "agora é a parte que só você pode fazer",
+    "agora é com você",
+    "anti-robô", "anti-robo", "captcha",
+]
+
+
+def _detect_waiting_for_user(result: dict[str, Any]) -> bool:
+    """Detecta se o resultado da automação indica que precisa de input do usuário."""
+    # 1. Orquestrador já sinalizou via status
+    if result.get("status") == "waiting_for_user":
+        return True
+
+    final_resp = (result.get("final_response") or "").lower()
+    # 2. Resposta menciona credenciais / login
+    if any(kw in final_resp for kw in _WAITING_KEYWORDS):
+        return True
+
+    # 3. Resultado de percepção detectou login page ou wait_for_user_login
+    for r in result.get("action_results", []):
+        # Detecção via tool wait_for_user_login
+        if r.get("tool") == "wait_for_user_login":
+            return True
+        output = r.get("output")
+        if isinstance(output, dict):
+            # Flag explícita de waiting_for_user
+            if output.get("waiting_for_user"):
+                return True
+            ps = output.get("page_state", {})
+            if isinstance(ps, dict) and ps.get("page_type") == "login":
+                return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -301,6 +351,26 @@ Formato:
             if clean.endswith("```"):
                 clean = clean[:-3]
         plan = json.loads(clean)
+
+        # ── Pós-processamento: forçar URL do template no primeiro navigate ──
+        # O LLM pode inventar URLs. A URL real vem do template e é canon.
+        try:
+            from backend.orchestrator.templates import get_template as _gt
+            tpl = _gt(site_hint)
+            canonical_url = tpl.get("site_config", {}).get("url", "")
+            if canonical_url:
+                for step in plan.get("steps", []):
+                    if step.get("action") == "navigate":
+                        old_url = step.get("params", {}).get("url", "")
+                        if old_url != canonical_url:
+                            logger.info(
+                                f"URL corrigida no plano: {old_url[:80]} -> {canonical_url[:80]}"
+                            )
+                            step["params"]["url"] = canonical_url
+                        break  # corrigir apenas o primeiro navigate
+        except Exception:
+            pass
+
         return plan
 
     except Exception as e:
@@ -431,7 +501,7 @@ async def _execute_automation(task: dict[str, Any]) -> dict[str, Any]:
             user_id=task.get("user_id", 1),
             goal=task.get("goal", ""),
             original_message=task.get("message", ""),
-            max_iterations=5,
+            max_iterations=12,
             max_steps=len(task.get("steps", [])) + 5,
             site_config=task.get("site_config"),
         )
@@ -440,9 +510,27 @@ async def _execute_automation(task: dict[str, Any]) -> dict[str, Any]:
         action_results = result.get("action_results", [])
         browser_actions = [r for r in action_results if r.get("tool", "").startswith("browser_")]
         
-        if not browser_actions and result.get("status") != "failed":
+        if not browser_actions and result.get("status") not in ("failed", "waiting_for_user"):
             logger.warning("Orchestrador completou sem ações de browser — tentando execução direta")
             return await _execute_direct(task)
+
+        # Detectar se precisa de input do usuário (login/credenciais)
+        if _detect_waiting_for_user(result):
+            result["status"] = "waiting_for_user"
+            resp = result.get("final_response", "")
+            # Se a resposta já veio com linguagem clara do wait_for_user_login, usar como está
+            # Caso contrário, adicionar instrução padrão
+            if "Continuar Automação" not in resp:
+                result["final_response"] = (
+                    resp.rstrip()
+                    + "\n\n🔒 **Agora é a parte que só você pode fazer.**"
+                    + "\n\n1. Olhe para a tela do site que abrimos."
+                    + "\n2. Digite seus dados (CPF, data de nascimento, senha — o que for pedido)."
+                    + "\n3. Clique no botão do site (ex: 'Consultar', 'Entrar')."
+                    + "\n4. Quando a próxima tela aparecer, volte aqui e clique no botão abaixo."
+                    + "\n\n💡 *O robô não vê nem guarda seu CPF ou senha. Isso é só entre você e o site.*"
+                    + "\n\n🔄 Clique em **Continuar Automação** quando estiver pronto."
+                )
 
         return result
 
@@ -460,9 +548,14 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
     """
     import asyncio
 
-    def _run_steps_sync() -> tuple[list[dict[str, Any]], bool]:
-        """Execução síncrona dos passos Playwright."""
+    def _run_steps_sync() -> tuple[list[dict[str, Any]], bool, bool]:
+        """Execução síncrona dos passos Playwright.
+        
+        Returns:
+            (results, all_ok, needs_user_input)
+        """
         results: list[dict[str, Any]] = []
+        needs_user_input = False
         try:
             from backend.orchestrator.tools.browser import (
                 browser_navigate, browser_click, browser_type,
@@ -523,34 +616,62 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
                     results.append({"step": step.get("step"), "action": action, "success": False, "error": str(e)})
                     break
 
-            # Fechar browser ao final
+            # Pós-execução: verificar se a página precisa de input do usuário
             try:
-                shutdown_browser()
+                ps_result = browser_get_page_state({}, minimal_state)
+                if ps_result.get("success"):
+                    ps = ps_result.get("page_state", {})
+                    if isinstance(ps, dict) and ps.get("page_type") in ("login", "form"):
+                        needs_user_input = True
             except Exception:
                 pass
 
+            # Só fechar browser se NÃO precisar de input do usuário
+            if not needs_user_input:
+                try:
+                    shutdown_browser()
+                except Exception:
+                    pass
+
             all_ok = all(r.get("success", False) for r in results)
-            return results, all_ok
+            return results, all_ok, needs_user_input
 
         except ImportError as e:
             logger.error(f"Playwright não disponível: {e}")
-            return [{"step": 0, "action": "import", "success": False, "error": str(e)}], False
+            return [{"step": 0, "action": "import", "success": False, "error": str(e)}], False, False
         except Exception as e:
             logger.error(f"Erro na execução direta: {e}", exc_info=True)
-            return [{"step": 0, "action": "error", "success": False, "error": str(e)}], False
+            return [{"step": 0, "action": "error", "success": False, "error": str(e)}], False, False
 
     # Executar em thread separada para não bloquear o event loop async
     try:
-        results, all_ok = await asyncio.to_thread(_run_steps_sync)
+        results, all_ok, needs_user_input = await asyncio.to_thread(_run_steps_sync)
     except Exception as e:
         logger.error(f"Erro ao executar em thread: {e}")
         results = [{"step": 0, "action": "thread", "success": False, "error": str(e)}]
         all_ok = False
+        needs_user_input = False
+
+    if needs_user_input:
+        status = "waiting_for_user"
+        message = (
+            _format_results_for_chat(results)
+            + "\n\n🔒 **Agora é a parte que só você pode fazer.**"
+            + "\n\n1. Olhe para a tela do site que abrimos."
+            + "\n2. Digite seus dados (CPF, data de nascimento, senha — o que for pedido)."
+            + "\n3. Clique no botão do site (ex: 'Consultar', 'Entrar')."
+            + "\n4. Quando a próxima tela aparecer, volte aqui e clique no botão abaixo."
+            + "\n\n💡 *O robô não vê nem guarda seu CPF ou senha. Isso é só entre você e o site.*"
+            + "\n\n🔄 Clique em **Continuar Automação** quando estiver pronto."
+        )
+    else:
+        status = "completed" if all_ok else "partial"
+        message = _format_results_for_chat(results)
 
     return {
         "task_id": task.get("task_id", "unknown"),
-        "status": "completed" if all_ok else "partial",
-        "final_response": _format_results_for_chat(results),
+        "status": status,
+        "final_response": message,
         "action_results": results,
     }
 
@@ -707,4 +828,244 @@ async def automation_status(
         "goal": task.get("goal", ""),
         "created_at": task.get("created_at"),
         "plan_summary": task.get("plan", {}).get("plan_summary", ""),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Continuação: retomar automação após input do usuário (login, etc.)
+# ---------------------------------------------------------------------------
+
+@router.post("/continue", response_model=AutomationResultResponse)
+async def continue_automation(
+    request: AutomationContinueRequest,
+    current_user: dict = Depends(get_current_user),
+) -> AutomationResultResponse:
+    """Retoma automação após o usuário inserir dados no browser (login, etc.).
+
+    O browser permanece aberto desde a execução anterior. Este endpoint
+    re-sente a página atual, re-planeja e executa os próximos passos.
+    """
+    task = _automation_tasks.get(request.task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Automação não encontrada")
+    if task.get("user_id") != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Sem permissão para esta automação")
+    if task["status"] != "waiting_for_user":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Automação não está aguardando continuação (status: {task['status']})",
+        )
+
+    task["status"] = "executing"
+    logger.info(f"🔄 Continuando automação {request.task_id} após input do usuário")
+
+    result = await _continue_automation(task)
+
+    task["status"] = result.get("status", "completed")
+    task["result"] = result
+
+    return AutomationResultResponse(
+        task_id=request.task_id,
+        status=result.get("status", "completed"),
+        message=result.get("final_response", "Automação concluída."),
+        action_results=result.get("action_results", []),
+    )
+
+
+async def _continue_automation(task: dict[str, Any]) -> dict[str, Any]:
+    """Continua automação: re-sensa a página e executa próximos passos.
+
+    O browser já está aberto (não foi fechado na execução anterior).
+    Tenta via orchestrator primeiro, depois fallback direto.
+    
+    O orchestrator vai:
+    1. sense_node: capturar novo DOM (pós-login) e limpar flags de awaiting_user_input
+    2. plan_node: planejar ações normais (sem wait_for_user_login, já que a tela mudou)
+    3. act_node: executar ações (extrair dados, baixar PDF, etc.)
+    """
+    try:
+        import backend.orchestrator.tools.browser  # noqa: F401
+        from backend.orchestrator.graph import run_task
+
+        # O goal é adaptado para indicar que o usuário já fez login
+        continuation_goal = (
+            f"Continuar a tarefa: {task.get('goal', '')}. "
+            "O usuário já preencheu seus dados (CPF, senha, captcha, etc.) no navegador. "
+            "A página agora deve estar diferente (pós-login/pós-consulta). "
+            "Capture o estado atual da página e prossiga com o objetivo original: "
+            "extrair informações, baixar comprovantes, copiar dados, etc."
+        )
+
+        result = await run_task(
+            agent_type="browser",
+            user_id=task.get("user_id", 1),
+            goal=continuation_goal,
+            original_message=task.get("message", ""),
+            max_iterations=12,
+            max_steps=15,
+            site_config=task.get("site_config"),
+        )
+
+        # Verificar novamente se ainda precisa de input
+        if _detect_waiting_for_user(result):
+            result["status"] = "waiting_for_user"
+            resp = result.get("final_response", "")
+            if "Continuar Automação" not in resp:
+                result["final_response"] = (
+                    resp.rstrip()
+                    + "\n\n🔄 Ainda é necessário completar ações no navegador. "
+                    "Clique em **Continuar Automação** quando estiver pronto."
+                )
+        else:
+            # Automação concluída — fechar browser
+            try:
+                from backend.orchestrator.tools.browser import shutdown_browser
+                shutdown_browser()
+            except Exception:
+                pass
+            
+            # Adicionar mensagem de retomada bem-sucedida
+            resp = result.get("final_response", "")
+            if resp and "Continuar Automação" not in resp:
+                result["final_response"] = (
+                    "✅ **Beleza, já estou vendo a tela depois do seu login.**\n\n"
+                    + resp
+                )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Erro ao continuar automação: {e}", exc_info=True)
+        return await _continue_direct(task)
+
+
+async def _continue_direct(task: dict[str, Any]) -> dict[str, Any]:
+    """Fallback de continuação: captura estado atual + screenshot + responde."""
+    import asyncio
+
+    def _sense_current_page() -> dict[str, Any]:
+        from backend.orchestrator.tools.browser import (
+            browser_get_page_state,
+            browser_screenshot,
+            browser_get_text,
+            shutdown_browser,
+        )
+
+        minimal_state = {
+            "user_id": task.get("user_id", 1),
+            "goal": task.get("goal", ""),
+            "agent_type": "browser",
+        }
+
+        results: list[dict[str, Any]] = []
+        page_text = ""
+        page_state: dict[str, Any] = {}
+
+        # 1. Capturar estado da página
+        try:
+            ps = browser_get_page_state({}, minimal_state)
+            results.append({"step": 1, "action": "get_page_state", **ps})
+            if ps.get("success"):
+                page_state = ps.get("page_state", {})
+        except Exception as ex:
+            results.append({"step": 1, "action": "get_page_state", "success": False, "error": str(ex)})
+
+        # 2. Screenshot
+        try:
+            ss = browser_screenshot({}, minimal_state)
+            results.append({"step": 2, "action": "screenshot", **ss})
+        except Exception as ex:
+            results.append({"step": 2, "action": "screenshot", "success": False, "error": str(ex)})
+
+        # 3. Ler texto
+        try:
+            txt = browser_get_text({"selector": "body"}, minimal_state)
+            results.append({"step": 3, "action": "read_text", **txt})
+            if txt.get("success"):
+                page_text = txt.get("text", "")[:2000]
+        except Exception as ex:
+            results.append({"step": 3, "action": "read_text", "success": False, "error": str(ex)})
+
+        # Fechar browser
+        try:
+            shutdown_browser()
+        except Exception:
+            pass
+
+        return {
+            "results": results,
+            "page_text": page_text,
+            "page_state": page_state,
+        }
+
+    try:
+        sense_data = await asyncio.to_thread(_sense_current_page)
+    except Exception as e:
+        logger.error(f"Erro ao sensar página para continuação: {e}")
+        return {
+            "task_id": task.get("task_id", "unknown"),
+            "status": "failed",
+            "final_response": (
+                "❌ Não consegui acessar o navegador. "
+                "O browser pode ter sido fechado. Tente iniciar uma nova automação."
+            ),
+            "action_results": [],
+        }
+
+    # Usar LLM para interpretar a página capturada
+    page_text = sense_data.get("page_text", "")
+    page_state = sense_data.get("page_state", {})
+    page_title = page_state.get("title", "")
+    page_type = page_state.get("page_type", "")
+    page_url = page_state.get("url", "")
+
+    try:
+        from app.api.agent_chat import get_openai_client
+
+        client = get_openai_client()
+        if client:
+            resp = client.chat_completion(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Você é o assistente do NEXUS. O usuário pediu uma automação web. "
+                            "Ele inseriu credenciais no navegador e você capturou a página atual. "
+                            "Resuma o que a página mostra, se o login foi bem-sucedido, e oriente "
+                            "o usuário sobre próximos passos. Seja conciso e amigável."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Objetivo original: {task.get('goal', '')}\n\n"
+                            f"URL atual: {page_url}\n"
+                            f"Título: {page_title}\n"
+                            f"Tipo: {page_type}\n\n"
+                            f"Texto da página (resumido):\n{page_text[:1500]}"
+                        ),
+                    },
+                ],
+                temperature=0.3,
+                max_tokens=400,
+            )
+            message = resp
+        else:
+            message = (
+                f"📄 Página capturada: **{page_title or 'Sem título'}**\n"
+                f"🔗 URL: {page_url}\n\n"
+                f"Texto: {page_text[:500]}"
+            )
+    except Exception:
+        message = (
+            f"📄 Página capturada: **{page_title or 'Sem título'}**\n"
+            f"🔗 URL: {page_url}\n\n"
+            f"Texto: {page_text[:500]}"
+        )
+
+    return {
+        "task_id": task.get("task_id", "unknown"),
+        "status": "completed",
+        "final_response": message,
+        "action_results": sense_data.get("results", []),
     }

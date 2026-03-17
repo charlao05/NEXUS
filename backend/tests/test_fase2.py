@@ -36,7 +36,7 @@ def auth_headers(client):
     """Cria usuário e retorna headers com token"""
     resp = client.post("/api/auth/signup", json={
         "email": "test@nexus.com",
-        "password": "senhaforte123",
+        "password": "SenhaForte@123",
         "full_name": "Test User"
     })
     token = resp.json()["access_token"]
@@ -171,7 +171,7 @@ class TestFreemiumAccess:
         """Usuário free NUNCA recebe 403 trial_expired (freemium permanente)"""
         resp = client.post("/api/auth/signup", json={
             "email": "freemium@nexus.com",
-            "password": "senhaforte123",
+            "password": "SenhaForte@123",
             "full_name": "Freemium User"
         })
         token = resp.json()["access_token"]
@@ -183,7 +183,7 @@ class TestFreemiumAccess:
         """Usuário com plano pago tem acesso normal"""
         resp = client.post("/api/auth/signup", json={
             "email": "paid@nexus.com",
-            "password": "senhaforte123",
+            "password": "SenhaForte@123",
             "full_name": "Paid User"
         })
         token = resp.json()["access_token"]
@@ -220,7 +220,7 @@ class TestSecurityHeaders:
         resp = client.get("/health")
         assert resp.headers.get("X-Content-Type-Options") == "nosniff"
         assert resp.headers.get("X-Frame-Options") == "DENY"
-        assert resp.headers.get("X-XSS-Protection") == "1; mode=block"
+        assert resp.headers.get("X-XSS-Protection") == "0"  # OWASP recomenda desativar em favor de CSP
 
     def test_plans_endpoint(self, client):
         resp = client.get("/api/auth/plans")

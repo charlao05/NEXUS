@@ -46,7 +46,7 @@ export default function ResetPassword() {
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-4">
         <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-8 max-w-md w-full text-center">
           <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-white mb-2">Link inválido</h2>
+          <h2 className="text-xl font-bold text-white mb-2">Link Inválido</h2>
           <p className="text-slate-400 mb-6">
             O link de redefinição de senha é inválido ou expirou.
             Solicite um novo na página de login.
@@ -69,7 +69,7 @@ export default function ResetPassword() {
           onClick={() => navigate('/login')}
           className="flex items-center gap-2 text-emerald-400 hover:text-emerald-300 mb-6 transition-colors text-sm"
         >
-          <ArrowLeft className="w-4 h-4" /> Voltar ao login
+          <ArrowLeft className="w-4 h-4" /> Voltar ao Login
         </button>
 
         <div className="text-center mb-6">
@@ -86,7 +86,7 @@ export default function ResetPassword() {
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1">Nova senha</label>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Nova Senha</label>
               <input
                 type="password"
                 value={password}
@@ -99,7 +99,7 @@ export default function ResetPassword() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1">Confirmar senha</label>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Confirmar Senha</label>
               <input
                 type="password"
                 value={confirm}

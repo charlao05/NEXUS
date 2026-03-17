@@ -26,6 +26,7 @@ class TaskStatus(str, Enum):
     EXECUTING = "executing"
     CHECKING = "checking"
     WAITING_APPROVAL = "waiting_approval"
+    WAITING_FOR_USER = "waiting_for_user"  # Aguardando input do usuário no browser (ex: login)
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -113,6 +114,15 @@ class AgentState(TypedDict, total=False):
     max_iterations: int                 # Limite de iterações (anti-loop)
     error: str | None                   # Último erro
     
+    # --- Human-in-the-loop (tela sensível) ---
+    awaiting_user_input: bool           # Agente parado em tela sensível, esperando humano
+    awaiting_user_reason: str           # Ex: "Campos CPF/senha detectados na Receita Federal"
+    resume_hint: str                    # Instrução simples pro MEI ("Digite seu CPF e clique em Consultar")
+    sensitive_screen_snapshot: str       # Descrição textual da tela (sem dados sensíveis)
+    
+    # --- Feedback do policy para o planner ---
+    blocked_actions_info: str           # Ações bloqueadas pela política (ex: "browser_type: campo CPF sensível")
+    
     # --- Metadata ---
     created_at: str                     # ISO timestamp
     updated_at: str                     # ISO timestamp
@@ -157,6 +167,11 @@ def create_initial_state(
         iteration=0,
         max_iterations=max_iterations,
         error=None,
+        awaiting_user_input=False,
+        awaiting_user_reason="",
+        resume_hint="",
+        sensitive_screen_snapshot="",
+        blocked_actions_info="",
         created_at=now,
         updated_at=now,
     )

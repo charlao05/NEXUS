@@ -33,7 +33,7 @@ export default function Privacidade() {
             <ul className="list-disc pl-6 space-y-1 mb-4">
               <li>Nome completo e email (cadastro)</li>
               <li>CNPJ, CPF, dados da empresa (funcionalidades MEI)</li>
-              <li>Informações de clientes inseridas no CRM</li>
+              <li>Informações de clientes cadastrados no sistema</li>
               <li>Dados financeiros (receitas, despesas, notas fiscais)</li>
               <li>Dados de agendamento e contatos</li>
             </ul>
@@ -49,7 +49,7 @@ export default function Privacidade() {
           <section>
             <h2 className="text-xl font-semibold text-white mb-3">3. Finalidades do Tratamento</h2>
             <ul className="list-disc pl-6 space-y-2">
-              <li><strong>Prestação do serviço:</strong> Gerenciar sua conta, processar dados contábeis, CRM e agendamentos.</li>
+              <li><strong>Prestação do serviço:</strong> Gerenciar sua conta, processar dados contábeis, clientes e agendamentos.</li>
               <li><strong>Comunicação:</strong> Enviar notificações sobre sua conta, cobranças e atualizações do serviço.</li>
               <li><strong>Melhoria do produto:</strong> Análise de uso agregada e anônima para aprimorar funcionalidades.</li>
               <li><strong>Segurança:</strong> Prevenir fraudes e acessos não autorizados.</li>

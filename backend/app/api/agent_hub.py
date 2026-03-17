@@ -12,14 +12,14 @@ Endpoints:
 - PUT /api/agents/{agent}/config - Atualizar configuração
 - POST /api/agents/{agent}/execute - Executar ação de um agente
 """
-from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 import logging
 
 # Importar dependência de autenticação
-from app.api.auth import get_current_user  # type: ignore[import]
+from app.api.auth import get_current_user, increment_request_count  # type: ignore[import]
 
 # Importar agentes existentes (paths relativos ao backend/)
 from agents.agenda_agent import AgendaAgent
@@ -336,7 +336,7 @@ async def get_hub_messages(limit: int = 50, user: dict = Depends(get_current_use
 
 @router.post("/hub/message")
 async def send_message(request: MessageRequest, user: dict = Depends(get_current_user)):
-    """Envia uma mensagem entre agentes"""
+    """Envia uma mensagem entre agentes (inter-agente, não conta como uso do usuário)"""
     hub = get_hub()
     
     try:
@@ -463,6 +463,126 @@ async def update_agent_config(
     }
 
 
+class ConfirmActionRequest(BaseModel):
+    """Request para confirmar ação sensível com senha.
+    Suporta batch: se 'actions' estiver presente, executa todas.
+    Caso contrário, usa tool_name/arguments (single — retrocompatível).
+    """
+    password: str
+    tool_name: str = ""
+    arguments: Dict[str, Any] = {}
+    original_message: str = ""
+    actions: List[Dict[str, Any]] = []  # Batch: [{tool_name, arguments}]
+
+    def get_actions_to_run(self) -> List[Dict[str, Any]]:
+        """Retorna lista de ações a executar (batch ou single).
+        Valida que ao menos uma ação foi fornecida."""
+        if self.actions and len(self.actions) > 0:
+            return self.actions
+        if self.tool_name:
+            return [{"tool_name": self.tool_name, "arguments": self.arguments}]
+        return []
+
+
+@router.post("/{agent_id}/confirm-action")
+async def confirm_sensitive_action(
+    agent_id: str,
+    req: ConfirmActionRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Confirma uma ação sensível (delete, etc.) verificando a senha do usuário.
+    Verifica primeiro o PIN de confirmação (se configurado), senão a senha de login.
+    Após verificação, re-executa a mensagem original com a ação pré-aprovada."""
+    from app.api.auth import verify_password
+    from database.models import User, SessionLocal
+
+    _user_id: int | None = current_user.get("user_id")
+
+    # Verificar senha/PIN do usuário
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == _user_id).first()
+        if not user:
+            raise HTTPException(status_code=403, detail="Usuário não encontrado.")
+
+        # Se o usuário tem PIN de confirmação, verificar PIN; senão, verificar senha de login
+        password_valid = False
+        if user.confirmation_pin_hash:
+            password_valid = verify_password(req.password, str(user.confirmation_pin_hash))
+        if not password_valid:
+            password_valid = verify_password(req.password, str(user.password_hash))
+
+        if not password_valid:
+            detail_msg = "PIN de confirmação incorreto." if user.confirmation_pin_hash else "Senha incorreta."
+            raise HTTPException(status_code=403, detail=f"{detail_msg} Ação não autorizada.")
+    finally:
+        db.close()
+
+    # Senha/PIN correto — executar a ferramenta diretamente com os argumentos capturados
+    # (não re-invocar a LLM, pois ela pode gerar tool calls diferentes na segunda vez)
+    agent_id = _resolve_agent_id(agent_id)
+
+    # ── Incrementar contador de uso (ação confirmada = interação real) ──
+    increment_request_count(_user_id or 0)
+
+    try:
+        from app.api.agent_chat import _execute_crm_tool
+
+        # Montar lista de ações a executar (batch ou single) com validação
+        actions_to_run = req.get_actions_to_run()
+        if not actions_to_run:
+            raise HTTPException(status_code=400, detail="Nenhuma ação fornecida para confirmar.")
+
+        results_msgs: list[str] = []
+        for act in actions_to_run:
+            _tool = act.get("tool_name", "")
+            _args = act.get("arguments", {})
+
+            result = _execute_crm_tool(_tool, _args, _user_id)
+            logger.info(f"✅ confirm-action executou {_tool} diretamente → {result.get('status', '?')}")
+
+            # Gerar mensagem amigável baseada no resultado
+            if _tool == "delete_client":
+                client_name = _args.get("client_name", f"#{_args.get('client_id', '?')}")
+                if result.get("status") in ("deactivated", "deleted"):
+                    action_word = "removido permanentemente" if result.get("status") == "deleted" else "desativado"
+                    results_msgs.append(f"✅ Cliente {client_name} foi {action_word} com sucesso.")
+                elif result.get("status") == "not_found":
+                    results_msgs.append(f"⚠️ Cliente {client_name} não foi encontrado. Pode já ter sido removido.")
+                else:
+                    results_msgs.append(f"❌ Não foi possível excluir o cliente {client_name}: {result.get('message', 'erro desconhecido')}.")
+            elif _tool == "update_client":
+                client_name = _args.get("name", f"#{_args.get('client_id', '?')}")
+                if result.get("status") == "updated":
+                    results_msgs.append(f"✅ Cliente {client_name} foi atualizado com sucesso.")
+                elif result.get("status") == "not_found":
+                    results_msgs.append(f"⚠️ Cliente {client_name} não foi encontrado.")
+                else:
+                    results_msgs.append(f"❌ Não foi possível atualizar o cliente: {result.get('message', 'erro desconhecido')}.")
+            else:
+                ok = result.get("status") not in ("error", "not_found")
+                results_msgs.append(f"✅ Ação '{_tool}' executada com sucesso." if ok else f"❌ Erro: {result.get('message', 'desconhecido')}")
+
+        friendly_msg = "\n".join(results_msgs)
+
+        # Salvar no histórico
+        try:
+            from app.services.chat_context import save_turn
+            save_turn(_user_id or 0, agent_id, req.original_message, friendly_msg)
+        except Exception:
+            pass
+
+        return {
+            "status": "success",
+            "agent_id": agent_id,
+            "action": "confirmed_action",
+            "message": friendly_msg,
+        }
+    except Exception as e:
+        logger.error(f"Erro ao executar ação confirmada: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Erro ao executar ação. Tente novamente.")
+
+
 @router.post("/{agent_id}/execute")
 async def execute_agent_action(
     agent_id: str,
@@ -487,6 +607,9 @@ async def execute_agent_action(
     from app.services.limit_service import check_agent_access, check_agent_message_limit
     check_agent_access(current_user, agent_id)
     check_agent_message_limit(current_user)
+
+    # ── Incrementar contador de uso (apenas interações reais) ────
+    increment_request_count(current_user.get("user_id", 0))
 
     # ── user_id extraído do JWT (autenticado) ────────────────────
     _user_id: int | None = current_user.get("user_id")
@@ -566,7 +689,7 @@ async def execute_agent_action(
 
     # ── Inteligência via OpenAI GPT-4.1 ──────────────────────────
     try:
-        from app.api.agent_chat import get_llm_response, ACTION_PROMPTS
+        from app.api.agent_chat import get_llm_response, ACTION_PROMPTS, SensitiveActionRequired
 
         # Carregar histórico persistente para contexto (Redis → fallback SQLite)
         chat_history: list[dict] = []
@@ -595,9 +718,30 @@ async def execute_agent_action(
             except Exception:
                 pass
 
+        # Extrair confirmed_action (se o usuário já confirmou com senha)
+        _confirmed_action: str | None = action.parameters.get("_confirmed_action")
+
         # Chat livre: usuário digitou uma mensagem
         if user_message and action.action in ("smart_chat", "chat"):
-            llm_response = await get_llm_response(agent_id, user_message, history=chat_history, user_id=_user_id)
+            try:
+                llm_response = await get_llm_response(agent_id, user_message, history=chat_history, user_id=_user_id, confirmed_action=_confirmed_action)
+            except SensitiveActionRequired as sar:
+                # Ação requer confirmação com senha — retornar ao frontend
+                _n_actions = len(sar.pending_actions)
+                _plural = f"{_n_actions} ações" if _n_actions > 1 else "a ação"
+                return {
+                    "status": "requires_confirmation",
+                    "agent_id": agent_id,
+                    "action": action.action,
+                    "message": f"🔒 **Confirmação Necessária**\n\nPara Executar {_plural}: **{sar.description}**\n\nDigite sua senha para confirmar.",
+                    "confirmation": {
+                        "tool_name": sar.tool_name,
+                        "arguments": sar.arguments,
+                        "description": sar.description,
+                        "original_message": user_message,
+                        "pending_actions": sar.pending_actions,
+                    },
+                }
             if llm_response:
                 _save_chat(user_message, llm_response, _user_id)
                 hub = get_hub()
@@ -610,11 +754,34 @@ async def execute_agent_action(
                 }
             else:
                 logger.warning(f"LLM retornou vazio para agent={agent_id} msg={user_message[:50]}")
+                return {
+                    "status": "success",
+                    "agent_id": agent_id,
+                    "action": action.action,
+                    "message": "⚠️ Não consegui processar sua solicitação agora. Tente reformular ou tente novamente em alguns instantes.",
+                }
 
         # Quick action (botão): converte ação em prompt natural
         if action.action in ACTION_PROMPTS:
             prompt = ACTION_PROMPTS[action.action]
-            llm_response = await get_llm_response(agent_id, prompt, history=chat_history, user_id=_user_id)
+            try:
+                llm_response = await get_llm_response(agent_id, prompt, history=chat_history, user_id=_user_id, confirmed_action=_confirmed_action)
+            except SensitiveActionRequired as sar:
+                _n_actions = len(sar.pending_actions)
+                _plural = f"{_n_actions} ações" if _n_actions > 1 else "a ação"
+                return {
+                    "status": "requires_confirmation",
+                    "agent_id": agent_id,
+                    "action": action.action,
+                    "message": f"🔒 **Confirmação Necessária**\n\nPara Executar {_plural}: **{sar.description}**\n\nDigite sua senha para confirmar.",
+                    "confirmation": {
+                        "tool_name": sar.tool_name,
+                        "arguments": sar.arguments,
+                        "description": sar.description,
+                        "original_message": prompt,
+                        "pending_actions": sar.pending_actions,
+                    },
+                }
             if llm_response:
                 _save_chat(prompt, llm_response, _user_id)
                 hub = get_hub()
@@ -655,7 +822,7 @@ async def execute_agent_action(
         }
     except Exception as e:
         logger.exception(f"Erro ao executar {agent_id}.{action.action}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno ao executar agente. Tente novamente.")
 
 
 @router.get("/{agent_id}/status")

@@ -17,8 +17,10 @@ interface LimitInfo {
 export interface PlanLimits {
   plan: string
   display_name: string
+  addon_clients_purchased?: boolean
   limits: {
     crm_clients: LimitInfo
+    crm_suppliers: LimitInfo
     invoices_per_month: LimitInfo
     agent_messages_per_day: LimitInfo
     available_agents: string[] | '__all__'

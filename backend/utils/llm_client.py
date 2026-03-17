@@ -11,12 +11,11 @@ import json
 import os
 from typing import Any, Dict
 
-from dotenv import load_dotenv
 from openai import OpenAI
 
 from .logging_utils import get_logger
 
-load_dotenv()
+# load_dotenv() removido — carregamento centralizado em backend/main.py
 
 logger = get_logger(__name__)
 

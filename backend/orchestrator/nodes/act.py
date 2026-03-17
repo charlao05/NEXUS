@@ -198,6 +198,24 @@ def _respond_to_user(params: dict, user_id: int) -> Any:
     return {"response": params.get("message", "")}
 
 
+@register_tool("wait_for_user_login")
+def _wait_for_user_login(params: dict, user_id: int) -> Any:
+    """Pseudo-tool que pausa a automação para o usuário preencher dados sensíveis.
+    
+    O orquestrador detecta esta ação e entra em modo waiting_for_user.
+    O browser permanece aberto para o usuário interagir manualmente.
+    """
+    message = params.get("message_to_user", "")
+    if not message:
+        message = (
+            "Agora é a parte que só você pode fazer.\n"
+            "Digite seus dados na tela do site e clique no botão de envio.\n"
+            "Quando a próxima tela aparecer, volte aqui e clique em 'Continuar Automação'.\n"
+            "O robô não vê nem guarda seu CPF ou senha."
+        )
+    return {"response": message, "waiting_for_user": True}
+
+
 # ---------------------------------------------------------------------------
 # Node principal
 # ---------------------------------------------------------------------------
@@ -261,6 +279,16 @@ def act_node(state: AgentState) -> dict[str, Any]:
             # Se é respond_to_user, capturar como resposta final
             if tool_name == "respond_to_user" and isinstance(output, dict):
                 final_response = output.get("response", final_response)
+            
+            # Se é wait_for_user_login, capturar resposta e marcar para pausa
+            if tool_name == "wait_for_user_login" and isinstance(output, dict):
+                final_response = output.get("response", final_response)
+                updates["status"] = TaskStatus.WAITING_FOR_USER.value
+                updates["awaiting_user_input"] = True
+                logger.info("⏸️ ACT: wait_for_user_login executada — pausando para input humano")
+                # Parar execução: não executar mais ações após wait_for_user_login
+                results.append(result.model_dump())
+                break
                 
         except Exception as e:
             duration = int((time.time() - start) * 1000)

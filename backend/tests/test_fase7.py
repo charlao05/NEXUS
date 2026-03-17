@@ -214,7 +214,10 @@ class TestSecurityHeaders:
         assert r.headers.get("X-Frame-Options") == "DENY"
         assert r.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
         # camera/microphone=(self) permite uso pela própria origem (Whisper audio transcription)
-        assert r.headers.get("Permissions-Policy") == "camera=(self), microphone=(self), geolocation=()"
+        assert r.headers.get("Permissions-Policy") == (
+            "camera=(self), microphone=(self), geolocation=(), "
+            "payment=(self), usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
+        )
 
     def test_csp_in_production(self, client, app):
         """CSP header aparece em produção."""

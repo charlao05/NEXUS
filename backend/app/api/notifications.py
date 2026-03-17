@@ -307,6 +307,7 @@ def _generate_proactive_notifications(user_id: int) -> list[dict[str, Any]]:
     db = SessionLocal()
     try:
         now = datetime.now(timezone.utc)
+        today = now.date()
 
         # 1) Agendamentos nas próximas 2 horas
         two_hours = now + timedelta(hours=2)
@@ -329,25 +330,126 @@ def _generate_proactive_notifications(user_id: int) -> list[dict[str, Any]]:
                 "data": {"appointment_id": apt.id, "minutes_until": minutes_until},
             })
 
-        # 2) Faturas vencidas
-        overdue = (
+        # 2) Faturas vencidas (atrasadas) — cobrança urgente
+        overdue_invoices = (
             db.query(Invoice)
             .filter(
                 Invoice.status == "pending",
-                Invoice.due_date < now.date(),
+                Invoice.due_date < today,
             )
-            .count()
+            .all()
         )
-        if overdue > 0:
+        if overdue_invoices:
+            total_overdue = sum(inv.amount for inv in overdue_invoices)
+            for inv in overdue_invoices[:5]:  # max 5 notificações individuais
+                days_late = (today - inv.due_date).days
+                # Buscar nome do cliente
+                from database.models import Client
+                client = db.query(Client).filter(Client.id == inv.client_id).first()
+                client_name = client.name if client else "Cliente"
+                notifications.append({
+                    "type": "invoice_overdue",
+                    "title": "🔴 Pagamento atrasado",
+                    "message": f"{client_name} — R$ {inv.amount:,.2f} venceu há {days_late} dia(s)",
+                    "severity": "error",
+                    "data": {
+                        "invoice_id": inv.id,
+                        "client_id": inv.client_id,
+                        "client_name": client_name,
+                        "amount": inv.amount,
+                        "days_overdue": days_late,
+                        "due_date": inv.due_date.isoformat(),
+                    },
+                })
+            if len(overdue_invoices) > 5:
+                notifications.append({
+                    "type": "invoice_overdue_summary",
+                    "title": "🔴 Mais pagamentos atrasados",
+                    "message": f"Total: {len(overdue_invoices)} fatura(s) vencida(s) — R$ {total_overdue:,.2f}",
+                    "severity": "error",
+                    "data": {"count": len(overdue_invoices), "total": total_overdue},
+                })
+
+        # 3) Faturas vencendo HOJE — lembrete de último dia
+        due_today = (
+            db.query(Invoice)
+            .filter(
+                Invoice.status == "pending",
+                Invoice.due_date == today,
+            )
+            .all()
+        )
+        for inv in due_today:
+            from database.models import Client
+            client = db.query(Client).filter(Client.id == inv.client_id).first()
+            client_name = client.name if client else "Cliente"
             notifications.append({
-                "type": "overdue_invoices",
-                "title": "Faturas vencidas",
-                "message": f"Você tem {overdue} fatura(s) vencida(s)",
-                "severity": "error",
-                "data": {"count": overdue},
+                "type": "invoice_due_today",
+                "title": "🟡 Vence hoje!",
+                "message": f"{client_name} — R$ {inv.amount:,.2f} vence HOJE",
+                "severity": "warning",
+                "data": {
+                    "invoice_id": inv.id,
+                    "client_id": inv.client_id,
+                    "client_name": client_name,
+                    "amount": inv.amount,
+                    "due_date": today.isoformat(),
+                },
             })
 
-        # 3) Lembrete de upgrade para usuários Free
+        # 4) Faturas vencendo nos próximos 3 dias — antecipação
+        three_days = today + timedelta(days=3)
+        upcoming_invoices = (
+            db.query(Invoice)
+            .filter(
+                Invoice.status == "pending",
+                Invoice.due_date > today,
+                Invoice.due_date <= three_days,
+            )
+            .all()
+        )
+        for inv in upcoming_invoices:
+            from database.models import Client
+            client = db.query(Client).filter(Client.id == inv.client_id).first()
+            client_name = client.name if client else "Cliente"
+            days_until = (inv.due_date - today).days
+            notifications.append({
+                "type": "invoice_due_soon",
+                "title": "📅 Pagamento próximo",
+                "message": f"{client_name} — R$ {inv.amount:,.2f} vence em {days_until} dia(s)",
+                "severity": "info",
+                "data": {
+                    "invoice_id": inv.id,
+                    "client_id": inv.client_id,
+                    "client_name": client_name,
+                    "amount": inv.amount,
+                    "days_until_due": days_until,
+                    "due_date": inv.due_date.isoformat(),
+                },
+            })
+
+        # 5) Lembrete do DAS MEI — vence dia 20 de cada mês
+        day_of_month = today.day
+        if day_of_month <= 20:
+            days_to_das = 20 - day_of_month
+            if days_to_das <= 5 and days_to_das > 0:
+                notifications.append({
+                    "type": "das_reminder",
+                    "title": "📋 DAS MEI",
+                    "message": f"Boleto mensal do MEI vence em {days_to_das} dia(s) (dia 20)",
+                    "severity": "warning" if days_to_das <= 2 else "info",
+                    "data": {"days_until": days_to_das, "due_day": 20},
+                })
+            elif days_to_das == 0:
+                notifications.append({
+                    "type": "das_reminder",
+                    "title": "🔴 DAS MEI vence HOJE",
+                    "message": "Boleto mensal do MEI vence HOJE (dia 20). Pague para evitar multa!",
+                    "severity": "error",
+                    "data": {"days_until": 0, "due_day": 20},
+                })
+
+        # 6) Lembrete de upgrade para usuários Free
         user = db.query(User).filter(User.id == user_id).first()
         if user and user.plan == "free":
             notifications.append({

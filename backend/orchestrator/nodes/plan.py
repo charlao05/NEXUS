@@ -37,6 +37,17 @@ REGRAS OBRIGATÓRIAS:
 7. Para tarefas de browser: use browser_get_page_state após navegação
    para "enxergar" os elementos da página antes de interagir
 
+REGRA CRÍTICA — HUMAN-IN-THE-LOOP:
+Se a página atual contiver campos de CPF, CNPJ, senha, anti-robô ou CAPTCHA,
+ou se estiver num domínio sensível (Receita Federal, gov.br, bancos, prefeituras):
+- **NÃO planeje ações de browser_type ou browser_click em campos de login/senha/CPF/captcha.**
+- Em vez disso, crie UM ÚNICO passo com tool="wait_for_user_login" e params contendo
+  "message_to_user" com instruções claras em português simples para o usuário preencher
+  esses dados manualmente. Exemplo:
+  {{"tool": "wait_for_user_login", "params": {{"message_to_user": "Agora é com você: digite seu CPF e data de nascimento e clique em Consultar."}}, "reason": "Campos sensíveis detectados", "risk": "low"}}
+- Após o wait_for_user_login, NÃO adicione mais ações — o orquestrador vai pausar e
+  retomar depois que o usuário completar sua parte.
+
 TOOLS DISPONÍVEIS:
 {available_tools}
 
@@ -160,6 +171,30 @@ def plan_node(state: AgentState) -> dict[str, Any]:
         "updated_at": datetime.now().isoformat(),
     }
     
+    # --- Human-in-the-loop: se sense detectou tela sensível, gerar wait_for_user_login ---
+    if state.get("awaiting_user_input"):
+        resume_hint = state.get("resume_hint", "")
+        reason = state.get("awaiting_user_reason", "Campos sensíveis detectados")
+        
+        message_to_user = resume_hint or (
+            "Agora é a parte que só você pode fazer.\n"
+            "Digite seus dados na tela do site e clique no botão de envio.\n"
+            "Quando a próxima tela aparecer, volte aqui e clique em 'Continuar Automação'.\n"
+            "O robô não vê nem guarda seu CPF ou senha."
+        )
+        
+        wait_action = PlannedAction(
+            tool="wait_for_user_login",
+            params={"message_to_user": message_to_user},
+            reason=reason,
+            risk=ActionRisk.LOW,
+        )
+        updates["planned_actions"] = [wait_action.model_dump()]
+        updates["current_step"] = 0
+        
+        logger.info(f"⏸️ PLAN: Gerado wait_for_user_login — {reason}")
+        return updates
+    
     try:
         # Montar contexto de iterações anteriores
         prev_results = state.get("action_results", [])
@@ -171,13 +206,34 @@ def plan_node(state: AgentState) -> dict[str, Any]:
                 results_summary.append(f"{status} {r.get('tool', '?')}: {str(r.get('output', ''))[:100]}")
             iteration_context = f"\n\nResultados anteriores:\n" + "\n".join(results_summary)
         
+        # Informar ao planner quais ações foram bloqueadas pela política
+        blocked_info = state.get("blocked_actions_info", "")
+        if blocked_info:
+            iteration_context += (
+                f"\n\n⚠️ AÇÕES BLOQUEADAS PELA POLÍTICA DE SEGURANÇA (NÃO repita estas ações):\n"
+                f"{blocked_info}\n"
+                f"Use wait_for_user_login para campos sensíveis como CPF, senha e captcha."
+            )
+        
         # Montar system prompt
         available_tools = AGENT_TOOLS.get(agent_type, AGENT_TOOLS["assistente"])
         page_observation = state.get("page_observation", "Nenhuma página aberta.")
+        
+        # Injetar URL canônica do template para evitar que o LLM invente URLs
+        site_config = state.get("site_config") or {}
+        canonical_url = site_config.get("url", "")
+        url_instruction = ""
+        if canonical_url and agent_type == "browser":
+            url_instruction = (
+                f"\n\nURL CANÔNICA OBRIGATÓRIA: {canonical_url}\n"
+                f"Quando usar browser_navigate, use EXATAMENTE esta URL. "
+                f"NÃO invente ou modifique a URL."
+            )
+        
         system = PLANNER_SYSTEM_PROMPT.format(
             max_steps=max_steps,
             available_tools=available_tools,
-            crm_context=crm_context + iteration_context,
+            crm_context=crm_context + iteration_context + url_instruction,
             page_observation=page_observation,
         )
         
@@ -223,6 +279,24 @@ def plan_node(state: AgentState) -> dict[str, Any]:
                     ]
                     # Manter o respond_to_user original como última ação
                     actions = forced_actions + actions
+        
+        # ── Pós-processamento: forçar URL canônica do template ──────
+        # Impede que o LLM invente URLs para browser_navigate
+        if agent_type == "browser" and canonical_url:
+            for a in actions:
+                if a.tool == "browser_navigate":
+                    planned_url = a.params.get("url", "")
+                    if planned_url and planned_url != canonical_url:
+                        # Só corrigir se a URL planejada é do mesmo domínio (evitar substituir URLs totalmente diferentes)
+                        from urllib.parse import urlparse
+                        planned_host = urlparse(planned_url).hostname or ""
+                        canon_host = urlparse(canonical_url).hostname or ""
+                        if planned_host == canon_host or not planned_url.startswith("http"):
+                            logger.warning(
+                                f"⚠️ URL corrigida pelo pós-processador: "
+                                f"{planned_url[:60]} → {canonical_url[:60]}"
+                            )
+                            a.params["url"] = canonical_url
         
         updates["planned_actions"] = [a.model_dump() for a in actions]
         updates["current_step"] = 0

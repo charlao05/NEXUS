@@ -23,7 +23,7 @@ export default class ErrorBoundary extends React.Component<React.PropsWithChildr
     if (this.state.hasError) {
       return (
         <div style={{ padding: '2rem' }}>
-          <h2>⚠️ Ocorreu um erro na interface</h2>
+          <h2>⚠️ Ocorreu um Erro na Interface</h2>
           <p>Tente recarregar a página. Se persistir, verifique o console do navegador.</p>
           <pre style={{ background: '#f8f9fa', padding: '1rem', borderRadius: 8 }}>
             {this.state.error?.message}

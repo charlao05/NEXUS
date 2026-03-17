@@ -84,7 +84,7 @@ export default function NotificationBell({
                   onClick={() => onMarkRead()}
                   className="text-xs text-blue-400 hover:text-blue-300"
                 >
-                  Marcar lidas
+                  Marcar Lidas
                 </button>
               )}
               {notifications.length > 0 && (
@@ -101,7 +101,7 @@ export default function NotificationBell({
           {/* List */}
           {notifications.length === 0 ? (
             <div className="p-8 text-center text-slate-500 text-sm">
-              Nenhuma notificação
+              Nenhuma Notificação
             </div>
           ) : (
             <div className="divide-y divide-slate-700/30">

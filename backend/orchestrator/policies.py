@@ -20,6 +20,39 @@ from backend.orchestrator.state import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Domínios sensíveis — browser_type proibido em campos de login/CPF/senha
+# ---------------------------------------------------------------------------
+
+SENSITIVE_DOMAINS: list[str] = [
+    "receita.fazenda.gov.br",
+    "cav.receita.fazenda.gov.br",
+    "www8.receita.fazenda.gov.br",
+    "servicos.receita.fazenda.gov.br",
+    "gov.br",
+    "www.gov.br",
+    "acesso.gov.br",
+    "sso.acesso.gov.br",
+    "bb.com.br",
+    "caixa.gov.br",
+    "itau.com.br",
+    "bradesco.com.br",
+    "santander.com.br",
+    "nubank.com.br",
+    "nfe.prefeitura.sp.gov.br",
+    "prefeitura.sp.gov.br",
+    "pbh.gov.br",
+    "rio.rj.gov.br",
+]
+
+# Campos que nunca devem ser preenchidos pelo agente em domínios sensíveis
+SENSITIVE_FIELD_LABELS: list[str] = [
+    "cpf", "cnpj", "senha", "password", "nascimento",
+    "codigo_acesso", "código de acesso", "chave", "captcha",
+    "anti-robo", "anti-robô", "token", "pin", "otp",
+    "codigo_verificacao", "código de verificação",
+]
+
+# ---------------------------------------------------------------------------
 # Políticas declarativas (Action CSP)
 # ---------------------------------------------------------------------------
 
@@ -247,6 +280,13 @@ ACTION_POLICIES: dict[str, dict[str, Any]] = {
         "risk": ActionRisk.LOW,
         "requires_approval": False,
     },
+
+    # --- Human-in-the-loop: pausa para input do usuário (sem risco) ---
+    "wait_for_user_login": {
+        "risk": ActionRisk.LOW,
+        "requires_approval": False,
+        "max_per_task": 5,
+    },
 }
 
 # Ações bloqueadas — nunca são permitidas
@@ -383,6 +423,26 @@ def evaluate_action(
                 allowed=False,
                 reason=f"Campo sensível detectado: '{bad_field}'. Use variáveis de ambiente.",
             )
+
+    # 5b. Bloqueio extra: browser_type em campos de login/CPF/senha em domínios sensíveis
+    if tool == "browser_type":
+        selector = str(action.params.get("selector", "")).lower()
+        text_param = str(action.params.get("text", "")).lower()
+        # Se o selector ou o texto indicam campo sensível em domínio sensível
+        for label in SENSITIVE_FIELD_LABELS:
+            if label in selector or label in text_param:
+                logger.warning(
+                    f"🚫 Policy: browser_type bloqueado em campo sensível '{label}' — "
+                    "handoff para humano necessário"
+                )
+                return PolicyDecision(
+                    action=action,
+                    allowed=False,
+                    reason=(
+                        f"Digitação bloqueada em campo sensível ('{label}'). "
+                        "O usuário deve preencher este campo manualmente."
+                    ),
+                )
 
     # 6. Verificar tempo de espera
     max_seconds = policy.get("max_seconds")

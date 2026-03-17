@@ -276,6 +276,25 @@ export const createCheckout = async (
   }
 }
 
+/**
+ * Iniciar checkout Stripe para addon de clientes/fornecedores extras (+10 cada por R$12,90 compra única)
+ */
+export const createAddonCheckout = async (
+  email?: string
+): Promise<{ checkout_url: string; session_id: string }> => {
+  const userEmail = email || localStorage.getItem('user_email') || ''
+  
+  const response = await authApi.post<{ status: string; checkout_url: string; session_id: string }>(
+    '/checkout/addon-clients',
+    { email: userEmail }
+  )
+  
+  return { 
+    checkout_url: response.data.checkout_url,
+    session_id: response.data.session_id
+  }
+}
+
 export default {
   signup,
   login,
@@ -284,5 +303,6 @@ export default {
   isAuthenticated,
   getToken,
   createCheckout,
+  createAddonCheckout,
   changePassword
 }

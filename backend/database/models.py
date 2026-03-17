@@ -238,6 +238,32 @@ class User(Base):
     lgpd_consent_at = Column(DateTime, nullable=True)
     lgpd_consent_ip = Column(String(45), nullable=True)
     
+    # PIN de confirmação para ações sensíveis (opcional, se não definido usa senha de login)
+    confirmation_pin_hash = Column(String(200), nullable=True)
+    
+    # Addon: slots extras de clientes/fornecedores (+10 cada, R$12,90 compra única)
+    extra_client_slots = Column(Integer, default=0, nullable=True)
+    addon_clients_purchased = Column(Boolean, default=False, nullable=True)
+    
+    # ── Perfil PF/PJ (preenchido após cadastro, na página de Perfil) ──────
+    person_type = Column(String(2), nullable=True)        # PF ou PJ
+    cpf = Column(String(14), nullable=True)               # 000.000.000-00
+    cnpj = Column(String(18), nullable=True)              # 00.000.000/0000-00
+    phone = Column(String(20), nullable=True)             # +55 11 99999-9999
+    company_name = Column(String(200), nullable=True)     # Razão Social (PJ)
+    trade_name = Column(String(200), nullable=True)       # Nome Fantasia (PJ)
+    state_registration = Column(String(30), nullable=True) # Inscrição Estadual
+    municipal_registration = Column(String(30), nullable=True)  # Inscrição Municipal
+    address_street = Column(String(200), nullable=True)   # Logradouro
+    address_number = Column(String(20), nullable=True)    # Número
+    address_complement = Column(String(100), nullable=True)  # Complemento
+    address_neighborhood = Column(String(100), nullable=True)  # Bairro
+    address_city = Column(String(100), nullable=True)     # Cidade
+    address_state = Column(String(2), nullable=True)      # UF (SP, RJ...)
+    address_zip = Column(String(10), nullable=True)       # CEP
+    birth_date = Column(Date, nullable=True)              # Data de nascimento (PF)
+    business_type = Column(String(50), nullable=True)     # Tipo de negócio (MEI, ME, EPP...)
+    
     # Datas
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
@@ -264,6 +290,15 @@ class User(Base):
             "requests_today": self.requests_today,
             "email_verified": self.email_verified,
             "lgpd_consent": self.lgpd_consent,
+            "person_type": self.person_type,
+            "cpf": self.cpf,
+            "cnpj": self.cnpj,
+            "phone": self.phone,
+            "company_name": self.company_name,
+            "trade_name": self.trade_name,
+            "address_city": self.address_city,
+            "address_state": self.address_state,
+            "business_type": self.business_type,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "last_login": self.last_login.isoformat() if self.last_login else None,
         }
@@ -335,6 +370,9 @@ class Client(Base):
     source = Column(String(20), default="manual")
     tags = Column(JSON, default=list)
     
+    # Tipo de contato: client (padrão) ou supplier (fornecedor)
+    contact_type = Column(String(20), default="client")
+    
     # Scores (calculados somente quando há histórico real)
     purchase_score = Column(Float, nullable=True, default=None)
     attendance_score = Column(Float, nullable=True, default=None)
@@ -394,6 +432,7 @@ class Client(Base):
             "last_interaction": self.last_interaction.isoformat() if self.last_interaction else None,
             "last_purchase": self.last_purchase.isoformat() if self.last_purchase else None,
             "is_active": self.is_active,
+            "contact_type": self.contact_type or "client",
             "notes": self.notes,
         }
 
@@ -508,6 +547,7 @@ class Transaction(Base):
     category = Column(String(50), default="geral")
     description = Column(String(300), nullable=False)
     amount = Column(Float, nullable=False)
+    payment_method = Column(String(30), default="nao_informado")  # pix, dinheiro, cartao_debito, cartao_credito, credito_proprio, fiado, boleto, transferencia, parcelado, entrada_parcelado, cheque, nao_informado
     date = Column(Date, nullable=False, index=True)
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=True)
     opportunity_id = Column(Integer, ForeignKey("opportunities.id"), nullable=True)
@@ -522,6 +562,7 @@ class Transaction(Base):
             "category": self.category,
             "description": self.description,
             "amount": self.amount,
+            "payment_method": self.payment_method or "nao_informado",
             "date": self.date.isoformat() if self.date else None,
             "client_id": self.client_id,
             "is_recurring": self.is_recurring,
@@ -600,12 +641,14 @@ class ActivityLog(Base):
     created_at = Column(DateTime, default=_utcnow, index=True)
 
     def to_dict(self) -> dict:
+        # Sufixo "Z" indica UTC — permite ao frontend converter para horário local
+        ts = (self.created_at.isoformat() + "Z") if self.created_at else None
         return {
             "id": self.id,
             "action": self.action,
             "agent_id": self.agent_id,
             "details": self.details,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": ts,
         }
 
 
@@ -730,6 +773,36 @@ class StockMovement(Base):
             "reason": self.reason,
             "notes": self.notes,
             "reference_id": self.reference_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+# ============================================================================
+# FEEDBACK DO USUÁRIO
+# ============================================================================
+
+class Feedback(Base):
+    """Feedback do usuário para melhoria contínua"""
+    __tablename__ = "feedbacks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    agent_id = Column(String(30), nullable=True)       # Agente específico (ou null = geral)
+    rating = Column(Integer, nullable=False)             # 1-5 estrelas
+    category = Column(String(50), nullable=True)         # bug, sugestao, elogio, reclamacao
+    message = Column(Text, nullable=True)                # Comentário livre
+    page = Column(String(100), nullable=True)            # Página de onde veio
+    created_at = Column(DateTime, default=_utcnow)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "agent_id": self.agent_id,
+            "rating": self.rating,
+            "category": self.category,
+            "message": self.message,
+            "page": self.page,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

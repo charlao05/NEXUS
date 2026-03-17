@@ -6,8 +6,9 @@
 .env.development
 .env.test
 .env.backend
-.env.example
-.env.template
+# .env.example e .env.template são TEMPLATES (OK commitar)
+# Mas não commitar .env reais
+.env.staging
 .env.local.example
 
 # TEST FILES WITH SECRETS

@@ -24,12 +24,12 @@ export default function Onboarding() {
   ]
 
   const GOALS = [
-    { id: 'clientes', label: 'Gerenciar clientes', icon: '👥' },
-    { id: 'agenda', label: 'Controlar agendamentos', icon: '📅' },
-    { id: 'financeiro', label: 'Contabilidade MEI completa', icon: '📊' },
-    { id: 'nf', label: 'Emitir notas fiscais', icon: '📄' },
-    { id: 'cobranca', label: 'Automatizar cobranças', icon: '💳' },
-    { id: 'automacao', label: 'Automação web', icon: '🤖' },
+    { id: 'clientes', label: 'Gerenciar Clientes', icon: '👥' },
+    { id: 'agenda', label: 'Controlar Agendamentos', icon: '📅' },
+    { id: 'financeiro', label: 'Contabilidade MEI Completa', icon: '📊' },
+    { id: 'nf', label: 'Emitir Notas Fiscais', icon: '📄' },
+    { id: 'cobranca', label: 'Automatizar Cobranças', icon: '💳' },
+    { id: 'automacao', label: 'Automação Web', icon: '🤖' },
   ]
 
   const toggleGoal = (id: string) => {
@@ -227,7 +227,7 @@ export default function Onboarding() {
               }}
               className="text-sm text-slate-500 hover:text-slate-400 transition-colors"
             >
-              Pular e ir direto ao dashboard
+              Pular e Ir Direto ao Dashboard
             </button>
           </div>
         )}

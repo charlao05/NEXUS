@@ -237,11 +237,15 @@ function Dashboard() {
                 onMarkRead={markRead}
                 onClearAll={clearAll}
               />
-              <div className={`w-9 h-9 rounded-full flex items-center justify-center ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+              <button
+                onClick={() => navigate('/profile')}
+                className={`w-9 h-9 rounded-full flex items-center justify-center transition hover:ring-2 hover:ring-green-500/50 ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}
+                title="Meu Perfil"
+              >
                 <span className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                   {(userName || userEmail || 'U').charAt(0).toUpperCase()}
                 </span>
-              </div>
+              </button>
               <button
                 onClick={logout}
                 className={`px-4 py-2 rounded-lg transition text-sm ${isDark ? 'bg-slate-700/50 text-slate-300 hover:bg-slate-600 hover:text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'}`}
@@ -303,7 +307,7 @@ function Dashboard() {
                 onClick={() => navigate('/pricing')}
                 className="text-sm text-green-400 hover:text-green-300 transition"
               >
-                Fazer upgrade →
+                Fazer Upgrade →
               </button>
             )}
           </div>
@@ -323,7 +327,7 @@ function Dashboard() {
               onClick={() => navigate('/agents')}
               className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg text-sm font-medium transition"
             >
-              Começar agora
+              Começar Agora
             </button>
           </div>
         </div>
@@ -334,22 +338,22 @@ function Dashboard() {
             <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50">
               <p className="text-slate-400 text-xs font-medium mb-1">Clientes</p>
               <p className="text-2xl font-bold text-white">{crmData.clients.total - crmData.clients.inactive}</p>
-              <p className="text-slate-500 text-xs mt-1">{crmData.clients.total} total</p>
+              <p className="text-slate-500 text-xs mt-1">{crmData.clients.total} Total</p>
             </div>
             <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50">
-              <p className="text-slate-400 text-xs font-medium mb-1">Pipeline</p>
+              <p className="text-slate-400 text-xs font-medium mb-1">Vendas em Andamento</p>
               <p className="text-2xl font-bold text-green-400">{formatCurrency(crmData.pipeline.total_value)}</p>
-              <p className="text-slate-500 text-xs mt-1">Taxa de ganho: {(crmData.pipeline.win_rate * 100).toFixed(0)}%</p>
+              <p className="text-slate-500 text-xs mt-1">Taxa de Sucesso: {(crmData.pipeline.win_rate * 100).toFixed(0)}%</p>
             </div>
             <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50">
               <p className="text-slate-400 text-xs font-medium mb-1">Receita Total</p>
               <p className="text-2xl font-bold text-blue-400">{formatCurrency(crmData.revenue.total)}</p>
-              <p className="text-slate-500 text-xs mt-1">ticket médio: {formatCurrency(crmData.revenue.avg_ticket)}</p>
+              <p className="text-slate-500 text-xs mt-1">Valor Médio por Venda: {formatCurrency(crmData.revenue.avg_ticket)}</p>
             </div>
             <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50">
               <p className="text-slate-400 text-xs font-medium mb-1">Agendamentos Hoje</p>
               <p className="text-2xl font-bold text-cyan-400">{crmData.appointments_today}</p>
-              <p className="text-slate-500 text-xs mt-1">{crmData.clients.need_followup} precisam follow-up</p>
+              <p className="text-slate-500 text-xs mt-1">{crmData.clients.need_followup} Precisam de Contato</p>
             </div>
           </div>
         )}
@@ -411,7 +415,7 @@ function Dashboard() {
               </div>
               {analytics.revenue_chart.length > 0 && (
                 <div className="mt-4">
-                  <p className="text-slate-500 text-xs mb-2">Receita últimos 30 dias</p>
+                  <p className="text-slate-500 text-xs mb-2">Receita Últimos 30 Dias</p>
                   <div className="flex items-end gap-px h-12">
                     {analytics.revenue_chart.slice(-30).map((d, i) => {
                       const maxVal = Math.max(...analytics.revenue_chart.map(r => r.value), 1)
@@ -436,7 +440,26 @@ function Dashboard() {
         {analytics && (analytics.activity_timeline.length > 0 || Object.keys(analytics.chat_usage).length > 0) && (
           <div className="grid md:grid-cols-2 gap-6 mb-8">
             {/* Timeline */}
-            {analytics.activity_timeline.length > 0 && (
+            {analytics.activity_timeline.length > 0 && (() => {
+              const actionLabels: Record<string, string> = {
+                daily_cashflow: 'Resumo do dia',
+                weekly_cashflow: 'Resumo da semana',
+                range_cashflow: 'Resumo por período',
+                payment_breakdown: 'Vendas por pagamento',
+                create_client: 'Novo cliente',
+                update_client: 'Cliente atualizado',
+                delete_client: 'Cliente removido',
+                create_appointment: 'Novo compromisso',
+                record_transaction: 'Transação registrada',
+                create_invoice: 'Nova fatura',
+                stock_entry: 'Entrada de estoque',
+                stock_exit: 'Saída de estoque',
+                create_supplier: 'Novo fornecedor',
+                login: 'Login',
+                signup: 'Cadastro',
+                chat: 'Conversa',
+              }
+              return (
               <div className="p-5 rounded-2xl bg-slate-800/50 border border-slate-700/50">
                 <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
                   <span className="text-lg">🕐</span> Atividades Recentes
@@ -448,21 +471,21 @@ function Dashboard() {
                         {new Date(a.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                       </span>
                       <div>
-                        <span className="text-slate-300">{a.action}</span>
-                        {a.agent_id && <span className="text-slate-500 ml-1">({a.agent_id})</span>}
+                        <span className="text-slate-300">{actionLabels[a.action] || a.action.replace(/_/g, ' ')}</span>
                         {a.details && <p className="text-slate-500 text-xs">{a.details}</p>}
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
-            )}
+              )
+            })()}
 
             {/* Chat Usage por Agente */}
             {Object.keys(analytics.chat_usage).length > 0 && (
               <div className="p-5 rounded-2xl bg-slate-800/50 border border-slate-700/50">
                 <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                  <span className="text-lg">💬</span> Uso de Chat (7 dias)
+                  <span className="text-lg">💬</span> Uso de Chat (7 Dias)
                 </h3>
                 <div className="space-y-3">
                   {Object.entries(analytics.chat_usage)
@@ -471,7 +494,8 @@ function Dashboard() {
                       const maxCount = Math.max(...Object.values(analytics.chat_usage))
                       const pct = Math.round((count / maxCount) * 100)
                       const colors: Record<string, string> = {
-                        agenda: 'bg-blue-500', clientes: 'bg-green-500', contabilidade: 'bg-emerald-500',
+                        agenda: 'bg-blue-500', clientes: 'bg-green-500',
+                        financeiro: 'bg-emerald-500', contabilidade: 'bg-emerald-500',
                         cobranca: 'bg-red-500', assistente: 'bg-cyan-500',
                       }
                       return (
@@ -558,7 +582,7 @@ function Dashboard() {
                 🔒 Faça upgrade para desbloquear mais agentes — a partir de R$ 39,90/mês
               </p>
               <button onClick={() => navigate('/pricing')} className="text-green-400 hover:text-green-300 text-sm mt-1">
-                Ver planos →
+                Ver Planos →
               </button>
             </div>
           )}

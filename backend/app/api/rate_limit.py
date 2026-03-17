@@ -227,7 +227,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """
 
     # Rotas que não sofrem rate limiting
-    EXEMPT_PATHS = {"/health", "/", "/openapi.json", "/docs", "/redoc"}
+    EXEMPT_PATHS = {"/health", "/", "/openapi.json", "/docs", "/redoc", "/api/auth/webhook/stripe"}
     EXEMPT_PREFIXES = ("/docs",)
 
     # Rotas de auth com rate limit agressivo
@@ -236,6 +236,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         "/api/auth/forgot-password", "/api/auth/reset-password",
     }
 
+    @staticmethod
+    def _get_client_ip(request: Request) -> str:
+        """Extrai IP real do cliente, considerando proxies (Render, Cloudflare, etc.)."""
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            # X-Forwarded-For: client, proxy1, proxy2 — pegar o primeiro (IP real)
+            return forwarded.split(",")[0].strip()
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip.strip()
+        return request.client.host if request.client else "unknown"
+
     async def dispatch(self, request: Request, call_next) -> Response:  # type: ignore[override]
         path = request.url.path
 
@@ -243,7 +255,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if os.environ.get("ENVIRONMENT") == "test":
             return await call_next(request)
 
-        # Rotas isentas
+        # Rotas isentas (inclui webhook Stripe — autenticado via assinatura, não via IP)
         if path in self.EXEMPT_PATHS:
             return await call_next(request)
         for prefix in self.EXEMPT_PREFIXES:
@@ -252,7 +264,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Rate limit agressivo para endpoints de auth
         if path in self.AUTH_RATE_LIMITED:
-            client_ip = request.client.host if request.client else "unknown"
+            client_ip = self._get_client_ip(request)
             key = f"auth:{client_ip}:{path}"
             counter = _get_active_counter()
             limits = AUTH_LIMITS.get(path, {"per_minute": 5, "per_hour": 30})
@@ -290,7 +302,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Para rotas públicas (sem auth), limitar por IP
         if not request.headers.get("authorization"):
-            client_ip = request.client.host if request.client else "unknown"
+            client_ip = self._get_client_ip(request)
             key = f"anon:{client_ip}"
             counter = _get_active_counter()
 

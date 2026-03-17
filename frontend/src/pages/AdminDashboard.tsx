@@ -67,7 +67,12 @@ export default function AdminDashboard() {
   const [filterPlan, setFilterPlan] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'system'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'system' | 'feedbacks'>('overview')
+  const [feedbacks, setFeedbacks] = useState<Array<{
+    id: number; user_id: number; agent_id?: string; rating: number;
+    category?: string; message?: string; page?: string; created_at: string;
+  }>>([])
+  const [feedbacksLoading, setFeedbacksLoading] = useState(false)
 
   const fetchOverview = useCallback(async () => {
     const headers = { Authorization: `Bearer ${token}` }
@@ -153,15 +158,24 @@ export default function AdminDashboard() {
             </h1>
           </div>
           <div className="flex items-center gap-4">
-            {['overview', 'users', 'system'].map(tab => (
+            {['overview', 'users', 'feedbacks', 'system'].map(tab => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab as 'overview' | 'users' | 'system')}
+                onClick={() => {
+                  setActiveTab(tab as 'overview' | 'users' | 'system' | 'feedbacks')
+                  if (tab === 'feedbacks' && feedbacks.length === 0) {
+                    setFeedbacksLoading(true)
+                    axios.get(apiUrl('/api/auth/feedbacks'), { headers: { Authorization: `Bearer ${token}` } })
+                      .then(res => setFeedbacks(res.data.feedbacks || []))
+                      .catch((err) => console.warn('Falha ao carregar feedbacks:', err?.message))
+                      .finally(() => setFeedbacksLoading(false))
+                  }
+                }}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                   activeTab === tab ? 'bg-purple-500/20 text-purple-300' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                {tab === 'overview' ? '📊 Overview' : tab === 'users' ? '👥 Usuários' : '⚙️ Sistema'}
+                {tab === 'overview' ? '📊 Overview' : tab === 'users' ? '👥 Usuários' : tab === 'feedbacks' ? '💬 Feedbacks' : '⚙️ Sistema'}
               </button>
             ))}
           </div>
@@ -185,12 +199,12 @@ export default function AdminDashboard() {
                 <p className="text-slate-500 text-xs mt-1">{overview.users.active_24h} nas últimas 24h</p>
               </div>
               <div className="bg-slate-800/60 border border-slate-700/50 rounded-xl p-4">
-                <p className="text-slate-400 text-xs uppercase tracking-wide">MRR</p>
+                <p className="text-slate-400 text-xs uppercase tracking-wide">Receita Mensal</p>
                 <p className="text-2xl font-bold text-green-400 mt-1">{fmt(overview.revenue.mrr)}</p>
                 <p className="text-slate-500 text-xs mt-1">{overview.revenue.active_subscriptions} assinaturas</p>
               </div>
               <div className="bg-slate-800/60 border border-slate-700/50 rounded-xl p-4">
-                <p className="text-slate-400 text-xs uppercase tracking-wide">Churn Rate</p>
+                <p className="text-slate-400 text-xs uppercase tracking-wide">Taxa de Cancelamento</p>
                 <p className="text-2xl font-bold text-orange-400 mt-1">{overview.revenue.churn_rate}%</p>
                 <p className="text-slate-500 text-xs mt-1">{overview.revenue.cancelled_this_month} cancelamentos</p>
               </div>
@@ -224,7 +238,7 @@ export default function AdminDashboard() {
 
               {/* MRR Chart */}
               <div className="bg-slate-800/60 border border-slate-700/50 rounded-xl p-5">
-                <h3 className="text-sm font-semibold text-slate-300 mb-4">MRR Evolution (6 meses)</h3>
+                <h3 className="text-sm font-semibold text-slate-300 mb-4">Receita Mensal (6 Meses)</h3>
                 <div className="flex items-end gap-2 h-32">
                   {mrrChart.map(m => (
                     <div key={m.month} className="flex-1 flex flex-col items-center gap-1">
@@ -245,7 +259,7 @@ export default function AdminDashboard() {
               <h3 className="text-sm font-semibold text-slate-300 mb-3">Plataforma</h3>
               <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <p className="text-slate-400 text-xs">Clientes CRM (total)</p>
+                  <p className="text-slate-400 text-xs">Clientes Cadastrados (Total)</p>
                   <p className="text-xl font-bold text-white">{overview.platform.total_clients}</p>
                 </div>
                 <div>
@@ -253,7 +267,7 @@ export default function AdminDashboard() {
                   <p className="text-xl font-bold text-white">{overview.platform.chat_messages_7d}</p>
                 </div>
                 <div>
-                  <p className="text-slate-400 text-xs">Receita Clientes (mês)</p>
+                  <p className="text-slate-400 text-xs">Receita Clientes (Mês)</p>
                   <p className="text-xl font-bold text-green-400">{fmt(overview.platform.platform_revenue_month)}</p>
                 </div>
               </div>
@@ -284,7 +298,7 @@ export default function AdminDashboard() {
                 <option value="profissional">Profissional</option>
                 <option value="completo">Completo</option>
               </select>
-              <span className="text-slate-400 text-sm">{totalUsers} total</span>
+              <span className="text-slate-400 text-sm">{totalUsers} Total</span>
             </div>
 
             {/* Users Table */}
@@ -359,6 +373,57 @@ export default function AdminDashboard() {
               </button>
             </div>
           </>
+        )}
+
+        {/* TAB: FEEDBACKS */}
+        {activeTab === 'feedbacks' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-white">Feedbacks dos Usuários</h2>
+              <span className="text-sm text-slate-400">{feedbacks.length} registro(s)</span>
+            </div>
+            {feedbacksLoading ? (
+              <div className="flex justify-center py-12">
+                <div className="w-8 h-8 border-4 border-slate-700 border-t-purple-400 rounded-full animate-spin" />
+              </div>
+            ) : feedbacks.length === 0 ? (
+              <div className="text-center py-12 text-slate-500">Nenhum feedback recebido ainda.</div>
+            ) : (
+              <div className="space-y-3">
+                {feedbacks.map(fb => (
+                  <div key={fb.id} className="bg-slate-800/60 border border-slate-700/50 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-3">
+                        <div className="flex gap-0.5">
+                          {[1,2,3,4,5].map(s => (
+                            <span key={s} className={s <= fb.rating ? 'text-yellow-400' : 'text-slate-700'}>★</span>
+                          ))}
+                        </div>
+                        {fb.category && (
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            fb.category === 'bug' ? 'bg-red-500/20 text-red-400' :
+                            fb.category === 'sugestao' ? 'bg-blue-500/20 text-blue-400' :
+                            fb.category === 'elogio' ? 'bg-green-500/20 text-green-400' :
+                            'bg-orange-500/20 text-orange-400'
+                          }`}>
+                            {fb.category}
+                          </span>
+                        )}
+                        {fb.agent_id && <span className="text-xs text-slate-500">Agente: {fb.agent_id}</span>}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        <span>User #{fb.user_id}</span>
+                        <span className="mx-1">·</span>
+                        <span>{new Date(fb.created_at).toLocaleDateString('pt-BR')}</span>
+                      </div>
+                    </div>
+                    {fb.message && <p className="text-sm text-slate-300">{fb.message}</p>}
+                    {fb.page && <p className="text-xs text-slate-600 mt-1">Página: {fb.page}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {/* TAB: SYSTEM */}

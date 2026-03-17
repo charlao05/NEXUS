@@ -39,12 +39,13 @@ def _get_admin_emails() -> list[str]:
 async def require_admin(
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Dependency que garante acesso admin."""
+    """Dependency que garante acesso admin.
+    Acesso concedido SOMENTE por role ou email explícito — nunca por plano.
+    (Padrão seguro: pagar pelo plano mais caro NÃO concede privilégios admin.)"""
     email = current_user.get("email", "")
-    plan = current_user.get("plan", "free")
     role = current_user.get("role", "user")
 
-    if role in ("admin", "superadmin") or email in _get_admin_emails() or plan in ("enterprise", "completo"):
+    if role in ("admin", "superadmin") or email in _get_admin_emails():
         return current_user
 
     raise HTTPException(status_code=403, detail="Acesso restrito a administradores")

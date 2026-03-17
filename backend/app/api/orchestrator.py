@@ -135,7 +135,7 @@ async def run_orchestrator(
 
     except Exception as e:
         logger.error(f"Erro ao executar orquestrador: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Erro no orquestrador: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro interno no orquestrador. Tente novamente.")
 
 
 @router.get("/task/{task_id}")
@@ -222,7 +222,7 @@ async def approve_task(
 
     except Exception as e:
         logger.error(f"Erro ao continuar tarefa aprovada: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno ao continuar tarefa. Tente novamente.")
 
 
 @router.get("/health")

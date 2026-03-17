@@ -65,6 +65,24 @@ class UserProfile(BaseModel):
     subscription_expires: Optional[datetime] = None
     requests_used: int
     requests_limit: int
+    # Perfil PF/PJ
+    person_type: Optional[str] = None
+    cpf: Optional[str] = None
+    cnpj: Optional[str] = None
+    phone: Optional[str] = None
+    company_name: Optional[str] = None
+    trade_name: Optional[str] = None
+    state_registration: Optional[str] = None
+    municipal_registration: Optional[str] = None
+    address_street: Optional[str] = None
+    address_number: Optional[str] = None
+    address_complement: Optional[str] = None
+    address_neighborhood: Optional[str] = None
+    address_city: Optional[str] = None
+    address_state: Optional[str] = None
+    address_zip: Optional[str] = None
+    birth_date: Optional[str] = None
+    business_type: Optional[str] = None
 
 
 class PaymentCheckout(BaseModel):
@@ -89,6 +107,36 @@ class VerifyPaymentRequest(BaseModel):
 # ============================================================================
 # SEGURANÇA — Funções auxiliares
 # ============================================================================
+
+import re as _re_auth
+import hmac as _hmac
+import hashlib as _hashlib
+
+
+def _validate_password_strength(password: str) -> str | None:
+    """Valida força da senha (padrão enterprise).
+    Retorna mensagem de erro ou None se OK."""
+    if len(password) < 8:
+        return "Senha deve ter pelo menos 8 caracteres"
+    if len(password) > 128:
+        return "Senha deve ter no máximo 128 caracteres"
+    if not _re_auth.search(r"[A-Z]", password):
+        return "Senha deve conter pelo menos 1 letra maiúscula"
+    if not _re_auth.search(r"[a-z]", password):
+        return "Senha deve conter pelo menos 1 letra minúscula"
+    if not _re_auth.search(r"\d", password):
+        return "Senha deve conter pelo menos 1 número"
+    if not _re_auth.search(r"[!@#$%^&*()_+\-=\[\]{}|;:'\",.<>?/\\`~]", password):
+        return "Senha deve conter pelo menos 1 caractere especial"
+    # Bloquear senhas comuns (top patterns)
+    _WEAK_PATTERNS = [
+        "password", "12345678", "qwerty", "abc123", "letmein",
+        "welcome", "monkey", "master", "admin123", "iloveyou",
+    ]
+    if password.lower() in _WEAK_PATTERNS:
+        return "Senha muito comum. Escolha uma mais segura."
+    return None
+
 
 def hash_password(password: str) -> str:
     """Hash bcrypt seguro (12 rounds)"""
@@ -126,14 +174,17 @@ def _get_jwt_secret() -> str:
 
 
 def create_jwt_token(user_id: int, email: str, plan: str) -> str:
-    """Cria JWT com expiração de 24h"""
+    """Cria JWT com expiração de 24h — inclui iss/aud para validação enterprise."""
     payload: dict[str, Any] = {
         "user_id": user_id,
         "email": email,
         "plan": plan,
         "exp": datetime.now(timezone.utc) + timedelta(hours=24),
         "iat": datetime.now(timezone.utc),
+        "nbf": datetime.now(timezone.utc),  # Not Before — token válido a partir de agora
         "jti": token_urlsafe(32),
+        "iss": "nexus-api",
+        "aud": "nexus-client",
     }
     return jwt.encode(  # type: ignore[no-untyped-call]
         payload,
@@ -150,7 +201,10 @@ def create_refresh_token(user_id: int, email: str) -> str:
         "type": "refresh",
         "exp": datetime.now(timezone.utc) + timedelta(days=30),
         "iat": datetime.now(timezone.utc),
+        "nbf": datetime.now(timezone.utc),
         "jti": token_urlsafe(32),
+        "iss": "nexus-api",
+        "aud": "nexus-client",
     }
     return jwt.encode(  # type: ignore[no-untyped-call]
         payload,
@@ -160,14 +214,35 @@ def create_refresh_token(user_id: int, email: str) -> str:
 
 
 def verify_jwt_token(token: str) -> dict[str, Any]:
-    """Decodifica e valida JWT"""
+    """Decodifica e valida JWT — verifica iss/aud/exp.
+    Suporta tokens legados (sem iss/aud) em período de transição."""
     try:
+        # Tentativa principal: validação completa com iss/aud
         result: Any = jwt.decode(  # type: ignore[no-untyped-call]
             token,
             _get_jwt_secret(),
             algorithms=[os.getenv("JWT_ALGORITHM", "HS256")],
+            issuer="nexus-api",
+            audience="nexus-client",
+            options={"require": ["exp", "iat"]},
         )
         return dict(result) if result else {}
+    except (jwt.InvalidIssuerError, jwt.InvalidAudienceError, jwt.MissingRequiredClaimError):  # type: ignore[attr-defined]
+        # Fallback: aceitar tokens legados (emitidos antes do upgrade)
+        # que não possuem iss/aud — para não deslogar todos os usuários
+        try:
+            result = jwt.decode(  # type: ignore[no-untyped-call]
+                token,
+                _get_jwt_secret(),
+                algorithms=[os.getenv("JWT_ALGORITHM", "HS256")],
+                options={"require": ["exp"]},
+            )
+            logger.debug("JWT legado aceito (sem iss/aud) — será renovado no próximo refresh")
+            return dict(result) if result else {}
+        except jwt.ExpiredSignatureError:  # type: ignore[attr-defined]
+            raise HTTPException(status_code=401, detail="Token expirado")
+        except jwt.InvalidTokenError:  # type: ignore[attr-defined]
+            raise HTTPException(status_code=401, detail="Token inválido")
     except jwt.ExpiredSignatureError:  # type: ignore[attr-defined]
         raise HTTPException(status_code=401, detail="Token expirado")
     except jwt.InvalidTokenError:  # type: ignore[attr-defined]
@@ -240,14 +315,10 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict[
         # ── Resolver plano (freemium — sem trial) ──
         plan = _normalize_plan(user.plan)
 
-        # Atualizar requests_today
-        today = date.today()
-        if user.requests_today_date != today:  # type: ignore[union-attr]
-            user.requests_today = 1  # type: ignore[assignment]
-            user.requests_today_date = today  # type: ignore[assignment]
-        else:
-            user.requests_today = (user.requests_today or 0) + 1  # type: ignore[assignment]
-        db.commit()
+        # NÃO incrementar requests_today aqui — o incremento agora
+        # acontece apenas nos endpoints de interação com agentes
+        # (send_message, execute_agent, confirm-action) para que o
+        # contador "Uso Hoje" reflita apenas uso real dos agentes IA.
 
         return {
             "user_id": user.id,
@@ -256,8 +327,36 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict[
             "full_name": user.full_name,
             "role": role,
             "communication_preference": str(getattr(user, 'communication_preference', None) or 'email'),
-            "requests_today": user.requests_today,
+            "requests_today": user.requests_today or 0,
         }
+    finally:
+        db.close()
+
+
+# ============================================================================
+# INCREMENTO DE USO (somente interações com agentes)
+# ============================================================================
+
+def increment_request_count(user_id: int) -> int:
+    """Incrementa requests_today para o usuário. Chamado APENAS nos endpoints
+    de interação real com agentes (send_message, execute_agent, confirm-action).
+    Retorna o novo valor de requests_today."""
+    db = _get_db_session()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return 0
+        today = date.today()
+        if user.requests_today_date != today:  # type: ignore[union-attr]
+            user.requests_today = 1  # type: ignore[assignment]
+            user.requests_today_date = today  # type: ignore[assignment]
+        else:
+            user.requests_today = (user.requests_today or 0) + 1  # type: ignore[assignment]
+        db.commit()
+        return user.requests_today or 0  # type: ignore[return-value]
+    except Exception:
+        db.rollback()
+        return 0
     finally:
         db.close()
 
@@ -329,8 +428,9 @@ async def signup(user_data: UserSignup):
     - Cria JWT
     - Trial de 14 dias
     """
-    if len(user_data.password) < 8:
-        raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 8 caracteres")
+    pwd_err = _validate_password_strength(user_data.password)
+    if pwd_err:
+        raise HTTPException(status_code=400, detail=pwd_err)
 
     db = _get_db_session()
     try:
@@ -390,7 +490,12 @@ async def login(credentials: UserLogin):
     try:
         user = db.query(User).filter(User.email == credentials.email).first()
 
-        if not user or not verify_password(credentials.password, str(user.password_hash)):
+        if not user:
+            # Timing-attack mitigation: run bcrypt even when user doesn't exist
+            verify_password(credentials.password, "$2b$12$" + "A" * 53)
+            raise HTTPException(status_code=401, detail="Email ou senha inválidos")
+
+        if not verify_password(credentials.password, str(user.password_hash)):
             raise HTTPException(status_code=401, detail="Email ou senha inválidos")
 
         if user.status != "active":  # type: ignore[union-attr]
@@ -460,6 +565,24 @@ async def get_profile(current_user: dict[str, Any] = Depends(get_current_user)):
         subscription_expires=sub_expires,
         requests_used=requests_today,
         requests_limit=int(plan_config["requests_per_day"]),
+        # Perfil PF/PJ
+        person_type=getattr(user, "person_type", None) if user else None,
+        cpf=getattr(user, "cpf", None) if user else None,
+        cnpj=getattr(user, "cnpj", None) if user else None,
+        phone=getattr(user, "phone", None) if user else None,
+        company_name=getattr(user, "company_name", None) if user else None,
+        trade_name=getattr(user, "trade_name", None) if user else None,
+        state_registration=getattr(user, "state_registration", None) if user else None,
+        municipal_registration=getattr(user, "municipal_registration", None) if user else None,
+        address_street=getattr(user, "address_street", None) if user else None,
+        address_number=getattr(user, "address_number", None) if user else None,
+        address_complement=getattr(user, "address_complement", None) if user else None,
+        address_neighborhood=getattr(user, "address_neighborhood", None) if user else None,
+        address_city=getattr(user, "address_city", None) if user else None,
+        address_state=getattr(user, "address_state", None) if user else None,
+        address_zip=getattr(user, "address_zip", None) if user else None,
+        birth_date=str(user.birth_date) if user and getattr(user, "birth_date", None) else None,
+        business_type=getattr(user, "business_type", None) if user else None,
     )
 
 
@@ -467,6 +590,7 @@ async def get_profile(current_user: dict[str, Any] = Depends(get_current_user)):
 async def get_my_limits(current_user: dict[str, Any] = Depends(get_current_user)):
     """Retorna limites do plano e uso atual do usuário."""
     from app.core.plan_limits import PLAN_LIMITS, resolve_plan
+    from sqlalchemy import or_
 
     plan_raw = str(current_user.get("plan", "free"))
     plan_enum = resolve_plan(plan_raw)
@@ -475,9 +599,35 @@ async def get_my_limits(current_user: dict[str, Any] = Depends(get_current_user)
 
     db = _get_db_session()
     try:
-        crm_count = db.query(Client).filter(
-            Client.user_id == uid, Client.is_active == True  # noqa: E712
+        # Contar clientes e fornecedores separadamente
+        crm_client_count = db.query(Client).filter(
+            Client.user_id == uid, Client.is_active == True,  # noqa: E712
+            or_(Client.contact_type == "client", Client.contact_type.is_(None)),
         ).count()
+
+        crm_supplier_count = db.query(Client).filter(
+            Client.user_id == uid, Client.is_active == True,  # noqa: E712
+            Client.contact_type == "supplier",
+        ).count()
+
+        # Somar slots extras de clientes/fornecedores (addon)
+        user_obj = db.query(User).filter(User.id == uid).first()
+        extra_slots = getattr(user_obj, 'extra_client_slots', 0) or 0
+        addon_purchased = getattr(user_obj, 'addon_clients_purchased', False) or False
+
+        base_crm = limits["crm_clients"]
+        effective_crm = (base_crm + extra_slots) if base_crm != -1 else -1
+
+        base_suppliers = limits.get("crm_suppliers", base_crm)
+        effective_suppliers = (base_suppliers + extra_slots) if base_suppliers != -1 else -1
+
+        # Mensagens — considerar bônus proporcional do addon
+        base_msgs = limits["agent_messages_per_day"]
+        if base_msgs != -1 and extra_slots > 0 and base_crm > 0:
+            ratio = base_msgs / base_crm  # ex: 10msgs / 5clients = 2
+            effective_msgs = base_msgs + int(extra_slots * ratio)
+        else:
+            effective_msgs = base_msgs
 
         start_month = datetime.now(timezone.utc).replace(
             day=1, hour=0, minute=0, second=0, microsecond=0,
@@ -502,11 +652,17 @@ async def get_my_limits(current_user: dict[str, Any] = Depends(get_current_user)
     return {
         "plan": plan_enum.value,
         "display_name": limits["display_name"],
+        "addon_clients_purchased": addon_purchased,
         "limits": {
             "crm_clients": {
-                "max": limits["crm_clients"],
-                "current": crm_count,
-                "unlimited": limits["crm_clients"] == -1,
+                "max": effective_crm,
+                "current": crm_client_count,
+                "unlimited": effective_crm == -1,
+            },
+            "crm_suppliers": {
+                "max": effective_suppliers,
+                "current": crm_supplier_count,
+                "unlimited": effective_suppliers == -1,
             },
             "invoices_per_month": {
                 "max": limits["invoices_per_month"],
@@ -514,9 +670,9 @@ async def get_my_limits(current_user: dict[str, Any] = Depends(get_current_user)
                 "unlimited": limits["invoices_per_month"] == -1,
             },
             "agent_messages_per_day": {
-                "max": limits["agent_messages_per_day"],
+                "max": effective_msgs,
                 "current": msg_count,
-                "unlimited": limits["agent_messages_per_day"] == -1,
+                "unlimited": effective_msgs == -1,
             },
             "available_agents": limits["available_agents"],
         },
@@ -560,6 +716,175 @@ async def update_preferences(
         db.rollback()
         logger.error(f"Erro ao atualizar preferências: {e}")
         raise HTTPException(status_code=500, detail="Erro ao salvar preferências")
+    finally:
+        db.close()
+
+
+# ============================================================================
+# PERFIL DO USUÁRIO — Dados PF/PJ (Pessoa Física ou Jurídica)
+# ============================================================================
+
+class UpdateProfileRequest(BaseModel):
+    """Dados atualizáveis do perfil do usuário."""
+    full_name: Optional[str] = None
+    person_type: Optional[str] = None          # PF ou PJ
+    cpf: Optional[str] = None
+    cnpj: Optional[str] = None
+    phone: Optional[str] = None
+    company_name: Optional[str] = None         # Razão Social
+    trade_name: Optional[str] = None           # Nome Fantasia
+    state_registration: Optional[str] = None
+    municipal_registration: Optional[str] = None
+    address_street: Optional[str] = None
+    address_number: Optional[str] = None
+    address_complement: Optional[str] = None
+    address_neighborhood: Optional[str] = None
+    address_city: Optional[str] = None
+    address_state: Optional[str] = None
+    address_zip: Optional[str] = None
+    birth_date: Optional[str] = None           # YYYY-MM-DD
+    business_type: Optional[str] = None        # MEI, ME, EPP, etc.
+    communication_preference: Optional[str] = None
+
+
+@router.put("/me", response_model=dict)
+async def update_profile(
+    data: UpdateProfileRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Atualizar perfil do usuário — dados pessoais PF/PJ, endereço etc."""
+    db = _get_db_session()
+    try:
+        user = db.query(User).filter(User.id == current_user["user_id"]).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+        # Validações
+        if data.person_type and data.person_type not in ("PF", "PJ"):
+            raise HTTPException(400, "person_type deve ser 'PF' ou 'PJ'")
+        if data.address_state and len(data.address_state) != 2:
+            raise HTTPException(400, "address_state deve ter 2 caracteres (UF)")
+        if data.communication_preference and data.communication_preference not in ("email", "whatsapp", "sms"):
+            raise HTTPException(400, "communication_preference deve ser 'email', 'whatsapp' ou 'sms'")
+
+        # Campos permitidos para atualização
+        _ALLOWED_FIELDS = {
+            "full_name", "person_type", "cpf", "cnpj", "phone",
+            "company_name", "trade_name", "state_registration", "municipal_registration",
+            "address_street", "address_number", "address_complement",
+            "address_neighborhood", "address_city", "address_state", "address_zip",
+            "birth_date", "business_type", "communication_preference",
+        }
+
+        updated_fields = []
+        for field in _ALLOWED_FIELDS:
+            value = getattr(data, field, None)
+            if value is not None:
+                # birth_date: converter string → date
+                if field == "birth_date":
+                    try:
+                        from datetime import date as _date_type
+                        value = _date_type.fromisoformat(value)
+                    except (ValueError, TypeError):
+                        raise HTTPException(400, "birth_date deve estar no formato YYYY-MM-DD")
+                setattr(user, field, value)
+                updated_fields.append(field)
+
+        if not updated_fields:
+            return {"status": "ok", "message": "Nenhum campo para atualizar", "updated": []}
+
+        db.commit()
+        logger.info(f"Perfil atualizado user={user.id}: {updated_fields}")
+        return {"status": "ok", "message": "Perfil atualizado com sucesso", "updated": updated_fields}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Erro ao atualizar perfil: {e}")
+        raise HTTPException(500, "Erro ao salvar perfil")
+    finally:
+        db.close()
+
+
+# ============================================================================
+# FEEDBACK — Melhoria Contínua
+# ============================================================================
+
+class FeedbackRequest(BaseModel):
+    rating: int                    # 1-5 estrelas
+    category: Optional[str] = None # bug, sugestao, elogio, reclamacao
+    message: Optional[str] = None  # Comentário livre
+    agent_id: Optional[str] = None # Agente específico (ou null = geral)
+    page: Optional[str] = None     # Página de onde veio
+
+
+@router.post("/feedback")
+async def submit_feedback(
+    data: FeedbackRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Envia feedback do usuário para melhoria contínua."""
+    if not 1 <= data.rating <= 5:
+        raise HTTPException(400, "rating deve ser entre 1 e 5")
+    valid_categories = {"bug", "sugestao", "elogio", "reclamacao", None}
+    if data.category not in valid_categories:
+        raise HTTPException(400, f"category deve ser: {', '.join(c for c in valid_categories if c)}")
+
+    db = _get_db_session()
+    try:
+        from database.models import Feedback
+        fb = Feedback(
+            user_id=current_user["user_id"],
+            agent_id=data.agent_id,
+            rating=data.rating,
+            category=data.category,
+            message=data.message,
+            page=data.page,
+        )
+        db.add(fb)
+        db.commit()
+        logger.info(f"Feedback #{fb.id} de user={current_user['user_id']} rating={data.rating}")
+
+        # Notificar admins sobre novo feedback
+        try:
+            admins = db.query(User).filter(User.role == "admin").all()
+            from app.api.notifications import send_notification
+            _cat = data.category or "geral"
+            for admin in admins:
+                await send_notification(
+                    admin.id, "new_feedback",
+                    f"Novo Feedback ({_cat})",
+                    f"Avaliação {data.rating}★ — {data.message[:80] if data.message else 'Sem comentário'}",
+                    severity="info",
+                    data={"feedback_id": fb.id, "rating": data.rating, "category": _cat},
+                )
+        except Exception:
+            pass  # Não bloquear resposta se notificação falhar
+
+        return {"status": "ok", "message": "Obrigado pelo feedback!", "id": fb.id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Erro ao salvar feedback: {e}")
+        raise HTTPException(500, "Erro ao salvar feedback")
+    finally:
+        db.close()
+
+
+@router.get("/feedbacks")
+async def list_feedbacks(
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Lista feedbacks do usuário (admin vê todos)."""
+    db = _get_db_session()
+    try:
+        from database.models import Feedback
+        query = db.query(Feedback)
+        if current_user.get("role") != "admin":
+            query = query.filter(Feedback.user_id == current_user["user_id"])
+        feedbacks = query.order_by(Feedback.created_at.desc()).limit(100).all()
+        return {"feedbacks": [f.to_dict() for f in feedbacks], "total": len(feedbacks)}
     finally:
         db.close()
 
@@ -710,6 +1035,8 @@ async def refresh_token_endpoint(data: RefreshRequest):
             data.refresh_token,
             _get_jwt_secret(),
             algorithms=[os.getenv("JWT_ALGORITHM", "HS256")],
+            issuer="nexus-api",
+            audience="nexus-client",
         )
     except jwt.ExpiredSignatureError:  # type: ignore[attr-defined]
         raise HTTPException(401, "Refresh token expirado. Faça login novamente.")
@@ -755,9 +1082,7 @@ async def create_checkout(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     """Checkout Stripe — cria sessão e vincula ao user_id."""
-    import stripe  # type: ignore[import-untyped]
-
-    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+    stripe = _init_stripe()
     if not stripe.api_key:
         raise HTTPException(status_code=503, detail="Stripe não configurado")
 
@@ -772,7 +1097,20 @@ async def create_checkout(
 
     try:
         price_in_cents = PLANS[plan_key]["price"]  # já está em centavos
-        frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173")
+        frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
+
+        # Sanitizar: em dev, garantir que FRONTEND_URL aponta para o Vite dev server correto
+        _env = os.getenv("ENVIRONMENT", "development")
+        if _env != "production" and "localhost" in frontend_url:
+            # Corrigir problemas comuns: HTTPS em dev, porta errada
+            frontend_url = frontend_url.replace("https://", "http://")
+            # Se porta não for 5173 (Vite default), corrigir
+            import re as _re
+            _port_match = _re.search(r":(\d+)$", frontend_url)
+            if _port_match and _port_match.group(1) not in ("5173", "5174", "5175", "3000"):
+                frontend_url = _re.sub(r":\d+$", ":5173", frontend_url)
+            elif not _port_match:
+                frontend_url = f"{frontend_url}:5173"
 
         _PLAN_DISPLAY_NAMES = {
             "essencial": "Essencial",
@@ -813,24 +1151,114 @@ async def create_checkout(
         )
     except Exception as e:
         logger.error(f"Erro Stripe checkout: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro ao criar checkout: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro ao criar checkout. Tente novamente ou contate o suporte.")
+
+
+# ============================================================================
+# ADDON: PACOTE EXTRA DE CLIENTES/FORNECEDORES (+10 cada por R$12,90 — compra única)
+# ============================================================================
+
+class AddonCheckoutRequest(BaseModel):
+    """Request para comprar pacote extra de clientes/fornecedores."""
+    email: str
+
+
+@router.post("/checkout/addon-clients")
+async def checkout_addon_clients(
+    body: AddonCheckoutRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Cria checkout Stripe para addon de +10 clientes/fornecedores (R$12,90 compra única).
+    Disponível SOMENTE para plano gratuito. Compra única por usuário."""
+
+    # ---- Restrição: apenas plano gratuito ----
+    plan = _normalize_plan(current_user.get("plan", "free"))
+    if plan != "free":
+        raise HTTPException(
+            status_code=403,
+            detail="O addon de clientes extras está disponível apenas para o plano gratuito.",
+        )
+
+    # ---- Restrição: compra única por usuário ----
+    db = _get_db_session()
+    try:
+        user_check = db.query(User).filter(User.id == current_user["user_id"]).first()
+        if user_check and getattr(user_check, 'addon_clients_purchased', False):
+            raise HTTPException(
+                status_code=409,
+                detail="Você já adquiriu o pacote extra de clientes. Esta é uma compra única.",
+            )
+    finally:
+        db.close()
+
+    stripe = _init_stripe()
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Stripe não configurado")
+
+    try:
+        frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
+        _env = os.getenv("ENVIRONMENT", "development")
+        if _env != "production" and "localhost" in frontend_url:
+            frontend_url = frontend_url.replace("https://", "http://")
+
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{
+                "price_data": {
+                    "currency": "brl",
+                    "product_data": {
+                        "name": "NEXUS — Pacote Extra de Clientes e Fornecedores",
+                        "description": "+10 clientes, +10 fornecedores e mensagens proporcionais (compra única)",
+                    },
+                    "unit_amount": 1290,  # R$ 12,90 em centavos
+                },
+                "quantity": 1,
+            }],
+            mode="payment",
+            success_url=f"{frontend_url}/success?session_id={{CHECKOUT_SESSION_ID}}&addon=clients",
+            cancel_url=f"{frontend_url}/pricing",
+            customer_email=body.email,
+            metadata={
+                "plan": "addon_clients",
+                "user_id": str(current_user["user_id"]),
+                "email": body.email,
+                "addon_type": "extra_clients",
+                "slots": "10",
+            },
+        )
+
+        return {
+            "status": "pending",
+            "checkout_url": session.url or "",
+            "session_id": session.id,
+        }
+    except Exception as e:
+        logger.error(f"Erro Stripe addon checkout: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao criar checkout. Tente novamente ou contate o suporte.")
 
 
 # ============================================================================
 # STRIPE WEBHOOK — Processamento real de pagamentos
 # ============================================================================
 
+def _init_stripe() -> Any:
+    """Inicializa Stripe SDK com a chave da env. Retorna o módulo stripe."""
+    import stripe  # type: ignore[import-untyped]
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+    return stripe
+
+
 @router.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
     """
-    Webhook Stripe REAL:
-    - checkout.session.completed → ativa plano
+    Webhook Stripe REAL (idempotente):
+    - checkout.session.completed → ativa plano (com idempotência via stripe_checkout_session_id)
     - customer.subscription.deleted → cancela plano
-    - invoice.payment_failed → loga falha
+    - customer.subscription.updated → atualiza período
+    - invoice.paid → renova período da subscription
+    - invoice.payment_failed → loga + marca subscription como past_due
     """
-    import stripe  # type: ignore[import-untyped]
-
-    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+    stripe = _init_stripe()
     webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
 
     payload = await request.body()
@@ -860,31 +1288,85 @@ async def stripe_webhook(request: Request):
             session_obj: Any = event.data.object  # type: ignore[union-attr]
             user_id = session_obj.metadata.get("user_id") if session_obj.metadata else None
             raw_plan = session_obj.metadata.get("plan", "free") if session_obj.metadata else "free"
-            plan = _normalize_plan(raw_plan)
+            addon_type = session_obj.metadata.get("addon_type") if session_obj.metadata else None
 
             if user_id:
                 user = db.query(User).filter(User.id == int(user_id)).first()
                 if user:
-                    user.plan = plan  # type: ignore[assignment]
-                    if session_obj.customer:
-                        user.stripe_customer_id = session_obj.customer  # type: ignore[assignment]
+                    # Addon de clientes/fornecedores extras (compra única)
+                    if addon_type == "extra_clients":
+                        # Idempotência: não reprocessar se já adquirido
+                        if getattr(user, 'addon_clients_purchased', False):
+                            logger.info(f"⚠️ Addon já processado para User {user_id} (idempotente)")
+                        else:
+                            slots = int(session_obj.metadata.get("slots", "10"))
+                            current_extra = getattr(user, 'extra_client_slots', 0) or 0
+                            user.extra_client_slots = current_extra + slots  # type: ignore[assignment]
+                            user.addon_clients_purchased = True  # type: ignore[assignment]
+                            if session_obj.customer:
+                                user.stripe_customer_id = session_obj.customer  # type: ignore[assignment]
+                            db.commit()
+                            logger.info(f"✅ Addon clientes (compra única): User {user_id} → +{slots} slots (total: {user.extra_client_slots})")
+                    else:
+                        # Idempotência: verificar se já processamos este checkout session
+                        existing_sub = db.query(Subscription).filter(
+                            Subscription.stripe_checkout_session_id == session_obj.id
+                        ).first()
+                        if existing_sub:
+                            logger.info(f"⚠️ Checkout {session_obj.id} já processado (idempotente) — sub #{existing_sub.id}")
+                        else:
+                            # Compra de plano normal
+                            plan = _normalize_plan(raw_plan)
+                            user.plan = plan  # type: ignore[assignment]
+                            if session_obj.customer:
+                                user.stripe_customer_id = session_obj.customer  # type: ignore[assignment]
 
-                    sub = Subscription(
-                        user_id=int(user_id),
-                        stripe_subscription_id=session_obj.subscription,
-                        stripe_checkout_session_id=session_obj.id,
-                        plan=plan,
-                        status="active",
-                        amount=float(PLANS.get(plan, {}).get("price", 0)),
-                        current_period_start=datetime.now(timezone.utc),
-                        current_period_end=datetime.now(timezone.utc) + timedelta(days=30),
-                    )
-                    db.add(sub)
+                            sub = Subscription(
+                                user_id=int(user_id),
+                                stripe_subscription_id=session_obj.subscription,
+                                stripe_checkout_session_id=session_obj.id,
+                                plan=plan,
+                                status="active",
+                                amount=float(PLANS.get(plan, {}).get("price", 0)),
+                                current_period_start=datetime.now(timezone.utc),
+                                current_period_end=datetime.now(timezone.utc) + timedelta(days=30),
+                            )
+                            db.add(sub)
+                            db.commit()
+                            logger.info(f"✅ Plano atualizado: User {user_id} → {plan}")
+
+        elif event_type == "invoice.paid":
+            # Renovação mensal — atualizar período da subscription
+            invoice_obj: Any = event.data.object  # type: ignore[union-attr]
+            stripe_sub_id = getattr(invoice_obj, "subscription", None)
+            if stripe_sub_id:
+                sub = db.query(Subscription).filter(
+                    Subscription.stripe_subscription_id == stripe_sub_id
+                ).first()
+                if sub:
+                    sub.status = "active"  # type: ignore[assignment]
+                    sub.current_period_end = datetime.now(timezone.utc) + timedelta(days=30)  # type: ignore[assignment]
                     db.commit()
-                    logger.info(f"✅ Plano atualizado: User {user_id} → {plan}")
+                    logger.info(f"✅ Renovação paga: subscription {stripe_sub_id}")
+
+        elif event_type == "customer.subscription.updated":
+            # Stripe atualiza status (active, past_due, trialing, etc.)
+            sub_data: Any = event.data.object  # type: ignore[union-attr]
+            sub = db.query(Subscription).filter(
+                Subscription.stripe_subscription_id == sub_data.id
+            ).first()
+            if sub:
+                new_status = getattr(sub_data, "status", "active")
+                sub.status = new_status  # type: ignore[assignment]
+                # Atualizar período se disponível
+                period_end = getattr(sub_data, "current_period_end", None)
+                if period_end:
+                    sub.current_period_end = datetime.fromtimestamp(period_end, tz=timezone.utc)  # type: ignore[assignment]
+                db.commit()
+                logger.info(f"Subscription atualizada: {sub_data.id} → status={new_status}")
 
         elif event_type == "customer.subscription.deleted":
-            sub_data: Any = event.data.object  # type: ignore[union-attr]
+            sub_data = event.data.object  # type: ignore[union-attr]
             sub = db.query(Subscription).filter(
                 Subscription.stripe_subscription_id == sub_data.id
             ).first()
@@ -898,8 +1380,19 @@ async def stripe_webhook(request: Request):
                 logger.info(f"Assinatura cancelada: {sub_data.id}")
 
         elif event_type == "invoice.payment_failed":
-            invoice: Any = event.data.object  # type: ignore[union-attr]
-            logger.warning(f"Pagamento falhou: customer {invoice.customer}")
+            invoice_obj = event.data.object  # type: ignore[union-attr]
+            stripe_sub_id = getattr(invoice_obj, "subscription", None)
+            customer_id = getattr(invoice_obj, "customer", "unknown")
+            logger.warning(f"⚠️ Pagamento falhou: customer={customer_id}, subscription={stripe_sub_id}")
+            # Marcar subscription como past_due para que o frontend avise o usuário
+            if stripe_sub_id:
+                sub = db.query(Subscription).filter(
+                    Subscription.stripe_subscription_id == stripe_sub_id
+                ).first()
+                if sub:
+                    sub.status = "past_due"  # type: ignore[assignment]
+                    db.commit()
+                    logger.warning(f"Subscription {stripe_sub_id} marcada como past_due")
 
         return {"status": "processed", "type": event_type}
     except Exception as e:
@@ -916,9 +1409,7 @@ async def verify_payment(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
     """Verifica pagamento e atualiza plano"""
-    import stripe  # type: ignore[import-untyped]
-
-    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+    stripe = _init_stripe()
     if not stripe.api_key:
         raise HTTPException(status_code=503, detail="Stripe não configurado")
 
@@ -938,7 +1429,8 @@ async def verify_payment(
             return {"status": "paid", "plan": plan, "email": current_user["email"]}
         return {"status": session.payment_status, "plan": "free"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Erro ao verificar checkout: {e}")
+        raise HTTPException(status_code=400, detail="Erro ao verificar status do pagamento.")
 
 
 # ============================================================================
@@ -994,19 +1486,9 @@ async def admin_switch_plan(
         user.plan = plan  # type: ignore[assignment]
         db.commit()
 
-        # Gerar novo token com o plano atualizado
+        # Gerar novo token com o plano atualizado (via create_jwt_token com iss/aud/jti)
         plan_config = PLANS.get(plan, PLANS["free"])
-        new_token = jwt.encode(
-            {
-                "user_id": user.id,
-                "email": user.email,
-                "plan": plan,
-                "role": role,
-                "exp": datetime.now(timezone.utc) + timedelta(hours=24),
-            },
-            _get_jwt_secret(),
-            algorithm="HS256",
-        )
+        new_token = create_jwt_token(user.id, user.email, plan)  # type: ignore[arg-type]
 
         return {
             "status": "ok",
@@ -1017,6 +1499,41 @@ async def admin_switch_plan(
         }
     finally:
         db.close()
+
+
+# ============================================================================
+# OAUTH — Estado CSRF (proteção anti-forgery)
+# ============================================================================
+
+# Armazena states pendentes em memória (TTL ~10min na validação)
+# Em produção com múltiplos workers, usar Redis para compartilhar.
+_oauth_pending_states: dict[str, float] = {}
+_OAUTH_STATE_TTL = 600  # 10 minutos
+
+
+def _create_oauth_state() -> str:
+    """Gera state CSRF criptograficamente seguro para OAuth."""
+    import time
+    state = token_urlsafe(32)
+    # Limpar states antigos (> 10 min)
+    now = time.time()
+    expired = [k for k, v in _oauth_pending_states.items() if now - v > _OAUTH_STATE_TTL]
+    for k in expired:
+        _oauth_pending_states.pop(k, None)
+    _oauth_pending_states[state] = now
+    return state
+
+
+def _validate_oauth_state(state: str | None) -> None:
+    """Valida e consome state CSRF. Levanta 403 se inválido."""
+    import time
+    if not state:
+        raise HTTPException(status_code=403, detail="OAuth state ausente — possível ataque CSRF")
+    created = _oauth_pending_states.pop(state, None)
+    if created is None:
+        raise HTTPException(status_code=403, detail="OAuth state inválido ou já utilizado")
+    if time.time() - created > _OAUTH_STATE_TTL:
+        raise HTTPException(status_code=403, detail="OAuth state expirado")
 
 
 # ============================================================================
@@ -1037,6 +1554,7 @@ async def google_start():
     )
     if not client_id:
         raise HTTPException(status_code=503, detail="GOOGLE_CLIENT_ID ausente")
+    state = _create_oauth_state()
     params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
@@ -1044,6 +1562,7 @@ async def google_start():
         "scope": "openid email profile",
         "access_type": "offline",
         "prompt": "consent",
+        "state": state,
     }
     url = "https://accounts.google.com/o/oauth2/v2/auth"
     query = "&".join(f"{k}={quote(str(v))}" for k, v in params.items())
@@ -1051,11 +1570,12 @@ async def google_start():
 
 
 @router.get("/google/callback")
-async def google_callback(code: str | None = None, error: str | None = None):
+async def google_callback(code: str | None = None, error: str | None = None, state: str | None = None):
     if error:
         raise HTTPException(status_code=400, detail=f"Google OAuth error: {error}")
     if not code:
         raise HTTPException(status_code=400, detail="Faltou o code do Google")
+    _validate_oauth_state(state)
 
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
@@ -1102,7 +1622,6 @@ async def google_callback(code: str | None = None, error: str | None = None):
                 email=g_email, password_hash=hash_password(token_urlsafe(32)),
                 full_name=g_name, plan="free", status="active",
                 oauth_provider="google", oauth_id=g_id,
-                trial_ends_at=datetime.now(timezone.utc) + timedelta(days=14),
                 last_login=datetime.now(timezone.utc),
             )
             db.add(user)
@@ -1133,9 +1652,11 @@ async def facebook_start():
     )
     if not client_id:
         raise HTTPException(status_code=503, detail="FACEBOOK_CLIENT_ID ausente")
+    state = _create_oauth_state()
     params = {
         "client_id": client_id, "redirect_uri": redirect_uri,
-        "response_type": "code", "scope": "public_profile",
+        "response_type": "code", "scope": "public_profile,email",
+        "state": state,
     }
     url = "https://www.facebook.com/v17.0/dialog/oauth"
     query = "&".join(f"{k}={quote(str(v))}" for k, v in params.items())
@@ -1143,11 +1664,12 @@ async def facebook_start():
 
 
 @router.get("/facebook/callback")
-async def facebook_callback(code: str | None = None, error: str | None = None):
+async def facebook_callback(code: str | None = None, error: str | None = None, state: str | None = None):
     if error:
         raise HTTPException(status_code=400, detail=f"Facebook OAuth error: {error}")
     if not code:
         raise HTTPException(status_code=400, detail="Faltou o code do Facebook")
+    _validate_oauth_state(state)
 
     client_id = os.getenv("FACEBOOK_CLIENT_ID")
     client_secret = os.getenv("FACEBOOK_CLIENT_SECRET")
@@ -1192,7 +1714,6 @@ async def facebook_callback(code: str | None = None, error: str | None = None):
                 email=fb_email, password_hash=hash_password(token_urlsafe(32)),
                 full_name=fb_name, plan="free", status="active",
                 oauth_provider="facebook", oauth_id=fb_id,
-                trial_ends_at=datetime.now(timezone.utc) + timedelta(days=14),
                 last_login=datetime.now(timezone.utc),
             )
             db.add(user)
@@ -1248,8 +1769,9 @@ class ResetPasswordRequest(BaseModel):
 @router.post("/reset-password")
 async def reset_password(data: ResetPasswordRequest):
     """Redefine senha via token enviado por email."""
-    if len(data.new_password) < 8:
-        raise HTTPException(400, "Senha deve ter pelo menos 8 caracteres")
+    pwd_err = _validate_password_strength(data.new_password)
+    if pwd_err:
+        raise HTTPException(400, pwd_err)
 
     db = _get_db_session()
     try:
@@ -1301,8 +1823,9 @@ async def change_password(
     current_user: dict = Depends(get_current_user),
 ):
     """Altera a senha do usuário autenticado (precisa informar a senha atual)."""
-    if len(data.new_password) < 8:
-        raise HTTPException(400, "Nova senha deve ter pelo menos 8 caracteres")
+    pwd_err = _validate_password_strength(data.new_password)
+    if pwd_err:
+        raise HTTPException(400, pwd_err)
 
     if data.current_password == data.new_password:
         raise HTTPException(400, "A nova senha deve ser diferente da atual")
@@ -1327,5 +1850,101 @@ async def change_password(
         db.rollback()
         logger.error(f"Erro no change-password: {e}")
         raise HTTPException(500, "Erro ao alterar senha")
+    finally:
+        db.close()
+
+
+# ============================================================================
+# PIN DE CONFIRMAÇÃO (senha para ações sensíveis nos agentes)
+# ============================================================================
+
+class SetConfirmationPinRequest(BaseModel):
+    login_password: str  # Senha de login para autenticar a operação
+    new_pin: str         # Novo PIN de confirmação (mín 4, máx 50 chars)
+    
+class RemoveConfirmationPinRequest(BaseModel):
+    login_password: str
+
+
+@router.post("/set-confirmation-pin", tags=["authentication"])
+async def set_confirmation_pin(
+    data: SetConfirmationPinRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Define ou atualiza o PIN de confirmação para ações sensíveis.
+    Se definido, será usado no lugar da senha de login para confirmar
+    exclusões, edições críticas, etc."""
+    if len(data.new_pin) < 4:
+        raise HTTPException(400, "PIN deve ter pelo menos 4 caracteres")
+    if len(data.new_pin) > 50:
+        raise HTTPException(400, "PIN deve ter no máximo 50 caracteres")
+
+    db = _get_db_session()
+    try:
+        user = db.query(User).filter(User.id == current_user["user_id"]).first()
+        if not user:
+            raise HTTPException(404, "Usuário não encontrado")
+
+        if not verify_password(data.login_password, user.password_hash):
+            raise HTTPException(401, "Senha de login incorreta")
+
+        user.confirmation_pin_hash = hash_password(data.new_pin)
+        db.commit()
+
+        logger.info(f"✅ PIN de confirmação definido por: {user.email}")
+        return {"status": "ok", "message": "PIN de confirmação definido com sucesso"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Erro ao definir PIN: {e}")
+        raise HTTPException(500, "Erro ao definir PIN")
+    finally:
+        db.close()
+
+
+@router.delete("/confirmation-pin", tags=["authentication"])
+async def remove_confirmation_pin(
+    data: RemoveConfirmationPinRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Remove o PIN de confirmação (volta a usar senha de login)."""
+    db = _get_db_session()
+    try:
+        user = db.query(User).filter(User.id == current_user["user_id"]).first()
+        if not user:
+            raise HTTPException(404, "Usuário não encontrado")
+
+        if not verify_password(data.login_password, user.password_hash):
+            raise HTTPException(401, "Senha de login incorreta")
+
+        user.confirmation_pin_hash = None
+        db.commit()
+
+        logger.info(f"✅ PIN de confirmação removido por: {user.email}")
+        return {"status": "ok", "message": "PIN removido. Será usada a senha de login."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Erro ao remover PIN: {e}")
+        raise HTTPException(500, "Erro ao remover PIN")
+    finally:
+        db.close()
+
+
+@router.get("/has-confirmation-pin", tags=["authentication"])
+async def has_confirmation_pin(
+    current_user: dict = Depends(get_current_user),
+):
+    """Verifica se o usuário tem PIN de confirmação configurado."""
+    db = _get_db_session()
+    try:
+        user = db.query(User).filter(User.id == current_user["user_id"]).first()
+        if not user:
+            raise HTTPException(404, "Usuário não encontrado")
+
+        has_pin = bool(user.confirmation_pin_hash)
+        return {"has_pin": has_pin}
     finally:
         db.close()
