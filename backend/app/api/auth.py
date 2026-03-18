@@ -87,7 +87,7 @@ class UserProfile(BaseModel):
 
 class PaymentCheckout(BaseModel):
     plan: str
-    email: str
+    email: Optional[str] = None  # ignorado — backend usa email do usuário autenticado
 
 
 class SubscriptionResponse(BaseModel):
@@ -1136,11 +1136,11 @@ async def create_checkout(
             mode="subscription",
             success_url=f"{frontend_url}/success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{frontend_url}/pricing",
-            customer_email=payment.email,
+            customer_email=current_user["email"],
             metadata={
                 "plan": plan_key,
                 "user_id": str(current_user["user_id"]),
-                "email": payment.email,
+                "email": current_user["email"],
             },
         )
 
@@ -1160,7 +1160,7 @@ async def create_checkout(
 
 class AddonCheckoutRequest(BaseModel):
     """Request para comprar pacote extra de clientes/fornecedores."""
-    email: str
+    email: Optional[str] = None  # ignorado — backend usa email do usuário autenticado
 
 
 @router.post("/checkout/addon-clients")
@@ -1217,11 +1217,11 @@ async def checkout_addon_clients(
             mode="payment",
             success_url=f"{frontend_url}/success?session_id={{CHECKOUT_SESSION_ID}}&addon=clients",
             cancel_url=f"{frontend_url}/pricing",
-            customer_email=body.email,
+            customer_email=current_user["email"],
             metadata={
                 "plan": "addon_clients",
                 "user_id": str(current_user["user_id"]),
-                "email": body.email,
+                "email": current_user["email"],
                 "addon_type": "extra_clients",
                 "slots": "10",
             },
