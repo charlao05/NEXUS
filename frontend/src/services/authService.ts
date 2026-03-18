@@ -24,6 +24,7 @@ interface UserProfile {
   email: string
   full_name: string
   plan: string
+  role: string
   created_at: string
   subscription_expires: string | null
   requests_used: number
@@ -165,6 +166,7 @@ function clearSession() {
   localStorage.removeItem('refresh_token')
   localStorage.removeItem('user_email')
   localStorage.removeItem('user_plan')
+  localStorage.removeItem('nexus_plan_limits')
 }
 
 /**

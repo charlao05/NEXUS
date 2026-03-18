@@ -17,6 +17,7 @@ interface AuthState {
   isLoading: boolean
   userEmail: string | null
   userPlan: string | null
+  userRole: string | null
   isAuthenticated: boolean
   login: (newToken: string, email?: string, plan?: string) => void
   logout: () => void
@@ -33,20 +34,29 @@ const AuthContext = createContext<AuthState | null>(null)
 // ---------------------------------------------------------------------------
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [userEmail, setUserEmail] = useState<string | null>(null)
-  const [userPlan, setUserPlan] = useState<string | null>(null)
+  // Inicializar diretamente do localStorage — sem esperar rede
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem('access_token'))
+  const [userEmail, setUserEmail] = useState<string | null>(() => localStorage.getItem('user_email'))
+  const [userPlan, setUserPlan] = useState<string | null>(() => localStorage.getItem('user_plan'))
+  const [userRole, setUserRole] = useState<string | null>(() => {
+    // Inicializar role do localStorage OU decodificar do token salvo
+    const saved = localStorage.getItem('user_role')
+    if (saved) return saved
+    try {
+      const t = localStorage.getItem('access_token')
+      if (t) {
+        const p = JSON.parse(atob(t.split('.')[1]))
+        if (p.role) { localStorage.setItem('user_role', p.role); return p.role }
+      }
+    } catch { /* ignore */ }
+    return null
+  })
+  // isLoading só bloqueia se NÃO temos token salvo (primeiro acesso real)
+  const [isLoading, setIsLoading] = useState(() => !localStorage.getItem('access_token'))
 
-  // Inicializar a partir do localStorage e validar token com o backend
+  // Validar token com o backend em background (sem bloquear renderização)
   useEffect(() => {
     const savedToken = localStorage.getItem('access_token')
-    const savedEmail = localStorage.getItem('user_email')
-    const savedPlan = localStorage.getItem('user_plan')
-
-    setToken(savedToken)
-    setUserEmail(savedEmail)
-    setUserPlan(savedPlan)
 
     if (savedToken) {
       // Usa authService.getProfile que passa pelo interceptor com refresh automático
@@ -55,6 +65,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (res.plan) {
             setUserPlan(res.plan)
             localStorage.setItem('user_plan', res.plan)
+          }
+          if (res.role) {
+            setUserRole(res.role)
+            localStorage.setItem('user_role', res.role)
           }
           if (res.full_name) {
             localStorage.setItem('user_name', res.full_name)
@@ -70,19 +84,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             localStorage.removeItem('user_email')
             localStorage.removeItem('user_plan')
             localStorage.removeItem('user_name')
+            localStorage.removeItem('user_role')
             localStorage.removeItem('onboarding_completed')
             setToken(null)
             setUserEmail(null)
             setUserPlan(null)
+            setUserRole(null)
           } else {
             // Erro de rede/timeout — manter token mas logar aviso
             console.warn('[AuthContext] Erro ao validar token (mantendo sessão):', err.message || err)
           }
         })
-        .finally(() => setIsLoading(false))
-    } else {
-      setIsLoading(false)
     }
+    // Se não tem token, isLoading já era true e agora podemos finalizar
+    setIsLoading(false)
   }, [])
 
   // Login — atualiza estado React + localStorage de uma vez
@@ -90,6 +105,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('access_token', newToken)
     if (email) localStorage.setItem('user_email', email)
     if (plan) localStorage.setItem('user_plan', plan)
+
+    // Extrair role do novo token
+    try {
+      const p = JSON.parse(atob(newToken.split('.')[1]))
+      if (p.role) { localStorage.setItem('user_role', p.role); setUserRole(p.role) }
+    } catch { /* ignore */ }
 
     setToken(newToken)
     if (email) setUserEmail(email)
@@ -103,10 +124,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('user_email')
     localStorage.removeItem('user_plan')
     localStorage.removeItem('user_name')
+    localStorage.removeItem('user_role')
     localStorage.removeItem('onboarding_completed')
+    localStorage.removeItem('nexus_plan_limits')
     setToken(null)
     setUserEmail(null)
     setUserPlan(null)
+    setUserRole(null)
   }, [])
 
   return (
@@ -116,6 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoading,
         userEmail,
         userPlan,
+        userRole,
         isAuthenticated: !!token,
         login,
         logout,

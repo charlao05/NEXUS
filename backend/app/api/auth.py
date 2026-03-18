@@ -173,12 +173,13 @@ def _get_jwt_secret() -> str:
     return secret
 
 
-def create_jwt_token(user_id: int, email: str, plan: str) -> str:
+def create_jwt_token(user_id: int, email: str, plan: str, role: str = "user") -> str:
     """Cria JWT com expiração de 24h — inclui iss/aud para validação enterprise."""
     payload: dict[str, Any] = {
         "user_id": user_id,
         "email": email,
         "plan": plan,
+        "role": role,
         "exp": datetime.now(timezone.utc) + timedelta(hours=24),
         "iat": datetime.now(timezone.utc),
         "nbf": datetime.now(timezone.utc),  # Not Before — token válido a partir de agora
@@ -508,7 +509,7 @@ async def login(credentials: UserLogin):
         plan = _normalize_plan(user.plan)
         role = str(getattr(user, 'role', None) or 'user')
 
-        token = create_jwt_token(user_id, credentials.email, plan)
+        token = create_jwt_token(user_id, credentials.email, plan, role)
         refresh = create_refresh_token(user_id, credentials.email)
         logger.info(f"Login bem-sucedido: {credentials.email} (role={role}, plan={plan})")
 
@@ -1056,10 +1057,11 @@ async def refresh_token_endpoint(data: RefreshRequest):
         if not user:
             raise HTTPException(401, "Usuário não encontrado ou conta excluída")
         plan = _normalize_plan(user.plan)
+        role = str(getattr(user, 'role', None) or 'user')
     finally:
         db.close()
 
-    new_access = create_jwt_token(user_id, email, plan)
+    new_access = create_jwt_token(user_id, email, plan, role)
     new_refresh = create_refresh_token(user_id, email)
 
     return TokenResponse(
@@ -1488,7 +1490,7 @@ async def admin_switch_plan(
 
         # Gerar novo token com o plano atualizado (via create_jwt_token com iss/aud/jti)
         plan_config = PLANS.get(plan, PLANS["free"])
-        new_token = create_jwt_token(user.id, user.email, plan)  # type: ignore[arg-type]
+        new_token = create_jwt_token(user.id, user.email, plan, str(getattr(user, 'role', None) or 'user'))  # type: ignore[arg-type]
 
         return {
             "status": "ok",
@@ -1633,7 +1635,7 @@ async def google_callback(code: str | None = None, error: str | None = None, sta
                 user.oauth_provider = "google"  # type: ignore[assignment]
                 user.oauth_id = g_id  # type: ignore[assignment]
             db.commit()
-        token = create_jwt_token(user.id, g_email, _normalize_plan(user.plan))  # type: ignore[arg-type]
+        token = create_jwt_token(user.id, g_email, _normalize_plan(user.plan), str(getattr(user, 'role', None) or 'user'))  # type: ignore[arg-type]
     finally:
         db.close()
     return _redirect_with_token(frontend_url, token)
@@ -1722,7 +1724,7 @@ async def facebook_callback(code: str | None = None, error: str | None = None, s
         else:
             user.last_login = datetime.now(timezone.utc)  # type: ignore[assignment]
             db.commit()
-        token = create_jwt_token(user.id, fb_email, _normalize_plan(user.plan))  # type: ignore[arg-type]
+        token = create_jwt_token(user.id, fb_email, _normalize_plan(user.plan), str(getattr(user, 'role', None) or 'user'))  # type: ignore[arg-type]
     finally:
         db.close()
     return _redirect_with_token(frontend_url, token)

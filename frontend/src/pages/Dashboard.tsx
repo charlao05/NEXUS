@@ -72,27 +72,28 @@ interface AnalyticsData {
 }
 
 function Dashboard() {
-  const { logout, token } = useAuth()
+  const { logout, token, userRole: authRole } = useAuth()
   const navigate = useNavigate()
   const { isDark, toggleTheme } = useTheme()
   const { notifications, unreadCount, markRead, clearAll } = useNotifications(token)
   const [userPlan, setUserPlan] = useState<string>('free')
-  const [userRole, setUserRole] = useState<string>('user')
+  const [userRole, setUserRole] = useState<string>(() => authRole || localStorage.getItem('user_role') || 'user')
   const [userName, setUserName] = useState<string>('')
   const [userEmail, setUserEmail] = useState<string>('')
   const [requestsUsed, setRequestsUsed] = useState(0)
   const [requestsLimit, setRequestsLimit] = useState(100)
   const [crmData, setCrmData] = useState<CRMDashboard | null>(null)
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
-  const [profileLoaded, setProfileLoaded] = useState(false)
 
   useEffect(() => {
     const savedName = localStorage.getItem('user_name')
     const savedEmail = localStorage.getItem('user_email')
     const savedPlan = localStorage.getItem('user_plan')
+    const savedRole = localStorage.getItem('user_role')
     if (savedName) setUserName(savedName)
     if (savedEmail) setUserEmail(savedEmail)
     if (savedPlan) setUserPlan(savedPlan)
+    if (savedRole) setUserRole(savedRole)
 
     if (token) {
       try {
@@ -112,15 +113,17 @@ function Dashboard() {
       }
     }
 
-    // Buscar perfil real do backend
+    // Buscar perfil (requests usage) + CRM + Analytics em paralelo
     const fetchProfile = async () => {
       try {
         const response = await axios.get(apiUrl('/api/auth/me'), {
           headers: { Authorization: `Bearer ${token}` }
         })
         if (response.data) {
-          setUserPlan(response.data.plan)
-          localStorage.setItem('user_plan', response.data.plan)
+          if (response.data.plan) {
+            setUserPlan(response.data.plan)
+            localStorage.setItem('user_plan', response.data.plan)
+          }
           if (response.data.full_name && response.data.full_name !== 'Usuário') {
             setUserName(response.data.full_name)
             localStorage.setItem('user_name', response.data.full_name)
@@ -132,12 +135,11 @@ function Dashboard() {
           setRequestsLimit(response.data.requests_limit || 100)
           if (response.data.role) {
             setUserRole(response.data.role)
+            localStorage.setItem('user_role', response.data.role)
           }
         }
-      } catch (e) {
-        console.log('Usando dados do token/localStorage')
-      } finally {
-        setProfileLoaded(true)
+      } catch {
+        // Dados do token/localStorage já estão setados acima
       }
     }
 
@@ -150,8 +152,8 @@ function Dashboard() {
         if (response.data) {
           setCrmData(response.data)
         }
-      } catch (e) {
-        console.log('CRM dashboard indisponível')
+      } catch {
+        // CRM dashboard indisponível
       }
     }
 
@@ -164,12 +166,13 @@ function Dashboard() {
         if (response.data) {
           setAnalytics(response.data)
         }
-      } catch (e) {
-        console.log('Analytics indisponível')
+      } catch {
+        // Analytics indisponível
       }
     }
 
     if (token) {
+      // Todas as chamadas em paralelo — UI renderiza instantaneamente com dados do localStorage
       fetchProfile()
       fetchCRM()
       fetchAnalytics()
@@ -576,7 +579,7 @@ function Dashboard() {
               </div>
             </button>
           </div>
-          {userPlan === 'free' && profileLoaded && (
+          {userPlan === 'free' && (
             <div className="mt-4 p-3 rounded-lg bg-slate-700/30 border border-slate-600/30">
               <p className="text-slate-400 text-sm">
                 🔒 Faça upgrade para desbloquear mais agentes — a partir de R$ 39,90/mês
