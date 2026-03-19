@@ -379,6 +379,14 @@ except ImportError as e:
     logging.warning(f"Módulo agent_chat indisponível: {e}")
 
 
+# Importar rotas de Billing (Stripe Payments)
+try:
+    from app.api.billing import router as billing_router  # type: ignore[import]
+    app.include_router(billing_router)  # type: ignore[arg-type]
+    logging.info("✅ Rotas de Billing (Stripe) carregadas")
+except ImportError as e:
+    logging.warning(f"Não foi possível importar billing routes: {e}")
+
 # ==================== ERROR HANDLERS ====================
 
 @app.exception_handler(Exception)
