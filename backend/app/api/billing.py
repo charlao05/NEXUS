@@ -1,18 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from app.db.session import get_db
-from app.core.auth import get_current_user
-from app.models.user import User
-from app.models.billing import Invoice, Subscription
-from app.schemas.billing import InvoiceOut, SubscriptionOut, SubscriptionCreate
-from typing import List
+from database.models import get_db, Invoice, Subscription, User  # type: ignore[import]
+from app.api.auth import get_current_user  # type: ignore[import]
+from app.schemas.billing import InvoiceOut, SubscriptionOut, SubscriptionCreate  # type: ignore[import]
+from typing import List, Optional
 import stripe
 import os
 from datetime import datetime
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 
 
 @router.get("/invoices", response_model=List[InvoiceOut])
@@ -20,8 +18,13 @@ def list_invoices(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Lista todas as faturas do usuario autenticado."""
-    invoices = db.query(Invoice).filter(Invoice.user_id == current_user.id).order_by(Invoice.created_at.desc()).all()
+    """Lista todas as faturas/contas do usuario autenticado."""
+    invoices = (
+        db.query(Invoice)
+        .filter(Invoice.user_id == current_user.id)
+        .order_by(Invoice.created_at.desc())
+        .all()
+    )
     return invoices
 
 
@@ -31,74 +34,68 @@ def get_invoice(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Retorna uma fatura especifica."""
-    invoice = db.query(Invoice).filter(
-        Invoice.id == invoice_id,
-        Invoice.user_id == current_user.id
-    ).first()
+    """Retorna uma fatura especifica do usuario."""
+    invoice = (
+        db.query(Invoice)
+        .filter(Invoice.id == invoice_id, Invoice.user_id == current_user.id)
+        .first()
+    )
     if not invoice:
         raise HTTPException(status_code=404, detail="Fatura nao encontrada")
     return invoice
 
 
-@router.get("/subscription", response_model=SubscriptionOut)
+@router.get("/subscription", response_model=Optional[SubscriptionOut])
 def get_subscription(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Retorna a assinatura ativa do usuario."""
-    subscription = db.query(Subscription).filter(
-        Subscription.user_id == current_user.id,
-        Subscription.status == "active"
-    ).first()
-    if not subscription:
-        raise HTTPException(status_code=404, detail="Nenhuma assinatura ativa encontrada")
+    subscription = (
+        db.query(Subscription)
+        .filter(
+            Subscription.user_id == current_user.id,
+            Subscription.status == "active"
+        )
+        .first()
+    )
     return subscription
 
 
-@router.post("/subscription", response_model=SubscriptionOut)
-def create_subscription(
+@router.post("/checkout")
+def create_checkout_session(
     payload: SubscriptionCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Cria uma nova assinatura via Stripe."""
+    """Cria sessao de checkout no Stripe e retorna URL de pagamento."""
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Pagamentos nao configurados")
     try:
-        # Cria ou recupera o customer no Stripe
+        # Cria ou recupera customer no Stripe
         if not current_user.stripe_customer_id:
             customer = stripe.Customer.create(
                 email=current_user.email,
                 name=current_user.full_name or current_user.email,
+                metadata={"user_id": str(current_user.id)},
             )
             current_user.stripe_customer_id = customer.id
             db.commit()
-        else:
-            customer = stripe.Customer.retrieve(current_user.stripe_customer_id)
 
-        # Cria a assinatura no Stripe
-        stripe_subscription = stripe.Subscription.create(
+        frontend_url = os.getenv("FRONTEND_URL", "https://nexxusapp.com.br")
+        session = stripe.checkout.Session.create(
             customer=current_user.stripe_customer_id,
-            items=[{"price": payload.price_id}],
-            expand=["latest_invoice.payment_intent"],
+            payment_method_types=["card"],
+            line_items=[{"price": payload.price_id, "quantity": 1}],
+            mode="subscription",
+            success_url=f"{frontend_url}/dashboard?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{frontend_url}/planos?checkout=cancelled",
+            metadata={"user_id": str(current_user.id), "plan": payload.plan},
         )
-
-        # Salva no banco
-        subscription = Subscription(
-            user_id=current_user.id,
-            stripe_subscription_id=stripe_subscription.id,
-            stripe_customer_id=current_user.stripe_customer_id,
-            plan=payload.plan,
-            status=stripe_subscription.status,
-            current_period_start=datetime.utcfromtimestamp(stripe_subscription.current_period_start),
-            current_period_end=datetime.utcfromtimestamp(stripe_subscription.current_period_end),
-        )
-        db.add(subscription)
-        db.commit()
-        db.refresh(subscription)
-        return subscription
+        return {"checkout_url": session.url, "session_id": session.id}
 
     except stripe.error.StripeError as e:
-        raise HTTPException(status_code=400, detail=str(e.user_message))
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.delete("/subscription")
@@ -106,58 +103,126 @@ def cancel_subscription(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Cancela a assinatura ativa do usuario."""
-    subscription = db.query(Subscription).filter(
-        Subscription.user_id == current_user.id,
-        Subscription.status == "active"
-    ).first()
+    """Cancela a assinatura ativa do usuario (ao final do periodo)."""
+    subscription = (
+        db.query(Subscription)
+        .filter(
+            Subscription.user_id == current_user.id,
+            Subscription.status == "active"
+        )
+        .first()
+    )
     if not subscription:
         raise HTTPException(status_code=404, detail="Nenhuma assinatura ativa encontrada")
 
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Pagamentos nao configurados")
+
     try:
-        stripe.Subscription.delete(subscription.stripe_subscription_id)
-        subscription.status = "canceled"
+        if subscription.stripe_subscription_id:
+            stripe.Subscription.modify(
+                subscription.stripe_subscription_id,
+                cancel_at_period_end=True
+            )
+        subscription.status = "cancelled"
         db.commit()
-        return {"message": "Assinatura cancelada com sucesso"}
+        return {"message": "Assinatura sera cancelada ao final do periodo vigente"}
     except stripe.error.StripeError as e:
-        raise HTTPException(status_code=400, detail=str(e.user_message))
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/webhook")
-async def stripe_webhook(request, db: Session = Depends(get_db)):
-    """Recebe webhooks do Stripe para atualizar status de pagamento."""
+async def stripe_webhook(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Webhook Stripe — processa eventos de pagamento e assinatura."""
     payload = await request.body()
-    sig_header = request.headers.get("stripe-signature")
-    endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+    sig_header = request.headers.get("stripe-signature", "")
+    endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+
+    if not endpoint_secret:
+        raise HTTPException(status_code=503, detail="Webhook secret nao configurado")
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid payload")
+        raise HTTPException(status_code=400, detail="Payload invalido")
     except stripe.error.SignatureVerificationError:
-        raise HTTPException(status_code=400, detail="Invalid signature")
+        raise HTTPException(status_code=400, detail="Assinatura invalida")
 
-    # Trata eventos relevantes
-    if event["type"] == "invoice.payment_succeeded":
-        stripe_invoice = event["data"]["object"]
-        invoice = Invoice(
-            user_id=None,  # mapear pelo customer_id
-            stripe_invoice_id=stripe_invoice["id"],
-            amount=stripe_invoice["amount_paid"] / 100,
-            currency=stripe_invoice["currency"].upper(),
-            status="paid",
-            paid_at=datetime.utcnow(),
-        )
-        db.add(invoice)
-        db.commit()
+    event_type = event["type"]
 
-    elif event["type"] == "customer.subscription.updated":
-        stripe_sub = event["data"]["object"]
-        sub = db.query(Subscription).filter(
-            Subscription.stripe_subscription_id == stripe_sub["id"]
-        ).first()
-        if sub:
-            sub.status = stripe_sub["status"]
+    if event_type == "checkout.session.completed":
+        # Checkout concluido — criar/atualizar assinatura
+        session_obj = event["data"]["object"]
+        user_id = session_obj.get("metadata", {}).get("user_id")
+        plan = session_obj.get("metadata", {}).get("plan", "essencial")
+        stripe_sub_id = session_obj.get("subscription")
+        stripe_customer_id = session_obj.get("customer")
+
+        if user_id and stripe_sub_id:
+            # Buscar dados da assinatura no Stripe
+            stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
+            sub = Subscription(
+                user_id=int(user_id),
+                stripe_subscription_id=stripe_sub_id,
+                stripe_checkout_session_id=session_obj.get("id"),
+                plan=plan,
+                status="active",
+                current_period_start=datetime.utcfromtimestamp(stripe_sub["current_period_start"]),
+                current_period_end=datetime.utcfromtimestamp(stripe_sub["current_period_end"]),
+                amount=(session_obj.get("amount_total") or 0) / 100,
+                currency=(session_obj.get("currency") or "brl").upper(),
+            )
+            db.add(sub)
+            # Atualizar plano do usuario
+            user = db.query(User).filter(User.id == int(user_id)).first()
+            if user:
+                user.plan = plan
+                user.stripe_customer_id = stripe_customer_id
+                user.plan_activated_at = datetime.utcnow()
             db.commit()
 
-    return {"received": True}
+    elif event_type == "customer.subscription.updated":
+        stripe_sub = event["data"]["object"]
+        sub = (
+            db.query(Subscription)
+            .filter(Subscription.stripe_subscription_id == stripe_sub["id"])
+            .first()
+        )
+        if sub:
+            sub.status = stripe_sub["status"]
+            sub.current_period_end = datetime.utcfromtimestamp(stripe_sub["current_period_end"])
+            db.commit()
+
+    elif event_type == "customer.subscription.deleted":
+        stripe_sub = event["data"]["object"]
+        sub = (
+            db.query(Subscription)
+            .filter(Subscription.stripe_subscription_id == stripe_sub["id"])
+            .first()
+        )
+        if sub:
+            sub.status = "cancelled"
+            db.commit()
+            # Rebaixar usuario para free
+            user = db.query(User).filter(User.id == sub.user_id).first()
+            if user:
+                user.plan = "free"
+                db.commit()
+
+    elif event_type == "invoice.payment_failed":
+        stripe_invoice = event["data"]["object"]
+        stripe_sub_id = stripe_invoice.get("subscription")
+        if stripe_sub_id:
+            sub = (
+                db.query(Subscription)
+                .filter(Subscription.stripe_subscription_id == stripe_sub_id)
+                .first()
+            )
+            if sub:
+                sub.status = "past_due"
+                db.commit()
+
+    return {"received": True, "type": event_type}
