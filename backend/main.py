@@ -128,6 +128,29 @@ async def lifespan(application: FastAPI):
         logging.info("✅ Banco de dados inicializado")
     except Exception as e:
         logging.warning(f"Banco de dados não inicializado: {e}")
+            # Seed admin user se ADMIN_SEED_EMAIL configurado
+    _seed_email = os.getenv("ADMIN_EMAILS", "")
+    if _seed_email:
+        try:
+            from database.models import SessionLocal, User  # type: ignore[import]
+            _db = SessionLocal()
+            try:
+                for _em in _seed_email.split(","):
+                    _em = _em.strip()
+                    if not _em:
+                        continue
+                    _u = _db.query(User).filter(User.email == _em).first()
+                    if _u and (_u.role != "admin" or _u.plan != "completo"):
+                        _u.role = "admin"
+                        _u.plan = "completo"
+                        if _u.full_name and _u.full_name == _u.full_name.lower():
+                            _u.full_name = _u.full_name.title()
+                        _db.commit()
+                        logging.info(f"Admin seed: {_em} promovido para admin/completo")
+            finally:
+                _db.close()
+        except Exception as _e:
+            logging.warning(f"Admin seed falhou: {_e}")
     yield
     # Shutdown (cleanup se necessário)
     logging.info("🛑 NEXUS API encerrando")
