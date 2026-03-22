@@ -380,6 +380,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "concurrent_requests": 5,
         "features": ["contabilidade", "clientes", "cobranca"],
         "price": 3990,
+        "stripe_price_id": os.getenv("STRIPE_PRICE_ESSENCIAL", ""),
     },
     "profissional": {
         "requests_per_day": 10000,
@@ -387,6 +388,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "concurrent_requests": 10,
         "features": ["contabilidade", "clientes", "cobranca", "agenda", "assistente"],
         "price": 6990,
+        "stripe_price_id": os.getenv("STRIPE_PRICE_PROFISSIONAL", ""),
     },
     "completo": {
         "requests_per_day": 999999,
@@ -395,6 +397,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "features": ["full_api", "dedicated_support", "custom_integration"],
         "price": 9990,
     },
+    "stripe_price_id": os.getenv("STRIPE_PRICE_COMPLETO", ""),
     # Aliases retrocompatíveis
     "pro": {
         "requests_per_day": 1000,
@@ -1099,10 +1102,12 @@ async def create_checkout(
 
     try:
         price_in_cents = PLANS[plan_key]["price"]  # já está em centavos
+        stripe_price_id = PLANS[plan_key].get("stripe_price_id", "")
         frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
 
         # Sanitizar: em dev, garantir que FRONTEND_URL aponta para o Vite dev server correto
         _env = os.getenv("ENVIRONMENT", "development")
+    
         if _env != "production" and "localhost" in frontend_url:
             # Corrigir problemas comuns: HTTPS em dev, porta errada
             frontend_url = frontend_url.replace("https://", "http://")
@@ -1124,15 +1129,61 @@ async def create_checkout(
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],
             line_items=[{
-                "price_data": {
-                    "currency": "brl",
-                    "product_data": {
-                        "name": f"NEXUS {plan_display}",
-                        "description": f"Acesso ao plano {plan_display} do NEXUS",
-                    },
-                    "unit_amount": price_in_cents,
-                    "recurring": {"interval": "month"},
-                },
+                **({
+                            # TAREFA 3: Upgrade/downgrade se já existir subscription ativa
+        db_upgrade = _get_db_session()
+        try:
+            existing_sub = (
+                db_upgrade.query(Subscription)
+                .filter(
+                    Subscription.user_id == current_user["user_id"],
+                    Subscription.status == "active",
+                    Subscription.stripe_subscription_id.isnot(None),
+                )
+                .order_by(Subscription.created_at.desc())
+                .first()
+            )
+            if existing_sub and existing_sub.stripe_subscription_id:
+                # Upgrade/downgrade inline via Stripe API
+                stripe_sub = stripe.Subscription.retrieve(existing_sub.stripe_subscription_id)
+                if stripe_sub and stripe_sub.get("status") in ("active", "trialing"):
+                    items = stripe_sub.get("items", {}).get("data", [])
+                    if items and stripe_price_id:
+                        stripe.Subscription.modify(
+                            existing_sub.stripe_subscription_id,
+                            items=[{"id": items[0]["id"], "price": stripe_price_id}],
+                            proration_behavior="create_prorations",
+                        )
+                        # Atualizar plano no banco diretamente
+                        user_obj = db_upgrade.query(User).filter(User.id == current_user["user_id"]).first()
+                        if user_obj:
+                            user_obj.plan = plan_key
+                        existing_sub.plan = plan_key
+                        db_upgrade.commit()
+                        return SubscriptionResponse(
+                            status="upgraded",
+                            checkout_url="",
+                            session_id=existing_sub.stripe_subscription_id or "",
+                        )
+        except HTTPException:
+            raise
+        except Exception as upg_err:
+            logger.warning(f"Upgrade inline falhou, prosseguindo com checkout: {upg_err}")
+        finally:
+            db_upgrade.close()
+
+                    "price": stripe_price_id,
+                } if stripe_price_id else {
+                    "price_data": {
+                        "currency": "brl",
+                        "product_data": {
+                            "name": f"NEXUS {plan_display}",
+                            "description": f"Acesso ao plano {plan_display} do NEXUS",
+                        },
+                        "unit_amount": price_in_cents,
+                        "recurring": {"interval": "month"},
+                    }
+                }),
                 "quantity": 1,
             }],
             mode="subscription",
@@ -1159,6 +1210,39 @@ async def create_checkout(
 # ============================================================================
 # ADDON: PACOTE EXTRA DE CLIENTES/FORNECEDORES (+10 cada por R$12,90 — compra única)
 # ============================================================================
+
+# ============================================================================
+# STRIPE BILLING PORTAL
+# ============================================================================
+@router.post("/create-portal-session")
+async def create_portal_session(
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Cria sessão do Stripe Billing Portal para gerenciar assinatura."""
+    stripe = _init_stripe()
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Stripe não configurado")
+    db = _get_db_session()
+    try:
+        user = db.query(User).filter(User.id == current_user["user_id"]).first()
+        if not user or not getattr(user, 'stripe_customer_id', None):
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhuma assinatura Stripe encontrada. Faça checkout primeiro.",
+            )
+        frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
+        portal_session = stripe.billing_portal.Session.create(
+            customer=user.stripe_customer_id,
+            return_url=f"{frontend_url}/settings",
+        )
+        return {"url": portal_session.url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao criar portal session: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao abrir portal de gerenciamento.")
+    finally:
+        db.close()
 
 class AddonCheckoutRequest(BaseModel):
     """Request para comprar pacote extra de clientes/fornecedores."""
@@ -1285,6 +1369,32 @@ async def stripe_webhook(request: Request):
     logger.info(f"Stripe webhook: {event_type}")
 
     db = _get_db_session()
+        # TAREFA 4: Idempotência global — verificar se já processamos este evento
+    event_id = event.get("id") if hasattr(event, "get") else getattr(event, "id", None)
+    if event_id:
+        _idem_db = _get_db_session()
+        try:
+            from database.models import StripeEvent as _StripeEventModel
+            existing_evt = _idem_db.query(_StripeEventModel).filter(
+                _StripeEventModel.stripe_event_id == event_id
+            ).first()
+            if existing_evt:
+                logger.info(f"⚠️ Evento Stripe já processado (idempotente): {event_id}")
+                return {"status": "already_processed", "event_id": event_id}
+            # Registrar antes de processar
+            new_evt = _StripeEventModel(
+                stripe_event_id=event_id,
+                event_type=str(getattr(event, 'type', 'unknown')),
+            )
+            _idem_db.add(new_evt)
+            _idem_db.commit()
+        except ImportError:
+            pass  # Modelo ainda não migrado — pular idempotência até migração
+        except Exception as idem_err:
+            logger.warning(f"Erro na verificação de idempotência: {idem_err}")
+        finally:
+            _idem_db.close()
+
     try:
         if event_type == "checkout.session.completed":
             session_obj: Any = event.data.object  # type: ignore[union-attr]
