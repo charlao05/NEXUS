@@ -844,6 +844,25 @@ def _auto_migrate_columns():
                 except Exception as e:
                     logger.warning(f"⚠️ Falha ao migrar {table_name}.{col.name}: {e}")
 
+# ============================================================================
+# MODELO DE IDEMPOTÊNCIA STRIPE
+# ============================================================================
+class StripeEvent(Base):
+    """Registro de eventos Stripe processados — garante idempotência no webhook."""
+    __tablename__ = "stripe_events"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    stripe_event_id = Column(String(200), unique=True, nullable=False, index=True)
+    event_type = Column(String(100), nullable=True)
+    processed_at = Column(DateTime, default=_utcnow)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "stripe_event_id": self.stripe_event_id,
+            "event_type": self.event_type,
+            "processed_at": self.processed_at.isoformat() if self.processed_at else None,
+        }
+
 
 def init_db():
     """Cria todas as tabelas se não existirem + migra colunas faltantes"""
