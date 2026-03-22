@@ -396,8 +396,8 @@ PLANS: dict[str, dict[str, Any]] = {
         "concurrent_requests": 999999,
         "features": ["full_api", "dedicated_support", "custom_integration"],
         "price": 9990,
+        "stripe_price_id": os.getenv("STRIPE_PRICE_COMPLETO", ""),
     },
-    "stripe_price_id": os.getenv("STRIPE_PRICE_COMPLETO", ""),
     # Aliases retrocompatíveis
     "pro": {
         "requests_per_day": 1000,
@@ -1126,11 +1126,7 @@ async def create_checkout(
         }
         plan_display = _PLAN_DISPLAY_NAMES.get(plan_key, plan_key.capitalize())
 
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{
-                **({
-                            # TAREFA 3: Upgrade/downgrade se já existir subscription ativa
+        # TAREFA 3: Upgrade/downgrade se já existir subscription ativa
         db_upgrade = _get_db_session()
         try:
             existing_sub = (
@@ -1172,20 +1168,25 @@ async def create_checkout(
         finally:
             db_upgrade.close()
 
-                    "price": stripe_price_id,
-                } if stripe_price_id else {
-                    "price_data": {
-                        "currency": "brl",
-                        "product_data": {
-                            "name": f"NEXUS {plan_display}",
-                            "description": f"Acesso ao plano {plan_display} do NEXUS",
-                        },
-                        "unit_amount": price_in_cents,
-                        "recurring": {"interval": "month"},
-                    }
-                }),
-                "quantity": 1,
-            }],
+        # Montar line_item com price_id fixo (produção) ou price_data inline (dev/fallback)
+        if stripe_price_id:
+            _line_item: dict = {"price": stripe_price_id}
+        else:
+            _line_item = {
+                "price_data": {
+                    "currency": "brl",
+                    "product_data": {
+                        "name": f"NEXUS {plan_display}",
+                        "description": f"Acesso ao plano {plan_display} do NEXUS",
+                    },
+                    "unit_amount": price_in_cents,
+                    "recurring": {"interval": "month"},
+                },
+            }
+
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{**_line_item, "quantity": 1}],
             mode="subscription",
             success_url=f"{frontend_url}/success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{frontend_url}/pricing",
@@ -1368,8 +1369,7 @@ async def stripe_webhook(request: Request):
     event_type = event.type  # type: ignore[union-attr]
     logger.info(f"Stripe webhook: {event_type}")
 
-    db = _get_db_session()
-        # TAREFA 4: Idempotência global — verificar se já processamos este evento
+    # TAREFA 4: Idempotência global — verificar se já processamos este evento
     event_id = event.get("id") if hasattr(event, "get") else getattr(event, "id", None)
     if event_id:
         _idem_db = _get_db_session()
@@ -1394,6 +1394,8 @@ async def stripe_webhook(request: Request):
             logger.warning(f"Erro na verificação de idempotência: {idem_err}")
         finally:
             _idem_db.close()
+
+    db = _get_db_session()
 
     try:
         if event_type == "checkout.session.completed":
