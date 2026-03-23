@@ -209,15 +209,7 @@ agents_instances: Dict[str, Any] = {}
 
 
 # Mapa de aliases legados (financeiro + documentos → contabilidade)
-_AGENT_ID_ALIAS: Dict[str, str] = {
-    "financeiro": "contabilidade",
-    "documentos": "contabilidade",
-}
-
-
-def _resolve_agent_id(agent_id: str) -> str:
-    """Resolve IDs legados para o novo nome."""
-    return _AGENT_ID_ALIAS.get(agent_id, agent_id)
+from app.core.agent_aliases import AGENT_ID_ALIASES as _AGENT_ID_ALIAS, resolve_agent_id as _resolve_agent_id
 
 
 def get_agent_instance(agent_name: str):

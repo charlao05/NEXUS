@@ -134,10 +134,8 @@ def check_agent_access(user: dict, agent_id: str) -> None:
         return
 
     # Mapear IDs de agente do frontend → backend
-    _AGENT_ALIASES: dict[str, str] = {
-        "financeiro": "contabilidade",
-    }
-    resolved = _AGENT_ALIASES.get(agent_id, agent_id)
+    from app.core.agent_aliases import resolve_agent_id
+    resolved = resolve_agent_id(agent_id)
 
     if resolved not in available:
         raise HTTPException(

@@ -1266,8 +1266,8 @@ async def get_llm_response(agent_id: str, user_message: str, history: list[dict]
         history = []
 
     # Resolver aliases legados (financeiro/documentos → contabilidade)
-    _alias = {"financeiro": "contabilidade", "documentos": "contabilidade"}
-    agent_id = _alias.get(agent_id, agent_id)
+    from app.core.agent_aliases import resolve_agent_id as _resolve_alias
+    agent_id = _resolve_alias(agent_id)
 
     # Buscar contexto real do CRM para enriquecer prompts (filtrado por user_id)
     crm_context = _get_crm_context(user_id=user_id)

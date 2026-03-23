@@ -24,6 +24,12 @@ services:
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
+      - key: STRIPE_PRICE_ESSENCIAL
+        sync: false
+      - key: STRIPE_PRICE_PROFISSIONAL
+        sync: false
+      - key: STRIPE_PRICE_COMPLETO
+        sync: false
       - key: FRONTEND_URL
         value: "https://app.nexxusapp.com.br"
       - key: CORS_ORIGINS

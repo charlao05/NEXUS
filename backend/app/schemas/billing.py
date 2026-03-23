@@ -16,8 +16,7 @@ class InvoiceOut(BaseModel):
     reminders_sent: int = 0
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class SubscriptionOut(BaseModel):
@@ -36,8 +35,7 @@ class SubscriptionOut(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class SubscriptionCreate(BaseModel):
