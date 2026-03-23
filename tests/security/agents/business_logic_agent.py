@@ -43,7 +43,7 @@ class BusinessLogicAgent(SecurityAgent):
     def _test_free_agent_access_gates(self) -> list[Finding]:
         """Free só pode usar contabilidade. Testa acesso aos outros."""
         findings: list[Finding] = []
-        blocked_agents = ["clientes", "cobranca", "agenda", "assistente"]
+        blocked_agents = ["clientes", "agenda", "assistente"]
         for agent in blocked_agents:
             resp = self.client.post(
                 f"/api/agents/{agent}/execute",

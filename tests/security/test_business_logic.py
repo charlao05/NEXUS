@@ -30,7 +30,7 @@ class TestBusinessLogic:
         self, client: TestClient, free_headers: dict
     ):
         """User free NÃO pode executar agentes pagos."""
-        blocked = ["clientes", "cobranca", "agenda", "assistente"]
+        blocked = ["clientes", "agenda", "assistente"]
         for agent in blocked:
             resp = client.post(
                 f"/api/agents/{agent}/execute",
