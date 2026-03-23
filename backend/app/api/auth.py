@@ -359,7 +359,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "requests_per_day": 100,
         "requests_per_month": 2000,
         "concurrent_requests": 1,
-        "features": ["contabilidade"],
+        "features": ["contabilidade", "clientes", "agenda"],
         "price": 0,
     },
     "essencial": {

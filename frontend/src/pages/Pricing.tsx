@@ -35,7 +35,7 @@ const plans: Plan[] = [
     buttonText: 'Plano Atual',
     features: [
       '10 mensagens/dia com IA',
-      '1 agente: Fiscal (contabilidade)',
+      '2 agentes: Fiscal e Clientes/Agenda',
       'Até 5 clientes e 5 fornecedores',
       '3 notas fiscais/mês',
       'Suporte por email',
