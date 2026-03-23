@@ -59,36 +59,16 @@ export default function NexusCodexLogin() {
       }
       localStorage.removeItem('nexus_remember_pwd');
       
-      // Buscar perfil real do backend para obter nome e plano
-      try {
-        const token = result.access_token || localStorage.getItem('access_token');
-        if (token) {
-          const profileRes = await fetch(apiUrl('/api/auth/me'), {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          if (profileRes.ok) {
-            const profile = await profileRes.json();
-            if (profile.full_name && profile.full_name !== 'Usuário') {
-              localStorage.setItem('user_name', profile.full_name);
-            } else {
-              const nameFromEmail = email.split('@')[0].replace(/[._]/g, ' ');
-              localStorage.setItem('user_name', nameFromEmail.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' '));
-            }
-            if (profile.plan) {
-              localStorage.setItem('user_plan', profile.plan);
-            }
-          }
-        }
-      } catch {
-        // Fallback: nome do email
+      // Nome derivado do email como fallback rápido (AuthContext busca perfil real em background)
+      if (!localStorage.getItem('user_name')) {
         const nameFromEmail = email.split('@')[0].replace(/[._]/g, ' ');
         localStorage.setItem('user_name', nameFromEmail.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' '));
       }
       
       // Marcar onboarding como completo para logins de retorno (pular tela de configuração)
       localStorage.setItem('onboarding_completed', 'true');
-      // Atualizar estado React compartilhado via AuthContext
-      auth.login(result.access_token || localStorage.getItem('access_token') || '', email, localStorage.getItem('user_plan') || 'free');
+      // Atualizar estado React compartilhado via AuthContext (perfil atualizado em background)
+      auth.login(result.access_token || localStorage.getItem('access_token') || '', email, result.plan || localStorage.getItem('user_plan') || 'free');
       // Navegação SPA (sem reload)
       navigate('/dashboard');
     } catch (err) {

@@ -29,7 +29,8 @@ PLAN_LIMITS: dict[Plan, dict[str, Any]] = {
         "crm_clients": 5,
         "crm_suppliers": 5,  # equiparado a clientes
         "invoices_per_month": 3,
-        "available_agents": ["contabilidade"],
+        # Agentes, Clientes e Agenda = conjunto gratuito padrão
+        "available_agents": ["contabilidade", "clientes", "agenda"],
         "notifications": "basic",
         "data_export": True,
         "display_name": "Gratuito",

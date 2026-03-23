@@ -71,6 +71,10 @@ interface AnalyticsData {
   clients_chart: Array<{ week: string; count: number }>;
 }
 
+/** Capitaliza cada palavra do nome (ex: "charles silva" → "Charles Silva") */
+const toTitleCase = (name: string): string =>
+  name.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+
 function Dashboard() {
   const { logout, token, userRole: authRole } = useAuth()
   const navigate = useNavigate()
@@ -90,7 +94,7 @@ function Dashboard() {
     const savedEmail = localStorage.getItem('user_email')
     const savedPlan = localStorage.getItem('user_plan')
     const savedRole = localStorage.getItem('user_role')
-    if (savedName) setUserName(savedName)
+    if (savedName) setUserName(toTitleCase(savedName))
     if (savedEmail) setUserEmail(savedEmail)
     if (savedPlan) setUserPlan(savedPlan)
     if (savedRole) setUserRole(savedRole)
@@ -125,8 +129,9 @@ function Dashboard() {
             localStorage.setItem('user_plan', response.data.plan)
           }
           if (response.data.full_name && response.data.full_name !== 'Usuário') {
-            setUserName(response.data.full_name)
-            localStorage.setItem('user_name', response.data.full_name)
+            const titleCased = toTitleCase(response.data.full_name)
+            setUserName(titleCased)
+            localStorage.setItem('user_name', titleCased)
           }
           if (response.data.email) {
             setUserEmail(response.data.email)
@@ -275,18 +280,18 @@ function Dashboard() {
         {/* Stats Cards */}
         <div className="grid md:grid-cols-3 gap-6 mb-8">
           {/* Usage Card */}
-          <div className="p-6 rounded-2xl bg-slate-800/50 border border-slate-700/50">
+          <div className={`p-6 rounded-2xl border ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'}`}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-slate-400 text-sm font-medium">Uso Hoje</h3>
-              <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <h3 className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Uso Hoje</h3>
+              <svg className={`w-5 h-5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             </div>
             <div className="mb-3">
-              <span className="text-3xl font-bold text-white">{requestsUsed}</span>
-              <span className="text-slate-400 text-sm"> / {requestsLimit === Infinity ? '∞' : requestsLimit}</span>
+              <span className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{requestsUsed}</span>
+              <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}> / {requestsLimit === Infinity ? '∞' : requestsLimit}</span>
             </div>
-            <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
+            <div className={`w-full h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
               <div 
                 className={`h-full transition-all duration-500 ${usagePercent > 80 ? 'bg-red-500' : 'bg-green-500'}`}
                 style={{ width: `${usagePercent}%` }}
@@ -295,10 +300,10 @@ function Dashboard() {
           </div>
 
           {/* Plan Card */}
-          <div className="p-6 rounded-2xl bg-slate-800/50 border border-slate-700/50">
+          <div className={`p-6 rounded-2xl border ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'}`}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-slate-400 text-sm font-medium">Seu Plano</h3>
-              <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <h3 className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Seu Plano</h3>
+              <svg className={`w-5 h-5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
               </svg>
             </div>
@@ -316,14 +321,14 @@ function Dashboard() {
           </div>
 
           {/* Quick Action Card */}
-          <div className="p-6 rounded-2xl bg-gradient-to-br from-green-900/30 to-emerald-900/30 border border-green-700/30">
+          <div className={`p-6 rounded-2xl border ${isDark ? 'bg-gradient-to-br from-green-900/30 to-emerald-900/30 border-green-700/30' : 'bg-gradient-to-br from-green-50 to-emerald-50 border-green-200'}`}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-green-400 text-sm font-medium">Início Rápido</h3>
-              <svg className="w-5 h-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <h3 className={`text-sm font-medium ${isDark ? 'text-green-400' : 'text-green-700'}`}>Início Rápido</h3>
+              <svg className={`w-5 h-5 ${isDark ? 'text-green-500' : 'text-green-600'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
               </svg>
             </div>
-            <p className="text-slate-300 text-sm mb-3">
+            <p className={`text-sm mb-3 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
               Configure sua primeira automação
             </p>
             <button 
@@ -338,25 +343,25 @@ function Dashboard() {
         {/* CRM Real Stats */}
         {crmData && (
           <div className="grid md:grid-cols-4 gap-4 mb-8">
-            <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50">
-              <p className="text-slate-400 text-xs font-medium mb-1">Clientes</p>
-              <p className="text-2xl font-bold text-white">{crmData.clients.total - crmData.clients.inactive}</p>
-              <p className="text-slate-500 text-xs mt-1">{crmData.clients.total} Total</p>
+            <div className={`p-4 rounded-xl border ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'}`}>
+              <p className={`text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Clientes</p>
+              <p className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{crmData.clients.total - crmData.clients.inactive}</p>
+              <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{crmData.clients.total} Total</p>
             </div>
-            <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50">
-              <p className="text-slate-400 text-xs font-medium mb-1">Vendas em Andamento</p>
-              <p className="text-2xl font-bold text-green-400">{formatCurrency(crmData.pipeline.total_value)}</p>
-              <p className="text-slate-500 text-xs mt-1">Taxa de Sucesso: {(crmData.pipeline.win_rate * 100).toFixed(0)}%</p>
+            <div className={`p-4 rounded-xl border ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'}`}>
+              <p className={`text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Vendas em Andamento</p>
+              <p className={`text-2xl font-bold ${isDark ? 'text-green-400' : 'text-green-600'}`}>{formatCurrency(crmData.pipeline.total_value)}</p>
+              <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Taxa de Sucesso: {(crmData.pipeline.win_rate * 100).toFixed(0)}%</p>
             </div>
-            <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50">
-              <p className="text-slate-400 text-xs font-medium mb-1">Receita Total</p>
-              <p className="text-2xl font-bold text-blue-400">{formatCurrency(crmData.revenue.total)}</p>
-              <p className="text-slate-500 text-xs mt-1">Valor Médio por Venda: {formatCurrency(crmData.revenue.avg_ticket)}</p>
+            <div className={`p-4 rounded-xl border ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'}`}>
+              <p className={`text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Receita Total</p>
+              <p className={`text-2xl font-bold ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>{formatCurrency(crmData.revenue.total)}</p>
+              <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Valor Médio por Venda: {formatCurrency(crmData.revenue.avg_ticket)}</p>
             </div>
-            <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50">
-              <p className="text-slate-400 text-xs font-medium mb-1">Agendamentos Hoje</p>
-              <p className="text-2xl font-bold text-cyan-400">{crmData.appointments_today}</p>
-              <p className="text-slate-500 text-xs mt-1">{crmData.clients.need_followup} Precisam de Contato</p>
+            <div className={`p-4 rounded-xl border ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'}`}>
+              <p className={`text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Agendamentos Hoje</p>
+              <p className={`text-2xl font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{crmData.appointments_today}</p>
+              <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{crmData.clients.need_followup} Precisam de Contato</p>
             </div>
           </div>
         )}
@@ -365,16 +370,16 @@ function Dashboard() {
         {analytics && (
           <div className="grid md:grid-cols-2 gap-6 mb-8">
             {/* MEI Limit Tracker */}
-            <div className="p-5 rounded-2xl bg-slate-800/50 border border-slate-700/50">
+            <div className={`p-5 rounded-2xl border ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'}`}>
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-white font-semibold flex items-center gap-2">
+                <h3 className={`font-semibold flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
                   <span className="text-lg">📊</span> Limite MEI 2026
                 </h3>
                 <span className={`text-sm font-bold ${analytics.mei.percent_used > 80 ? 'text-red-400' : analytics.mei.percent_used > 60 ? 'text-amber-400' : 'text-green-400'}`}>
                   {analytics.mei.percent_used}%
                 </span>
               </div>
-              <div className="w-full h-3 bg-slate-700 rounded-full overflow-hidden mb-2">
+              <div className={`w-full h-3 rounded-full overflow-hidden mb-2 ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
                 <div
                   className={`h-full rounded-full transition-all duration-700 ${
                     analytics.mei.percent_used > 80 ? 'bg-red-500' : analytics.mei.percent_used > 60 ? 'bg-amber-500' : 'bg-green-500'
@@ -383,42 +388,42 @@ function Dashboard() {
                 />
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-slate-400">
+                <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>
                   {formatCurrency(analytics.mei.year_revenue)} faturado
                 </span>
-                <span className="text-slate-400">
+                <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>
                   {formatCurrency(analytics.mei.remaining)} restante
                 </span>
               </div>
-              <p className="text-slate-500 text-xs mt-2">
+              <p className={`text-xs mt-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                 Limite anual: {formatCurrency(analytics.mei.limit)}
               </p>
             </div>
 
             {/* Lucro do Mês */}
-            <div className="p-5 rounded-2xl bg-slate-800/50 border border-slate-700/50">
-              <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+            <div className={`p-5 rounded-2xl border ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'}`}>
+              <h3 className={`font-semibold mb-3 flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
                 <span className="text-lg">💰</span> Resultado do Mês
               </h3>
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-400 text-sm">Receitas</span>
-                  <span className="text-green-400 font-bold">{formatCurrency(analytics.overview.month_revenue)}</span>
+                  <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Receitas</span>
+                  <span className={`font-bold ${isDark ? 'text-green-400' : 'text-green-600'}`}>{formatCurrency(analytics.overview.month_revenue)}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-400 text-sm">Despesas</span>
-                  <span className="text-red-400 font-bold">- {formatCurrency(analytics.overview.month_expenses)}</span>
+                  <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Despesas</span>
+                  <span className={`font-bold ${isDark ? 'text-red-400' : 'text-red-600'}`}>- {formatCurrency(analytics.overview.month_expenses)}</span>
                 </div>
-                <div className="border-t border-slate-700 pt-2 flex justify-between items-center">
-                  <span className="text-white text-sm font-medium">Lucro</span>
-                  <span className={`text-lg font-bold ${analytics.overview.month_profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                <div className={`border-t pt-2 flex justify-between items-center ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                  <span className={`text-sm font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>Lucro</span>
+                  <span className={`text-lg font-bold ${analytics.overview.month_profit >= 0 ? (isDark ? 'text-green-400' : 'text-green-600') : (isDark ? 'text-red-400' : 'text-red-600')}`}>
                     {formatCurrency(analytics.overview.month_profit)}
                   </span>
                 </div>
               </div>
               {analytics.revenue_chart.length > 0 && (
                 <div className="mt-4">
-                  <p className="text-slate-500 text-xs mb-2">Receita Últimos 30 Dias</p>
+                  <p className={`text-xs mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Receita Últimos 30 Dias</p>
                   <div className="flex items-end gap-px h-12">
                     {analytics.revenue_chart.slice(-30).map((d, i) => {
                       const maxVal = Math.max(...analytics.revenue_chart.map(r => r.value), 1)
@@ -463,19 +468,19 @@ function Dashboard() {
                 chat: 'Conversa',
               }
               return (
-              <div className="p-5 rounded-2xl bg-slate-800/50 border border-slate-700/50">
-                <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <div className={`p-5 rounded-2xl border ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'}`}>
+                <h3 className={`font-semibold mb-3 flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
                   <span className="text-lg">🕐</span> Atividades Recentes
                 </h3>
                 <div className="space-y-2 max-h-48 overflow-y-auto">
                   {analytics.activity_timeline.slice(0, 10).map((a, i) => (
                     <div key={i} className="flex items-start gap-3 text-sm">
-                      <span className="text-slate-500 text-xs whitespace-nowrap mt-0.5">
+                      <span className={`text-xs whitespace-nowrap mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                         {new Date(a.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                       </span>
                       <div>
-                        <span className="text-slate-300">{actionLabels[a.action] || a.action.replace(/_/g, ' ')}</span>
-                        {a.details && <p className="text-slate-500 text-xs">{a.details}</p>}
+                        <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>{actionLabels[a.action] || a.action.replace(/_/g, ' ')}</span>
+                        {a.details && <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{a.details}</p>}
                       </div>
                     </div>
                   ))}
@@ -486,8 +491,8 @@ function Dashboard() {
 
             {/* Chat Usage por Agente */}
             {Object.keys(analytics.chat_usage).length > 0 && (
-              <div className="p-5 rounded-2xl bg-slate-800/50 border border-slate-700/50">
-                <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <div className={`p-5 rounded-2xl border ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'}`}>
+                <h3 className={`font-semibold mb-3 flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
                   <span className="text-lg">💬</span> Uso de Chat (7 Dias)
                 </h3>
                 <div className="space-y-3">
@@ -504,10 +509,10 @@ function Dashboard() {
                       return (
                         <div key={agent}>
                           <div className="flex justify-between items-center text-sm mb-1">
-                            <span className="text-slate-300 capitalize">{agent}</span>
-                            <span className="text-slate-400">{count} msgs</span>
+                            <span className={`capitalize ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{agent}</span>
+                            <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>{count} msgs</span>
                           </div>
-                          <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
+                          <div className={`w-full h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
                             <div
                               className={`h-full rounded-full ${colors[agent] || 'bg-slate-500'}`}
                               style={{ width: `${pct}%` }}
@@ -523,8 +528,8 @@ function Dashboard() {
         )}
 
         {/* Seus Agentes */}
-        <div className="p-6 rounded-2xl bg-slate-800/50 border border-slate-700/50">
-          <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+        <div className={`p-6 rounded-2xl border ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'}`}>
+          <h2 className={`text-xl font-semibold mb-4 flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
             <svg className="w-6 h-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
             </svg>
@@ -534,7 +539,7 @@ function Dashboard() {
             {/* Clientes e Agenda — sempre visível */}
             <button
               onClick={() => navigate('/agents/clientes')}
-              className="flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r from-green-900/30 to-emerald-900/30 border border-green-700/30 hover:border-green-500/50 transition text-left"
+              className={`flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r border transition text-left ${isDark ? 'from-green-900/30 to-emerald-900/30 border-green-700/30 hover:border-green-500/50' : 'from-green-50 to-emerald-50 border-green-200 hover:border-green-400'}`}
             >
               <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center">
                 <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -542,15 +547,15 @@ function Dashboard() {
                 </svg>
               </div>
               <div>
-                <h3 className="text-white font-semibold text-base">Clientes e Agenda</h3>
-                <p className="text-slate-400 text-sm">Cadastro, compromissos e vendas</p>
+                <h3 className={`font-semibold text-base ${isDark ? 'text-white' : 'text-slate-900'}`}>Clientes e Agenda</h3>
+                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Cadastro, compromissos e vendas</p>
               </div>
             </button>
 
             {/* Financeiro */}
             <button
               onClick={() => navigate('/agents/financeiro')}
-              className="flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r from-emerald-900/30 to-teal-900/30 border border-emerald-700/30 hover:border-emerald-500/50 transition text-left"
+              className={`flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r border transition text-left ${isDark ? 'from-emerald-900/30 to-teal-900/30 border-emerald-700/30 hover:border-emerald-500/50' : 'from-emerald-50 to-teal-50 border-emerald-200 hover:border-emerald-400'}`}
             >
               <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
                 <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -558,15 +563,15 @@ function Dashboard() {
                 </svg>
               </div>
               <div>
-                <h3 className="text-white font-semibold text-base">Financeiro</h3>
-                <p className="text-slate-400 text-sm">Dinheiro, cobranças, NFs e MEI</p>
+                <h3 className={`font-semibold text-base ${isDark ? 'text-white' : 'text-slate-900'}`}>Financeiro</h3>
+                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Dinheiro, cobranças, NFs e MEI</p>
               </div>
             </button>
 
             {/* Assistente Pessoal */}
             <button
               onClick={() => navigate('/agents/assistente')}
-              className="flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r from-blue-900/30 to-indigo-900/30 border border-blue-700/30 hover:border-blue-500/50 transition text-left"
+              className={`flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r border transition text-left ${isDark ? 'from-blue-900/30 to-indigo-900/30 border-blue-700/30 hover:border-blue-500/50' : 'from-blue-50 to-indigo-50 border-blue-200 hover:border-blue-400'}`}
             >
               <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center">
                 <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -574,14 +579,14 @@ function Dashboard() {
                 </svg>
               </div>
               <div>
-                <h3 className="text-white font-semibold text-base">Assistente Pessoal</h3>
-                <p className="text-slate-400 text-sm">Resumo, alertas e automações</p>
+                <h3 className={`font-semibold text-base ${isDark ? 'text-white' : 'text-slate-900'}`}>Assistente Pessoal</h3>
+                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Resumo, alertas e automações</p>
               </div>
             </button>
           </div>
           {userPlan === 'free' && (
-            <div className="mt-4 p-3 rounded-lg bg-slate-700/30 border border-slate-600/30">
-              <p className="text-slate-400 text-sm">
+            <div className={`mt-4 p-3 rounded-lg border ${isDark ? 'bg-slate-700/30 border-slate-600/30' : 'bg-slate-50 border-slate-200'}`}>
+              <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                 🔒 Faça upgrade para desbloquear mais agentes — a partir de R$ 39,90/mês
               </p>
               <button onClick={() => navigate('/pricing')} className="text-green-400 hover:text-green-300 text-sm mt-1">

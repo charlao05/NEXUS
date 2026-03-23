@@ -138,9 +138,9 @@ export default function Profile() {
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Form state
-  const [form, setForm] = useState({
-    full_name: '',
+  // Form state — inicializar com dados do localStorage para renderização rápida
+  const [form, setForm] = useState(() => ({
+    full_name: localStorage.getItem('user_name') || '',
     person_type: 'PF' as 'PF' | 'PJ',
     cpf: '',
     cnpj: '',
@@ -159,7 +159,7 @@ export default function Profile() {
     birth_date: '',
     business_type: '',
     communication_preference: 'email',
-  });
+  }));
 
   // Password change state
   const [passwordForm, setPasswordForm] = useState({

@@ -50,18 +50,18 @@ const agents: Agent[] = [
 export default function Agents() {
   const navigate = useNavigate();
   const { isDark } = useTheme();
-  const { isAgentAvailable, isFree, loading } = usePlanLimits();
+  const { isAgentAvailable, isFree, loading, limits } = usePlanLimits();
 
   const handleAgentClick = (agent: Agent) => {
-    if (isAgentAvailable(agent.backendId)) {
+    if (loading || isAgentAvailable(agent.backendId)) {
       navigate(`/agents/${agent.id}`);
     } else {
       navigate('/pricing');
     }
   };
 
-  // Conta quantos agentes estão disponíveis
-  const availableCount = agents.filter(a => isAgentAvailable(a.backendId)).length;
+  // Conta quantos agentes estão disponíveis (assume todos durante loading)
+  const availableCount = loading ? agents.length : agents.filter(a => isAgentAvailable(a.backendId)).length;
 
   return (
     <div className={`min-h-screen transition-colors duration-300 ${isDark ? 'bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white' : 'bg-gradient-to-br from-slate-50 via-white to-slate-100 text-slate-900'}`}>
@@ -77,7 +77,7 @@ export default function Agents() {
           </button>
           <h1 className="text-3xl font-bold">Seus Agentes</h1>
           <p className={`mt-2 text-base ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            {loading ? 'Carregando...' : `${availableCount} de ${agents.length} agentes disponíveis no seu plano`}
+            {`${availableCount} de ${agents.length} agentes disponíveis no seu plano`}
           </p>
         </div>
       </div>
@@ -87,7 +87,8 @@ export default function Agents() {
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {agents.map((agent) => {
             const Icon = agent.icon;
-            const hasAccess = isAgentAvailable(agent.backendId);
+            // Durante loading sem dados, não mostrar lock (otimista)
+            const hasAccess = loading && !limits ? true : isAgentAvailable(agent.backendId);
             
             return (
               <div

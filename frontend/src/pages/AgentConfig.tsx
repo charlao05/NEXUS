@@ -167,7 +167,7 @@ const agentMeta: Record<string, {
 function AgentConfig() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { token, userPlan } = useAuth();
+  const { token, userPlan, userRole } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -219,33 +219,34 @@ function AgentConfig() {
   const agent = agentMeta[id || 'assistente'] || agentMeta.assistente;
   const IconComponent = agent.icon;
 
-  // Verificar acesso ao agente — consultar backend para plano real
+  // Verificar acesso ao agente — usar plano do AuthContext (já validado lá)
   const [checkedAccess, setCheckedAccess] = useState(false);
   const [realPlan, setRealPlan] = useState<string>(userPlan || localStorage.getItem('user_plan') || 'free');
   
+  // Sincronizar quando AuthContext atualizar o plano em background
   useEffect(() => {
-    // Buscar plano real do backend antes de decidir acesso
-    if (token) {
-      axios.get(apiUrl('/api/auth/me'), { headers: { Authorization: `Bearer ${token}` } })
-        .then(res => {
-          const plan = res.data.plan || 'free';
-          setRealPlan(plan);
-          localStorage.setItem('user_plan', plan);
-        })
-        .catch(() => { /* usar valor do localStorage */ })
-        .finally(() => setCheckedAccess(true));
+    if (userPlan) setRealPlan(userPlan);
+  }, [userPlan]);
 
-      // Verificar se tem PIN de confirmação configurado
+  useEffect(() => {
+    if (token) {
+      // Usar plano do localStorage/token diretamente (AuthContext já valida em background)
+      const savedPlan = localStorage.getItem('user_plan');
+      if (savedPlan) setRealPlan(savedPlan);
+
+      // Só buscar se tem PIN de confirmação configurado (chamada leve)
       axios.get(apiUrl('/api/auth/has-confirmation-pin'), { headers: { Authorization: `Bearer ${token}` } })
         .then(res => setHasConfirmationPin(res.data.has_pin ?? false))
         .catch(() => setHasConfirmationPin(false));
-    } else {
-      setCheckedAccess(true);
     }
+    setCheckedAccess(true);
   }, [token]);
 
   const _PAID_PLANS = ['essencial', 'profissional', 'completo', 'pro', 'enterprise'];
-  const hasAccess = (id === 'agenda' || id === 'clientes') || _PAID_PLANS.includes(realPlan);
+  // Admin tem acesso total; agentes, clientes e agenda = gratuitos (financeiro inclui contabilidade)
+  const isAdmin = userRole === 'admin' || userRole === 'superadmin';
+  const _FREE_AGENTS = ['agenda', 'clientes', 'financeiro', 'contabilidade'];
+  const hasAccess = isAdmin || _FREE_AGENTS.includes(id || '') || _PAID_PLANS.includes(realPlan);
 
   useEffect(() => {
     if (checkedAccess && !hasAccess) {

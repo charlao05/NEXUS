@@ -758,7 +758,7 @@ async def execute_agent_action(
                     "status": "success",
                     "agent_id": agent_id,
                     "action": action.action,
-                    "message": "⚠️ Não consegui processar sua solicitação agora. Tente reformular ou tente novamente em alguns instantes.",
+                    "message": "⚠️ Não consegui processar sua solicitação agora. Tente usar os botões de **Ações Rápidas** no menu lateral, ou reformule sua mensagem.",
                 }
 
         # Quick action (botão): converte ação em prompt natural

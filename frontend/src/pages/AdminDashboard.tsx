@@ -446,7 +446,7 @@ function SystemHealth({ token }: { token: string | null }) {
     }
   }, [token])
 
-  if (!health) return <div className="text-slate-400">Carregando...</div>
+  if (!health) return <div className="flex items-center gap-2 text-slate-400"><div className="w-5 h-5 border-2 border-slate-600 border-t-green-400 rounded-full animate-spin" /> Carregando...</div>
 
   return (
     <div className="space-y-4">

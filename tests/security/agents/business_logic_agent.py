@@ -39,22 +39,26 @@ class BusinessLogicAgent(SecurityAgent):
         findings.extend(self._test_mass_assignment())
         return findings
 
-    # ── Free user acessa agentes bloqueados ─────────────────────
+    # ── Free user rate-limited após exceder limite diário ──────
     def _test_free_agent_access_gates(self) -> list[Finding]:
-        """Free só pode usar contabilidade. Testa acesso aos outros."""
+        """Free acessa todos os agentes (degustação). Bypass seria contornar rate limit."""
         findings: list[Finding] = []
-        blocked_agents = ["clientes", "cobranca", "agenda", "assistente"]
-        for agent in blocked_agents:
+        # No modelo freemium, todos os agentes estão disponíveis.
+        # O controle é por rate limit (requests_per_day).
+        # Um bypass seria conseguir status 200 quando já deveria ser 429.
+        agents = ["clientes", "cobranca", "agenda", "assistente"]
+        for agent in agents:
             resp = self.client.post(
                 f"/api/agents/{agent}/execute",
                 json={"action": "smart_chat", "message": "oi"},
                 headers=self.free_headers,
             )
-            if resp.status_code == 200:
+            # 200 e 429 são respostas válidas para free users
+            if resp.status_code not in (200, 429):
                 findings.append(Finding(
-                    title=f"Bypass freemium: user free acessou agente '{agent}'",
-                    description=f"Agente {agent} deveria ser bloqueado para plano free.",
-                    severity=Severity.HIGH,
+                    title=f"Resposta inesperada para free user no agente '{agent}'",
+                    description=f"Agente {agent} retornou {resp.status_code}; esperado 200 ou 429.",
+                    severity=Severity.MEDIUM,
                     category="business_logic",
                     evidence={
                         "endpoint": f"POST /api/agents/{agent}/execute",

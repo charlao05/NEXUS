@@ -23,6 +23,11 @@ def check_crm_limit(user: dict, contact_type: str | None = None) -> None:
     """Verifica se o usuário pode criar mais clientes ou fornecedores.
     Considera extra_client_slots (addon +10 por R$12,90 compra única).
     contact_type: None=conta todos, 'client'=só clientes, 'supplier'=só fornecedores."""
+    # Admins são isentos de limites
+    role = user.get("role", "user")
+    if role in ("admin", "superadmin"):
+        return
+
     from app.core.plan_limits import get_limit, is_unlimited
     from database.models import Client, User
     from sqlalchemy import or_
@@ -74,6 +79,11 @@ def check_crm_limit(user: dict, contact_type: str | None = None) -> None:
 
 def check_invoice_limit(user: dict) -> None:
     """Verifica se o usuário pode criar mais invoices neste mês."""
+    # Admins são isentos de limites
+    role = user.get("role", "user")
+    if role in ("admin", "superadmin"):
+        return
+
     from app.core.plan_limits import get_limit, is_unlimited
     from database.models import Invoice
 

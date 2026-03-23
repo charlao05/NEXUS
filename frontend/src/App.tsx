@@ -34,9 +34,14 @@ const PageSpinner = () => (
 const VALID_PLANS = new Set(['free', 'essencial', 'profissional', 'completo', 'pro', 'enterprise'])
 
 function App() {
-  const { token, isLoading, userPlan } = useAuth()
+  const { token, isLoading, userPlan, userRole } = useAuth()
 
-  const hasValidPlan = VALID_PLANS.has(userPlan ?? '')
+  // Admin sempre tem acesso total, independente do plano
+  const isAdmin = userRole === 'admin' || userRole === 'superadmin'
+
+  // Se temos token mas plano ainda não carregou (null), tratar como válido
+  // para não redirecionar prematuramente para /pricing
+  const hasValidPlan = isAdmin || userPlan === null ? !!token : VALID_PLANS.has(userPlan)
 
   // Verificar se precisa de onboarding
   const needsOnboarding = token && !localStorage.getItem('onboarding_completed')
@@ -91,6 +96,7 @@ function App() {
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/success" element={<PaymentSuccess />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/profile" element={<Profile />} />
             <Route path="*" element={<Navigate to="/pricing" replace />} />
           </Routes>
         )

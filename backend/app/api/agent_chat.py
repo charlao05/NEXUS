@@ -1330,19 +1330,24 @@ async def get_llm_response(agent_id: str, user_message: str, history: list[dict]
 
     # ── Fallback: chamada sem ferramentas ─────────────────────────
     client = get_openai_client()
-    if not client:
-        return ""
+    if client:
+        try:
+            response = client.chat_completion(
+                messages=messages,
+                temperature=0.15,
+                max_tokens=800,
+            )
+            if response:
+                return response
+        except Exception as e:
+            logger.error(f"Erro ao gerar resposta LLM: {e}")
 
-    try:
-        response = client.chat_completion(
-            messages=messages,
-            temperature=0.15,
-            max_tokens=800,
-        )
-        return response
-    except Exception as e:
-        logger.error(f"Erro ao gerar resposta LLM: {e}")
-        return ""
+    # ── Último recurso: fallback por palavras-chave (LLM indisponível) ──
+    keyword_fallback = _get_keyword_fallback(agent_id, user_message)
+    if keyword_fallback:
+        return keyword_fallback
+
+    return ""
 
 
 # ============================================================================
@@ -1416,11 +1421,24 @@ _EMPTY_DATA_RESPONSES: dict[str, dict[str, str]] = {
         "Quero cadastrar um cliente": "👤 **Novo Cliente**\n\nPra cadastrar, preciso de:\n1. **Nome completo**\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
         "Quais clientes eu preciso entrar em contato": "📞 Você ainda não tem clientes cadastrados.\n\nQuando tiver clientes registrados, eu aviso quando fizer tempo que você não fala com alguém.\n\n💡 Comece cadastrando seus clientes!",
         "resumo das minhas vendas": "📊 Ainda não tem clientes ou vendas registradas.\n\nRegistre seus clientes e vendas que eu faço o resumo pra você!\n\n💡 Me diga: \"cadastrar cliente João, telefone 11999998888\"",
+        "cadastrar cliente": "👤 **Novo Cliente**\n\nPra cadastrar, preciso de:\n1. **Nome completo**\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
+        "novo cliente": "👤 **Novo Cliente**\n\nPra cadastrar, preciso de:\n1. **Nome completo**\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
+        "cadastrar fornecedor": "🚚 **Novo Fornecedor**\n\nPra cadastrar, preciso de:\n1. **Nome** do fornecedor\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
+        "novo fornecedor": "🚚 **Novo Fornecedor**\n\nPra cadastrar, preciso de:\n1. **Nome** do fornecedor\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
+        "meu estoque": "📦 Você ainda não tem produtos cadastrados no estoque.\n\nPra começar a controlar, cadastre seus produtos primeiro!",
+        "fornecedores": "🚚 Você ainda não tem fornecedores cadastrados.\n\nQuer cadastrar o primeiro? Me diz o **nome** e **telefone**! 😊",
     },
     "agenda": {
         "O que eu tenho marcado pra hoje": "📅 Dia livre! Você não tem nada marcado pra hoje.\n\nQuer agendar algo? Me diz o que, o dia e o horário! 😊",
         "Mostra minha agenda da semana": "📅 Semana livre! Nenhum compromisso agendado.\n\nQuer marcar algo? Me diz: \"reunião amanhã às 14h\" por exemplo.",
         "Quero marcar um compromisso": "📅 **Novo Compromisso**\n\nMe diz:\n1. **O que** vai fazer (reunião, consulta, ligação...)\n2. **Quando** (dia e hora)\n3. **Onde** (opcional)\n\n💡 Exemplo: \"dentista amanhã 15h\"",
+        "cadastrar cliente": "👤 **Novo Cliente**\n\nPra cadastrar, preciso de:\n1. **Nome completo**\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
+        "novo cliente": "👤 **Novo Cliente**\n\nPra cadastrar, preciso de:\n1. **Nome completo**\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
+        "cadastrar fornecedor": "🚚 **Novo Fornecedor**\n\nPra cadastrar, preciso de:\n1. **Nome** do fornecedor\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
+        "novo fornecedor": "🚚 **Novo Fornecedor**\n\nPra cadastrar, preciso de:\n1. **Nome** do fornecedor\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
+        "meus clientes": "👥 Você ainda não tem clientes cadastrados.\n\nQuer cadastrar o primeiro? Me diz o **nome**, **telefone** e **email** que eu registro rapidinho! 😊",
+        "meu estoque": "📦 Você ainda não tem produtos cadastrados no estoque.\n\nPra começar a controlar, cadastre seus produtos primeiro!",
+        "fornecedores": "🚚 Você ainda não tem fornecedores cadastrados.\n\nQuer cadastrar o primeiro? Me diz o **nome** e **telefone**! 😊",
     },
     "cobranca": {
         "Quem tá devendo": "✅ Não encontrei cobranças pendentes no sistema. Tudo em dia! 👍\n\n💡 Quando registrar vendas a prazo, eu acompanho os pagamentos automaticamente.",
@@ -1432,6 +1450,10 @@ _EMPTY_DATA_RESPONSES: dict[str, dict[str, str]] = {
         "resumo do meu dia": "📋 **Resumo do dia**\n\n• 📅 Agenda: Nenhum compromisso marcado\n• 💰 Financeiro: Sem movimentações registradas\n• 🔔 Cobranças: Nenhuma pendência\n• 👥 Clientes: Nenhum cadastrado ainda\n\n💡 **Sugestão**: Que tal começar cadastrando seus clientes e registrando suas vendas? Assim consigo te dar um resumo completo!",
         "O que é mais importante": "🎯 Pelo que vejo no sistema, você está começando. Sugiro:\n\n1. **Cadastrar seus clientes** — é a base de tudo\n2. **Registrar suas vendas** do mês — pra acompanhar o faturamento\n3. **Verificar o DAS** — vence dia 20 de cada mês\n\nPor qual quer começar?",
         "algum alerta importante": "✅ Nenhum alerta no momento.\n\n⚠️ Lembre-se:\n• DAS vence dia **20 de cada mês**\n• DASN (declaração anual) até **31 de maio**\n\n💡 Registre suas movimentações que eu aviso sobre tudo automaticamente!",
+        "cadastrar cliente": "👤 **Novo Cliente**\n\nPra cadastrar, preciso de:\n1. **Nome completo**\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
+        "cadastrar fornecedor": "🚚 **Novo Fornecedor**\n\nPra cadastrar, preciso de:\n1. **Nome** do fornecedor\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
+        "novo fornecedor": "🚚 **Novo Fornecedor**\n\nPra cadastrar, preciso de:\n1. **Nome** do fornecedor\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
+        "meu estoque": "📦 Você ainda não tem produtos cadastrados no estoque.\n\nPra começar a controlar, cadastre seus produtos primeiro!",
     },
 }
 
@@ -1446,6 +1468,77 @@ def _get_direct_empty_response(agent_id: str, user_message: str) -> str:
     for key, response in agent_responses.items():
         if key.lower() in msg_lower:
             return response
+    return ""
+
+
+def _get_keyword_fallback(agent_id: str, user_message: str) -> str:
+    """Fallback de último recurso quando o LLM está indisponível.
+    Detecta intenção por palavras-chave e retorna orientação útil.
+    Retorna string vazia se não reconhecer a intenção.
+    """
+    msg = user_message.lower()
+
+    if any(kw in msg for kw in ("cadastrar cliente", "novo cliente", "registrar cliente", "adicionar cliente")):
+        return (
+            "👤 **Novo Cliente**\n\n"
+            "Pra cadastrar, preciso de:\n"
+            "1. **Nome completo**\n"
+            "2. **Telefone** (com DDD)\n"
+            "3. **Email** (opcional)\n\n"
+            "Me passe as informações! 😊"
+        )
+
+    if any(kw in msg for kw in ("cadastrar fornecedor", "novo fornecedor", "registrar fornecedor", "adicionar fornecedor")):
+        return (
+            "🚚 **Novo Fornecedor**\n\n"
+            "Pra cadastrar, preciso de:\n"
+            "1. **Nome** do fornecedor\n"
+            "2. **Telefone** (com DDD)\n"
+            "3. **Email** (opcional)\n\n"
+            "Me passe as informações! 😊"
+        )
+
+    if any(kw in msg for kw in ("marcar compromisso", "agendar reunião", "agendar reuniao", "novo compromisso", "marcar reunião", "marcar reuniao")):
+        return (
+            "📅 **Novo Compromisso**\n\n"
+            "Me diz:\n"
+            "1. **O que** vai fazer (reunião, consulta, ligação...)\n"
+            "2. **Quando** (dia e hora)\n"
+            "3. **Onde** (opcional)\n\n"
+            "💡 Exemplo: \"dentista amanhã 15h\""
+        )
+
+    if any(kw in msg for kw in ("anotar venda", "registrar venda", "recebi", "gastei", "paguei", "anotar gasto")):
+        return (
+            "💰 **Registrar Transação**\n\n"
+            "Me diz:\n"
+            "1. **Tipo**: entrada (venda) ou saída (gasto)\n"
+            "2. **Valor**: quanto\n"
+            "3. **Descrição**: o que foi\n"
+            "4. **Forma de pagamento**: PIX, dinheiro, cartão, etc.\n\n"
+            "💡 Exemplo: \"recebi R$ 500 do João por PIX\""
+        )
+
+    if any(kw in msg for kw in ("meus clientes", "listar clientes", "ver clientes", "quantos clientes")):
+        return "👥 Use o botão **Meus Clientes** nas Ações Rápidas para ver a lista! Ou me diga o nome de quem procura."
+
+    if any(kw in msg for kw in ("meus fornecedores", "listar fornecedores", "ver fornecedores")):
+        return "🚚 Use o botão **Meus Fornecedores** nas Ações Rápidas para ver a lista! Ou me diga o nome de quem procura."
+
+    if any(kw in msg for kw in ("meu estoque", "estoque", "inventário", "inventario", "produtos")):
+        return "📦 Use o botão **Meu Estoque** nas Ações Rápidas para ver o resumo! Ou me pergunte sobre um produto específico."
+
+    if any(kw in msg for kw in ("nota fiscal", "emitir nf", "emitir nota")):
+        return (
+            "📝 **Emissão de Nota Fiscal (NFS-e)**\n\n"
+            "Pra emitir a nota, preciso de:\n"
+            "1. **Nome/Razão Social** do cliente\n"
+            "2. **CPF ou CNPJ** do cliente\n"
+            "3. **Valor** do serviço/produto\n"
+            "4. **Descrição** do que foi feito\n\n"
+            "Me passe essas informações! 😊"
+        )
+
     return ""
 
 

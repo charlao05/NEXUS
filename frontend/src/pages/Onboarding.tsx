@@ -9,7 +9,7 @@ export default function Onboarding() {
   const [businessName, setBusinessName] = useState('')
   const [businessType, setBusinessType] = useState('')
   const [goals, setGoals] = useState<string[]>([])
-  
+
   const BUSINESS_TYPES = [
     { id: 'servicos', label: 'Prestação de Serviços', icon: '🔧' },
     { id: 'comercio', label: 'Comércio', icon: '🛒' },
@@ -50,9 +50,10 @@ export default function Onboarding() {
         }, { headers: { Authorization: `Bearer ${token}` } }).catch((err) => console.warn('Falha ao salvar onboarding:', err?.message))
       }
 
-            window.location.href = '/dashboard'
+      // Navegar direto sem tela intermediária — reload força App a ler localStorage atualizado
+      window.location.href = '/dashboard'
     } catch {
-            window.location.href = '/dashboard'
+      window.location.href = '/dashboard'
     }
   }
 
@@ -181,8 +182,8 @@ export default function Onboarding() {
     </div>,
   ]
 
-      return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-lg">
         {/* Progress bar */}
         <div className="flex gap-2 mb-8">
@@ -207,7 +208,7 @@ export default function Onboarding() {
             <button
               onClick={() => {
                 localStorage.setItem('onboarding_completed', 'true')
-                              window.location.href = '/dashboard'
+                window.location.href = '/dashboard'
               }}
               className="text-sm text-slate-500 hover:text-slate-400 transition-colors"
             >

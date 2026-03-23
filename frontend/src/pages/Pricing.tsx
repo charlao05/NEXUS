@@ -148,8 +148,15 @@ export default function Pricing() {
       console.error('Erro no checkout:', err);
       const detail = axios.isAxiosError(err) ? (err.response?.data?.detail || '') : '';
       const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+      const isNetworkError = axios.isAxiosError(err) && !err.response;
       if (detail === 'Stripe não configurado' || status === 503) {
         setError('Sistema de pagamento em manutenção. Use o plano gratuito por enquanto ou entre em contato pelo suporte.');
+      } else if (status === 502) {
+        setError('Serviço de pagamento temporariamente indisponível. Tente novamente em alguns instantes.');
+      } else if (isNetworkError) {
+        setError('Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.');
+      } else if (status === 401) {
+        setError('Sua sessão expirou. Faça login novamente para continuar.');
       } else {
         setError(detail || 'Não foi possível iniciar o pagamento. Tente novamente ou escolha o plano gratuito.');
       }
@@ -323,6 +330,9 @@ export default function Pricing() {
                 <p className="text-indigo-200 text-sm mt-1">
                   Adicione <span className="text-amber-300 font-semibold">+10 clientes e +10 fornecedores</span> ao seu plano gratuito por apenas{' '}
                   <span className="text-amber-300 font-semibold">R$ 12,90 (compra única)</span>. Mensagens proporcionais inclusas.
+                </p>
+                <p className="text-green-400/80 text-xs mt-1 flex items-center gap-1">
+                  <span>💳</span> Cartão ou <span className="font-semibold">PIX</span> — QR Code válido por 30 min
                 </p>
               </div>
               <button

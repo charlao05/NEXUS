@@ -4,7 +4,7 @@
  * Consulta GET /api/auth/my-limits e expõe helpers (isAgentAvailable, isAtLimit, isFree).
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { apiUrl } from '../config/api'
 
@@ -29,18 +29,29 @@ export interface PlanLimits {
 
 export function usePlanLimits() {
   const { token } = useAuth()
-  const [limits, setLimits] = useState<PlanLimits | null>(null)
-  const [loading, setLoading] = useState(true)
+  // Inicializar do cache para renderização instantânea
+  const [limits, setLimits] = useState<PlanLimits | null>(() => {
+    try {
+      const cached = localStorage.getItem('nexus_plan_limits')
+      return cached ? JSON.parse(cached) : null
+    } catch { return null }
+  })
+  const hasCacheRef = useRef(!!limits)
+  const [loading, setLoading] = useState(!hasCacheRef.current)
 
   const refresh = useCallback(() => {
     if (!token) return
-    setLoading(true)
+    if (!hasCacheRef.current) setLoading(true)
     fetch(apiUrl('/api/auth/my-limits'), {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
-      .then(setLimits)
-      .catch(() => setLimits(null))
+      .then((data) => {
+        setLimits(data)
+        hasCacheRef.current = true
+        try { localStorage.setItem('nexus_plan_limits', JSON.stringify(data)) } catch { /* ignore */ }
+      })
+      .catch(() => { /* Manter cache em caso de erro */ })
       .finally(() => setLoading(false))
   }, [token])
 
