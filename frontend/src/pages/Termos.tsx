@@ -48,8 +48,8 @@ export default function Termos() {
           <section>
             <h2 className="text-xl font-semibold text-white mb-3">4. Planos e Pagamento</h2>
             <ul className="list-disc pl-6 space-y-2">
-              <li><strong>Gratuito (R$ 0):</strong> Acesso permanente aos agentes Fiscal e Clientes/Agenda, até 5 clientes cadastrados, 10 mensagens/dia com IA. Sem cartão de crédito.</li>
-              <li><strong>Essencial (R$ 29,90/mês):</strong> 4 agentes (Fiscal, Clientes/Agenda, Cobranças), até 100 clientes, 200 mensagens/dia, lembretes automáticos.</li>
+              <li><strong>Gratuito (R$ 0):</strong> Acesso permanente aos agentes Fiscal e Clientes/Agenda, até 5 clientes cadastrados, 50 mensagens/dia com IA. Sem cartão de crédito.</li>
+              <li><strong>Essencial (R$ 29,90/mês):</strong> 4 agentes (Fiscal, Clientes/Agenda, Cobranças), até 100 clientes, 300 mensagens/dia, lembretes automáticos.</li>
               <li><strong>Profissional (R$ 59,90/mês):</strong> 5 agentes, até 500 clientes, 1.000 mensagens/dia, automação completa e relatórios avançados.</li>
               <li><strong>Completo (R$ 89,90/mês):</strong> Todos os agentes (incluindo futuros), clientes e mensagens ilimitados, integrações, notificações automáticas, suporte 24/7 e garantia de disponibilidade 99,9%.</li>
               <li>Pagamentos processados via Stripe. Cancelamento a qualquer momento.</li>

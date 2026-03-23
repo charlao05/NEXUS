@@ -243,12 +243,12 @@ class TestAgentAccess:
 class TestAgentMessageLimit:
     def test_free_message_limit(self, client):
         token = _signup_and_token(client, "msg_limit@test.com")
-        # Preencher 10 mensagens diretamente no banco
+        # Preencher 50 mensagens diretamente no banco
         from database.models import get_session
         db = get_session()
         user = db.query(User).filter(User.email == "msg_limit@test.com").first()
         now = datetime.now(timezone.utc)
-        for i in range(10):
+        for i in range(50):
             msg = ChatMessage(
                 user_id=user.id,
                 agent_id="contabilidade",
@@ -261,7 +261,7 @@ class TestAgentMessageLimit:
 
         resp = client.post(
             "/api/agents/contabilidade/execute",
-            json={"action": "chat", "parameters": {"message": "11th message"}},
+            json={"action": "chat", "parameters": {"message": "51st message"}},
             headers=_headers(token),
         )
         assert resp.status_code == 403

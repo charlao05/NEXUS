@@ -25,7 +25,7 @@ _PLAN_ALIASES: dict[str, str] = {
 
 PLAN_LIMITS: dict[Plan, dict[str, Any]] = {
     Plan.FREE: {
-        "agent_messages_per_day": 10,
+        "agent_messages_per_day": 50,
         "crm_clients": 5,
         "crm_suppliers": 5,  # equiparado a clientes
         "invoices_per_month": 3,
@@ -37,7 +37,7 @@ PLAN_LIMITS: dict[Plan, dict[str, Any]] = {
         "price": 0,
     },
     Plan.ESSENCIAL: {
-        "agent_messages_per_day": 200,
+        "agent_messages_per_day": 300,
         "crm_clients": 100,
         "crm_suppliers": 100,  # equiparado a clientes
         "invoices_per_month": -1,

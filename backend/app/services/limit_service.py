@@ -179,7 +179,7 @@ def check_agent_message_limit(user: dict) -> None:
         if extra_slots > 0:
             base_clients = get_limit(plan, "crm_clients")
             if base_clients and base_clients > 0:
-                ratio = limit / base_clients  # ex: 10msgs / 5clients = 2
+                ratio = limit / base_clients  # ex: 50msgs / 5clients = 10
                 effective_limit = limit + int(extra_slots * ratio)
             else:
                 effective_limit = limit

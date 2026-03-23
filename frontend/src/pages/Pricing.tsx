@@ -35,7 +35,7 @@ const plans: Plan[] = [
     free: true,
     buttonText: 'Plano Atual',
     features: [
-      '10 mensagens/dia com IA',
+      '50 mensagens/dia com IA',
       '2 agentes: Fiscal e Clientes/Agenda',
       'Até 5 clientes e 5 fornecedores',
       '3 notas fiscais/mês',
@@ -53,7 +53,7 @@ const plans: Plan[] = [
     icon: <Zap className="w-7 h-7" />,
     buttonText: 'Assinar Essencial',
     features: [
-      '200 mensagens/dia com IA',
+      '300 mensagens/dia com IA',
       '4 agentes: Fiscal, Clientes/Agenda e Cobranças',
       'Até 100 clientes e 100 fornecedores',
       'Notas fiscais ilimitadas',

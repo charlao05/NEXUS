@@ -175,8 +175,8 @@ Botões pré-mapeados no frontend que convertem cliques em prompts naturais:
 
 | Recurso | Free | Essencial (R$29,90) | Profissional (R$59,90) | Completo (R$89,90) |
 |---------|------|---------------------|------------------------|--------------------|
-| **Agentes disponíveis** | `contabilidade` apenas | `contabilidade`, `clientes`, `cobranca` | Todos os 5 | Todos os 5 |
-| **Mensagens/dia** | 10 | 200 | 1.000 | Ilimitado |
+| **Agentes disponíveis** | `contabilidade`, `clientes`, `agenda` | `contabilidade`, `clientes`, `cobranca`, `agenda` | Todos os 5 | Todos os 5 |
+| **Mensagens/dia** | 50 | 300 | 1.000 | Ilimitado |
 | **Clientes CRM** | 5 | 100 | 500 | Ilimitado |
 | **Faturas/mês** | 3 | Ilimitado | Ilimitado | Ilimitado |
 
@@ -607,8 +607,8 @@ Usar com agentes `assistente`, `contabilidade` ou `agenda`.
 
 | # | Teste | Como Testar | Resultado Esperado |
 |---|-------|-------------|-------------------|
-| 1 | Plano free tenta acessar `clientes` | Login com user free → POST /agents/clientes/execute | HTTP 403 `AGENT_NOT_AVAILABLE` |
-| 2 | Plano free excede 10 mensagens | Enviar 11 mensagens no dia | HTTP 403 `LIMIT_REACHED` na 11ª |
+| 1 | Plano free tenta acessar `assistente` | Login com user free → POST /agents/assistente/execute | HTTP 403 `AGENT_NOT_AVAILABLE` |
+| 2 | Plano free excede 50 mensagens | Enviar 51 mensagens no dia | HTTP 403 `LIMIT_REACHED` na 51ª |
 | 3 | Automação tenta digitar em campo de senha | Via orchestrator, tentar `browser_type` em selector `[name=password]` | Policy bloqueia a ação |
 
 ---
