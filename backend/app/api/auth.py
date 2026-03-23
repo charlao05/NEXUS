@@ -396,8 +396,8 @@ PLANS: dict[str, dict[str, Any]] = {
         "concurrent_requests": 999999,
         "features": ["full_api", "dedicated_support", "custom_integration"],
         "price": 9990,
+        "stripe_price_id": os.getenv("STRIPE_PRICE_COMPLETO", ""),
     },
-    "stripe_price_id": os.getenv("STRIPE_PRICE_COMPLETO", ""),
     # Aliases retrocompatíveis
     "pro": {
         "requests_per_day": 1000,
@@ -1126,11 +1126,7 @@ async def create_checkout(
         }
         plan_display = _PLAN_DISPLAY_NAMES.get(plan_key, plan_key.capitalize())
 
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{
-                **({
-                            # TAREFA 3: Upgrade/downgrade se já existir subscription ativa
+        # TAREFA 3: Upgrade/downgrade se já existir subscription ativa
         db_upgrade = _get_db_session()
         try:
             existing_sub = (
@@ -1144,7 +1140,6 @@ async def create_checkout(
                 .first()
             )
             if existing_sub and existing_sub.stripe_subscription_id:
-                # Upgrade/downgrade inline via Stripe API
                 stripe_sub = stripe.Subscription.retrieve(existing_sub.stripe_subscription_id)
                 if stripe_sub and stripe_sub.get("status") in ("active", "trialing"):
                     items = stripe_sub.get("items", {}).get("data", [])
@@ -1154,7 +1149,6 @@ async def create_checkout(
                             items=[{"id": items[0]["id"], "price": stripe_price_id}],
                             proration_behavior="create_prorations",
                         )
-                        # Atualizar plano no banco diretamente
                         user_obj = db_upgrade.query(User).filter(User.id == current_user["user_id"]).first()
                         if user_obj:
                             user_obj.plan = plan_key
@@ -1172,20 +1166,25 @@ async def create_checkout(
         finally:
             db_upgrade.close()
 
-                    "price": stripe_price_id,
-                } if stripe_price_id else {
-                    "price_data": {
-                        "currency": "brl",
-                        "product_data": {
-                            "name": f"NEXUS {plan_display}",
-                            "description": f"Acesso ao plano {plan_display} do NEXUS",
-                        },
-                        "unit_amount": price_in_cents,
-                        "recurring": {"interval": "month"},
-                    }
-                }),
-                "quantity": 1,
-            }],
+        # Montar line_item com price_id fixo (produção) ou price_data inline (dev/fallback)
+        if stripe_price_id:
+            _line_item: dict = {"price": stripe_price_id}
+        else:
+            _line_item = {
+                "price_data": {
+                    "currency": "brl",
+                    "product_data": {
+                        "name": f"NEXUS {plan_display}",
+                        "description": f"Acesso ao plano {plan_display} do NEXUS",
+                    },
+                    "unit_amount": price_in_cents,
+                    "recurring": {"interval": "month"},
+                }
+            }
+
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{**_line_item, "quantity": 1}],
             mode="subscription",
             success_url=f"{frontend_url}/success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{frontend_url}/pricing",
