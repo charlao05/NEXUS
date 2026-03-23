@@ -173,7 +173,7 @@ Botões pré-mapeados no frontend que convertem cliques em prompts naturais:
 
 ### 1.7 Limites por Plano
 
-| Recurso | Free | Essencial (R$39,90) | Profissional (R$69,90) | Completo (R$99,90) |
+| Recurso | Free | Essencial (R$29,90) | Profissional (R$59,90) | Completo (R$89,90) |
 |---------|------|---------------------|------------------------|--------------------|
 | **Agentes disponíveis** | `contabilidade` apenas | `contabilidade`, `clientes`, `cobranca` | Todos os 5 | Todos os 5 |
 | **Mensagens/dia** | 10 | 200 | 1.000 | Ilimitado |

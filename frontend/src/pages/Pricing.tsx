@@ -46,7 +46,7 @@ const plans: Plan[] = [
   {
     id: 'essencial',
     name: 'Essencial',
-    price: 'R$ 39,90',
+    price: 'R$ 29,90',
     priceNote: '/mês',
     description: 'Para quem está começando',
     icon: <Zap className="w-7 h-7" />,
@@ -63,7 +63,7 @@ const plans: Plan[] = [
   {
     id: 'profissional',
     name: 'Profissional',
-    price: 'R$ 69,90',
+    price: 'R$ 59,90',
     priceNote: '/mês',
     description: 'Para profissionais autônomos',
     icon: <Star className="w-7 h-7" />,
@@ -82,7 +82,7 @@ const plans: Plan[] = [
   {
     id: 'completo',
     name: 'Completo',
-    price: 'R$ 99,90',
+    price: 'R$ 89,90',
     priceNote: '/mês',
     description: 'Para empresas em escala',
     icon: <Crown className="w-7 h-7" />,

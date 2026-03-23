@@ -367,7 +367,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "requests_per_month": 30000,
         "concurrent_requests": 5,
         "features": ["contabilidade", "clientes", "cobranca"],
-        "price": 3990,
+        "price": 2990,
         "stripe_price_id": os.getenv("STRIPE_PRICE_ESSENCIAL", ""),
     },
     "profissional": {
@@ -375,7 +375,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "requests_per_month": 300000,
         "concurrent_requests": 10,
         "features": ["contabilidade", "clientes", "cobranca", "agenda", "assistente"],
-        "price": 6990,
+        "price": 5990,
         "stripe_price_id": os.getenv("STRIPE_PRICE_PROFISSIONAL", ""),
     },
     "completo": {
@@ -383,7 +383,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "requests_per_month": 999999,
         "concurrent_requests": 999999,
         "features": ["full_api", "dedicated_support", "custom_integration"],
-        "price": 9990,
+        "price": 8990,
         "stripe_price_id": os.getenv("STRIPE_PRICE_COMPLETO", ""),
     },
     # Aliases retrocompatíveis
@@ -392,14 +392,14 @@ PLANS: dict[str, dict[str, Any]] = {
         "requests_per_month": 30000,
         "concurrent_requests": 5,
         "features": ["contabilidade", "clientes", "cobranca"],
-        "price": 3990,
+        "price": 2990,
     },
     "enterprise": {
         "requests_per_day": 999999,
         "requests_per_month": 999999,
         "concurrent_requests": 999999,
         "features": ["full_api", "dedicated_support", "custom_integration"],
-        "price": 9990,
+        "price": 8990,
     },
 }
 

@@ -154,9 +154,9 @@ export default function PlanSwitcher({ currentPlan, isAdmin, token, isDark, onPl
                     </p>
                     <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                       {planKey === 'free' && '10 msg/dia • 1 agente'}
-                      {planKey === 'essencial' && 'R$ 39,90/mês • 3 agentes'}
-                      {planKey === 'profissional' && 'R$ 69,90/mês • Todos agentes'}
-                      {planKey === 'completo' && 'R$ 99,90/mês • Ilimitado'}
+                      {planKey === 'essencial' && 'R$ 29,90/mês • 3 agentes'}
+                      {planKey === 'profissional' && 'R$ 59,90/mês • Todos agentes'}
+                      {planKey === 'completo' && 'R$ 89,90/mês • Ilimitado'}
                     </p>
                   </div>
                   {isActive && (

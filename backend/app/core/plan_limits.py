@@ -45,7 +45,7 @@ PLAN_LIMITS: dict[Plan, dict[str, Any]] = {
         "notifications": "full",
         "data_export": True,
         "display_name": "Essencial",
-        "price": 3990,  # centavos
+        "price": 2990,  # centavos
     },
     Plan.PROFISSIONAL: {
         "agent_messages_per_day": 1000,
@@ -57,7 +57,7 @@ PLAN_LIMITS: dict[Plan, dict[str, Any]] = {
         "notifications": "full",
         "data_export": True,
         "display_name": "Profissional",
-        "price": 6990,
+        "price": 5990,
     },
     Plan.COMPLETO: {
         "agent_messages_per_day": -1,
@@ -68,7 +68,7 @@ PLAN_LIMITS: dict[Plan, dict[str, Any]] = {
         "notifications": "full",
         "data_export": True,
         "display_name": "Completo",
-        "price": 9990,
+        "price": 8990,
     },
 }
 

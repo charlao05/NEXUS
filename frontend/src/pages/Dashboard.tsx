@@ -587,7 +587,7 @@ function Dashboard() {
           {userPlan === 'free' && (
             <div className={`mt-4 p-3 rounded-lg border ${isDark ? 'bg-slate-700/30 border-slate-600/30' : 'bg-slate-50 border-slate-200'}`}>
               <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                🔒 Faça upgrade para desbloquear mais agentes — a partir de R$ 39,90/mês
+                🔒 Faça upgrade para desbloquear mais agentes — a partir de R$ 29,90/mês
               </p>
               <button onClick={() => navigate('/pricing')} className="text-green-400 hover:text-green-300 text-sm mt-1">
                 Ver Planos →

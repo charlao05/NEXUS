@@ -149,7 +149,7 @@ export default function Agents() {
               <div className="flex-1">
                 <h3 className={`font-semibold text-lg ${isDark ? 'text-white' : 'text-slate-900'}`}>Desbloqueie Mais Agentes</h3>
                 <p className={`text-base ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                  A partir de R$ 39,90/mês, acesse até 3 agentes com o plano Essencial
+                  A partir de R$ 29,90/mês, acesse até 3 agentes com o plano Essencial
                 </p>
               </div>
               <button
