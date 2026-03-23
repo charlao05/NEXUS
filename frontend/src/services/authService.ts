@@ -296,6 +296,21 @@ export const createAddonCheckout = async (
     session_id: response.data.session_id
   }
 }
+/**
+ * Abrir Stripe Customer Portal para gerenciar assinatura
+ */
+export const createPortalSession = async (
+  email?: string
+): Promise<{ portal_url: string }> => {
+  const userEmail = email || localStorage.getItem('user_email') || ''
+
+  const response = await authApi.post<{ status: string; portal_url: string }>(
+    '/create-portal-session',
+    { email: userEmail }
+  )
+
+  return { portal_url: response.data.portal_url }
+}
 
 export default {
   signup,
@@ -306,5 +321,6 @@ export default {
   getToken,
   createCheckout,
   createAddonCheckout,
-  changePassword
+  changePassword,
+  createPortalSession
 }

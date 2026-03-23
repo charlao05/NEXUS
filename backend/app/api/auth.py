@@ -1065,6 +1065,7 @@ async def create_checkout(
         frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
 
         _env = os.getenv("ENVIRONMENT", "development")
+    
         if _env != "production" and "localhost" in frontend_url:
             frontend_url = frontend_url.replace("https://", "http://")
             import re as _re
@@ -1199,6 +1200,39 @@ async def create_portal_session(
 # ============================================================================
 # ADDON: PACOTE EXTRA DE CLIENTES/FORNECEDORES
 # ============================================================================
+
+# ============================================================================
+# STRIPE BILLING PORTAL
+# ============================================================================
+@router.post("/create-portal-session")
+async def create_portal_session(
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Cria sessão do Stripe Billing Portal para gerenciar assinatura."""
+    stripe = _init_stripe()
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Stripe não configurado")
+    db = _get_db_session()
+    try:
+        user = db.query(User).filter(User.id == current_user["user_id"]).first()
+        if not user or not getattr(user, 'stripe_customer_id', None):
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhuma assinatura Stripe encontrada. Faça checkout primeiro.",
+            )
+        frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
+        portal_session = stripe.billing_portal.Session.create(
+            customer=user.stripe_customer_id,
+            return_url=f"{frontend_url}/settings",
+        )
+        return {"url": portal_session.url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao criar portal session: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao abrir portal de gerenciamento.")
+    finally:
+        db.close()
 
 class AddonCheckoutRequest(BaseModel):
     email: Optional[str] = None

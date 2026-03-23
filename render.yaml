@@ -1,5 +1,5 @@
 services:
-  # ── Backend API ──
+  # -- Backend API --
   - type: web
     name: nexus-backend
     env: python
@@ -7,7 +7,6 @@ services:
     region: ohio
     rootDir: backend
     runtime: python
-    pythonVersion: "3.12.0"
     buildCommand: pip install -r requirements.txt && python -c "from database.models import Base, engine; Base.metadata.create_all(engine)"
     startCommand: gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers 2 --timeout 120
     healthCheckPath: /health
@@ -26,15 +25,23 @@ services:
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
       - key: FRONTEND_URL
-        sync: false
+        value: "https://app.nexxusapp.com.br"
       - key: CORS_ORIGINS
-        sync: false
+        value: "https://app.nexxusapp.com.br"
+      - key: BACKEND_BASE_URL
+        value: "https://api.nexxusapp.com.br"
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
         sync: false
-      - key: BACKEND_BASE_URL
-        sync: false  # Ex: https://nexus-backend.onrender.com
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: JWT_ALGORITHM
+        value: "HS256"
+      - key: OPENAI_MODEL
+        value: "gpt-4.1"
+      - key: LOG_LEVEL
+        value: "INFO"
       - key: PORT
         value: "10000"
       - key: ENVIRONMENT
@@ -44,12 +51,10 @@ services:
       - key: PYTHONUNBUFFERED
         value: "1"
 
-  # ── Frontend SPA ──
+  # -- Frontend SPA --
   - type: web
     name: nexus-frontend
     env: static
-    plan: free
-    region: ohio
     rootDir: frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
@@ -69,15 +74,17 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_URL
-        sync: false  # Setar manualmente: https://nexus-backend.onrender.com
+        value: "https://api.nexxusapp.com.br"
+      - key: VITE_GOOGLE_CLIENT_ID
+        sync: false
       - key: NODE_VERSION
         value: "18"
 
 databases:
-  # ── PostgreSQL (produção) ──
+  # -- PostgreSQL (producao) --
   - name: nexus-db
     plan: free
     region: ohio
     databaseName: nexus
     user: nexus_user
-    ipAllowList: []  # Render internal only
+    ipAllowList: []

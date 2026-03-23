@@ -1,18 +1,15 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import axios from 'axios'
 import { apiUrl } from '../config/api'
 
 export default function Onboarding() {
-  const navigate = useNavigate()
   const { token } = useAuth()
   const [currentStep, setCurrentStep] = useState(0)
   const [businessName, setBusinessName] = useState('')
   const [businessType, setBusinessType] = useState('')
   const [goals, setGoals] = useState<string[]>([])
-  const [completed, setCompleted] = useState(false)
-
+  
   const BUSINESS_TYPES = [
     { id: 'servicos', label: 'Prestação de Serviços', icon: '🔧' },
     { id: 'comercio', label: 'Comércio', icon: '🛒' },
@@ -53,10 +50,9 @@ export default function Onboarding() {
         }, { headers: { Authorization: `Bearer ${token}` } }).catch((err) => console.warn('Falha ao salvar onboarding:', err?.message))
       }
 
-      setCompleted(true)
-      navigate('/dashboard')
+            window.location.href = '/dashboard'
     } catch {
-      navigate('/dashboard')
+            window.location.href = '/dashboard'
     }
   }
 
@@ -185,20 +181,8 @@ export default function Onboarding() {
     </div>,
   ]
 
-  if (completed) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
-        <div className="text-center space-y-4 animate-pulse">
-          <div className="text-6xl">🎉</div>
-          <h2 className="text-2xl font-bold text-white">Tudo pronto!</h2>
-          <p className="text-slate-400">Redirecionando para o dashboard...</p>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-lg">
         {/* Progress bar */}
         <div className="flex gap-2 mb-8">
@@ -223,7 +207,7 @@ export default function Onboarding() {
             <button
               onClick={() => {
                 localStorage.setItem('onboarding_completed', 'true')
-                navigate('/dashboard')
+                              window.location.href = '/dashboard'
               }}
               className="text-sm text-slate-500 hover:text-slate-400 transition-colors"
             >

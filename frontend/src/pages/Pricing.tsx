@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { createCheckout, createAddonCheckout } from '../services/authService';
+import { createCheckout, createAddonCheckout , createPortalSession} from '../services/authService';
 import { Check, Zap, Crown, Gift, Rocket, ArrowLeft, Star, Users } from 'lucide-react';
 import axios from 'axios';
 
@@ -369,6 +369,28 @@ export default function Pricing() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+            {/* Portal: Gerenciar Assinatura (apenas planos pagos) */}
+      {normalizedPlan !== 'free' && (
+        <div className="max-w-4xl mx-auto mt-6 p-4 bg-indigo-900/30 border border-indigo-500/40 rounded-2xl text-center">
+          <p className="text-indigo-200 text-sm mb-3">Você está no plano <strong>{normalizedPlan}</strong>. Gerencie sua assinatura pelo portal Stripe.</p>
+          <button
+            onClick={async () => {
+              try {
+                const email = userEmail || localStorage.getItem('user_email');
+                if (!email) { navigate('/login'); return; }
+                const res = await createPortalSession(email);
+                window.location.href = res.portal_url;
+              } catch (err) {
+                setError('Não foi possível abrir o portal. Tente novamente.');
+              }
+            }}
+            className="px-6 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-sm transition-all"
+          >
+            Gerenciar Assinatura
+          </button>
         </div>
       )}
 
