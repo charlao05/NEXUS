@@ -218,7 +218,6 @@ def verify_jwt_token(token: str) -> dict[str, Any]:
     """Decodifica e valida JWT — verifica iss/aud/exp.
     Suporta tokens legados (sem iss/aud) em período de transição."""
     try:
-        # Tentativa principal: validação completa com iss/aud
         result: Any = jwt.decode(  # type: ignore[no-untyped-call]
             token,
             _get_jwt_secret(),
@@ -229,8 +228,6 @@ def verify_jwt_token(token: str) -> dict[str, Any]:
         )
         return dict(result) if result else {}
     except (jwt.InvalidIssuerError, jwt.InvalidAudienceError, jwt.MissingRequiredClaimError):  # type: ignore[attr-defined]
-        # Fallback: aceitar tokens legados (emitidos antes do upgrade)
-        # que não possuem iss/aud — para não deslogar todos os usuários
         try:
             result = jwt.decode(  # type: ignore[no-untyped-call]
                 token,
@@ -301,7 +298,6 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict[
 
     token_data = verify_jwt_token(parts[1])
 
-    # Verificar se usuário ainda existe e está ativo
     db = _get_db_session()
     try:
         user = db.query(User).filter(User.id == token_data.get("user_id")).first()
@@ -310,16 +306,8 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict[
         if user.status != "active":  # type: ignore[union-attr]
             raise HTTPException(status_code=403, detail="Conta suspensa ou deletada")
 
-        # ── Determinar role ──
         role = str(getattr(user, 'role', None) or 'user')
-
-        # ── Resolver plano (freemium — sem trial) ──
         plan = _normalize_plan(user.plan)
-
-        # NÃO incrementar requests_today aqui — o incremento agora
-        # acontece apenas nos endpoints de interação com agentes
-        # (send_message, execute_agent, confirm-action) para que o
-        # contador "Uso Hoje" reflita apenas uso real dos agentes IA.
 
         return {
             "user_id": user.id,
@@ -380,6 +368,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "concurrent_requests": 5,
         "features": ["contabilidade", "clientes", "cobranca"],
         "price": 3990,
+        "stripe_price_id": os.getenv("STRIPE_PRICE_ESSENCIAL", ""),
     },
     "profissional": {
         "requests_per_day": 10000,
@@ -387,6 +376,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "concurrent_requests": 10,
         "features": ["contabilidade", "clientes", "cobranca", "agenda", "assistente"],
         "price": 6990,
+        "stripe_price_id": os.getenv("STRIPE_PRICE_PROFISSIONAL", ""),
     },
     "completo": {
         "requests_per_day": 999999,
@@ -394,6 +384,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "concurrent_requests": 999999,
         "features": ["full_api", "dedicated_support", "custom_integration"],
         "price": 9990,
+        "stripe_price_id": os.getenv("STRIPE_PRICE_COMPLETO", ""),
     },
     # Aliases retrocompatíveis
     "pro": {
@@ -422,13 +413,7 @@ router = APIRouter(prefix="/api/auth", tags=["authentication"])
 
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def signup(user_data: UserSignup):
-    """
-    Cadastro REAL — salva no banco com senha hashada.
-    - Valida email único
-    - Hash bcrypt 12 rounds
-    - Cria JWT
-    - Trial de 14 dias
-    """
+    """Cadastro REAL — salva no banco com senha hashada."""
     pwd_err = _validate_password_strength(user_data.password)
     if pwd_err:
         raise HTTPException(status_code=400, detail=pwd_err)
@@ -440,7 +425,6 @@ async def signup(user_data: UserSignup):
             raise HTTPException(status_code=400, detail="Email já cadastrado")
 
         hashed = hash_password(user_data.password)
-        # Validar preferência de comunicação
         comm_pref = user_data.communication_preference
         if comm_pref not in ("email", "whatsapp", "sms"):
             comm_pref = "email"
@@ -484,15 +468,12 @@ async def signup(user_data: UserSignup):
 
 @router.post("/login", response_model=TokenResponse)
 async def login(credentials: UserLogin):
-    """
-    Login REAL — valida email+senha no banco.
-    """
+    """Login REAL — valida email+senha no banco."""
     db = _get_db_session()
     try:
         user = db.query(User).filter(User.email == credentials.email).first()
 
         if not user:
-            # Timing-attack mitigation: run bcrypt even when user doesn't exist
             verify_password(credentials.password, "$2b$12$" + "A" * 53)
             raise HTTPException(status_code=401, detail="Email ou senha inválidos")
 
@@ -566,7 +547,6 @@ async def get_profile(current_user: dict[str, Any] = Depends(get_current_user)):
         subscription_expires=sub_expires,
         requests_used=requests_today,
         requests_limit=int(plan_config["requests_per_day"]),
-        # Perfil PF/PJ
         person_type=getattr(user, "person_type", None) if user else None,
         cpf=getattr(user, "cpf", None) if user else None,
         cnpj=getattr(user, "cnpj", None) if user else None,
@@ -600,7 +580,6 @@ async def get_my_limits(current_user: dict[str, Any] = Depends(get_current_user)
 
     db = _get_db_session()
     try:
-        # Contar clientes e fornecedores separadamente
         crm_client_count = db.query(Client).filter(
             Client.user_id == uid, Client.is_active == True,  # noqa: E712
             or_(Client.contact_type == "client", Client.contact_type.is_(None)),
@@ -611,7 +590,6 @@ async def get_my_limits(current_user: dict[str, Any] = Depends(get_current_user)
             Client.contact_type == "supplier",
         ).count()
 
-        # Somar slots extras de clientes/fornecedores (addon)
         user_obj = db.query(User).filter(User.id == uid).first()
         extra_slots = getattr(user_obj, 'extra_client_slots', 0) or 0
         addon_purchased = getattr(user_obj, 'addon_clients_purchased', False) or False
@@ -622,10 +600,9 @@ async def get_my_limits(current_user: dict[str, Any] = Depends(get_current_user)
         base_suppliers = limits.get("crm_suppliers", base_crm)
         effective_suppliers = (base_suppliers + extra_slots) if base_suppliers != -1 else -1
 
-        # Mensagens — considerar bônus proporcional do addon
         base_msgs = limits["agent_messages_per_day"]
         if base_msgs != -1 and extra_slots > 0 and base_crm > 0:
-            ratio = base_msgs / base_crm  # ex: 10msgs / 5clients = 2
+            ratio = base_msgs / base_crm
             effective_msgs = base_msgs + int(extra_slots * ratio)
         else:
             effective_msgs = base_msgs
@@ -685,7 +662,7 @@ async def get_my_limits(current_user: dict[str, Any] = Depends(get_current_user)
 # ============================================================================
 
 class UpdatePreferencesRequest(BaseModel):
-    communication_preference: Optional[str] = None  # email, whatsapp, sms
+    communication_preference: Optional[str] = None
 
 
 @router.put("/preferences")
@@ -722,18 +699,17 @@ async def update_preferences(
 
 
 # ============================================================================
-# PERFIL DO USUÁRIO — Dados PF/PJ (Pessoa Física ou Jurídica)
+# PERFIL DO USUÁRIO — Dados PF/PJ
 # ============================================================================
 
 class UpdateProfileRequest(BaseModel):
-    """Dados atualizáveis do perfil do usuário."""
     full_name: Optional[str] = None
-    person_type: Optional[str] = None          # PF ou PJ
+    person_type: Optional[str] = None
     cpf: Optional[str] = None
     cnpj: Optional[str] = None
     phone: Optional[str] = None
-    company_name: Optional[str] = None         # Razão Social
-    trade_name: Optional[str] = None           # Nome Fantasia
+    company_name: Optional[str] = None
+    trade_name: Optional[str] = None
     state_registration: Optional[str] = None
     municipal_registration: Optional[str] = None
     address_street: Optional[str] = None
@@ -743,8 +719,8 @@ class UpdateProfileRequest(BaseModel):
     address_city: Optional[str] = None
     address_state: Optional[str] = None
     address_zip: Optional[str] = None
-    birth_date: Optional[str] = None           # YYYY-MM-DD
-    business_type: Optional[str] = None        # MEI, ME, EPP, etc.
+    birth_date: Optional[str] = None
+    business_type: Optional[str] = None
     communication_preference: Optional[str] = None
 
 
@@ -760,7 +736,6 @@ async def update_profile(
         if not user:
             raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
-        # Validações
         if data.person_type and data.person_type not in ("PF", "PJ"):
             raise HTTPException(400, "person_type deve ser 'PF' ou 'PJ'")
         if data.address_state and len(data.address_state) != 2:
@@ -768,7 +743,6 @@ async def update_profile(
         if data.communication_preference and data.communication_preference not in ("email", "whatsapp", "sms"):
             raise HTTPException(400, "communication_preference deve ser 'email', 'whatsapp' ou 'sms'")
 
-        # Campos permitidos para atualização
         _ALLOWED_FIELDS = {
             "full_name", "person_type", "cpf", "cnpj", "phone",
             "company_name", "trade_name", "state_registration", "municipal_registration",
@@ -781,7 +755,6 @@ async def update_profile(
         for field in _ALLOWED_FIELDS:
             value = getattr(data, field, None)
             if value is not None:
-                # birth_date: converter string → date
                 if field == "birth_date":
                     try:
                         from datetime import date as _date_type
@@ -812,11 +785,11 @@ async def update_profile(
 # ============================================================================
 
 class FeedbackRequest(BaseModel):
-    rating: int                    # 1-5 estrelas
-    category: Optional[str] = None # bug, sugestao, elogio, reclamacao
-    message: Optional[str] = None  # Comentário livre
-    agent_id: Optional[str] = None # Agente específico (ou null = geral)
-    page: Optional[str] = None     # Página de onde veio
+    rating: int
+    category: Optional[str] = None
+    message: Optional[str] = None
+    agent_id: Optional[str] = None
+    page: Optional[str] = None
 
 
 @router.post("/feedback")
@@ -846,7 +819,6 @@ async def submit_feedback(
         db.commit()
         logger.info(f"Feedback #{fb.id} de user={current_user['user_id']} rating={data.rating}")
 
-        # Notificar admins sobre novo feedback
         try:
             admins = db.query(User).filter(User.role == "admin").all()
             from app.api.notifications import send_notification
@@ -860,7 +832,7 @@ async def submit_feedback(
                     data={"feedback_id": fb.id, "rating": data.rating, "category": _cat},
                 )
         except Exception:
-            pass  # Não bloquear resposta se notificação falhar
+            pass
 
         return {"status": "ok", "message": "Obrigado pelo feedback!", "id": fb.id}
     except HTTPException:
@@ -896,10 +868,7 @@ async def list_feedbacks(
 
 @router.get("/export-my-data")
 async def export_my_data(current_user: dict[str, Any] = Depends(get_current_user)):
-    """
-    LGPD Art. 18 — Portabilidade: retorna TODOS os dados do usuário.
-    Inclui: perfil, clientes, oportunidades, transações, agendamentos, interações.
-    """
+    """LGPD Art. 18 — Portabilidade: retorna TODOS os dados do usuário."""
     uid = current_user["user_id"]
     db = _get_db_session()
     try:
@@ -919,16 +888,12 @@ async def export_my_data(current_user: dict[str, Any] = Depends(get_current_user
     finally:
         db.close()
 
-    # Buscar dados do CRM (com user_id filter)
     try:
         from database.crm_service import CRMService  # type: ignore[import]
         clients_data = CRMService.search_clients(query="", user_id=uid, limit=10000, offset=0)
         clients = clients_data.get("clients", [])
-
-        # Buscar interações de cada cliente
         for c in clients:
             c["interactions"] = CRMService.get_interactions(c.get("id", 0), limit=1000)
-
         opportunities = CRMService.get_pipeline_summary(user_id=uid).get("pipeline", [])
         appointments = CRMService.get_appointments(user_id=uid).get("appointments", [])
         transactions = CRMService.get_financial_summary(user_id=uid)
@@ -947,7 +912,7 @@ async def export_my_data(current_user: dict[str, Any] = Depends(get_current_user
 
 
 # ============================================================================
-# LGPD — EXCLUSÃO DE CONTA (DIREITO AO APAGAMENTO)
+# LGPD — EXCLUSÃO DE CONTA
 # ============================================================================
 
 class DeleteAccountRequest(BaseModel):
@@ -960,11 +925,7 @@ async def delete_account(
     data: DeleteAccountRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    """
-    LGPD Art. 18 — Direito ao Apagamento.
-    Exclui conta e anonimiza dados vinculados ao usuário.
-    Requer confirmação de senha.
-    """
+    """LGPD Art. 18 — Direito ao Apagamento."""
     if not data.confirm:
         raise HTTPException(400, "Confirme a exclusão com confirm=true")
 
@@ -975,21 +936,16 @@ async def delete_account(
         if not user:
             raise HTTPException(404, "Usuário não encontrado")
 
-        # Verificar senha
         if not verify_password(data.password, user.password_hash):  # type: ignore[arg-type]
             raise HTTPException(403, "Senha incorreta")
 
-        # Excluir dados relacionados no CRM
         try:
             from database.models import Client, Interaction, Opportunity, Appointment, Transaction, Invoice  # type: ignore[import]
-            # Deletar clientes (cascade exclui interactions, opportunities, appointments)
             db.query(Client).filter(Client.user_id == uid).delete(synchronize_session=False)
-            # Deletar subscriptions
             db.query(Subscription).filter(Subscription.user_id == uid).delete(synchronize_session=False)
         except Exception as e:
             logger.warning(f"Erro ao apagar dados CRM: {e}")
 
-        # Anonimizar usuário (manter registro para integridade referencial)
         user.email = f"deleted_{uid}@anonimizado.nexus"  # type: ignore[assignment]
         user.full_name = "Usuário Removido"  # type: ignore[assignment]
         user.password_hash = "DELETED"  # type: ignore[assignment]
@@ -1027,10 +983,7 @@ class RefreshRequest(BaseModel):
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token_endpoint(data: RefreshRequest):
-    """
-    Emite novo access_token a partir de um refresh_token válido.
-    O refresh_token permanece válido até expirar (30 dias).
-    """
+    """Emite novo access_token a partir de um refresh_token válido."""
     try:
         payload: Any = jwt.decode(  # type: ignore[no-untyped-call]
             data.refresh_token,
@@ -1050,7 +1003,6 @@ async def refresh_token_endpoint(data: RefreshRequest):
     user_id = payload.get("user_id")
     email = payload.get("email")
 
-    # Verificar se usuário ainda existe e está ativo
     db = _get_db_session()
     try:
         user = db.query(User).filter(User.id == user_id, User.status != "deleted").first()
@@ -1075,6 +1027,17 @@ async def refresh_token_endpoint(data: RefreshRequest):
 
 
 # ============================================================================
+# STRIPE — init
+# ============================================================================
+
+def _init_stripe() -> Any:
+    """Inicializa Stripe SDK com a chave da env. Retorna o módulo stripe."""
+    import stripe  # type: ignore[import-untyped]
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+    return stripe
+
+
+# ============================================================================
 # STRIPE CHECKOUT
 # ============================================================================
 
@@ -1088,7 +1051,6 @@ async def create_checkout(
     if not stripe.api_key:
         raise HTTPException(status_code=503, detail="Stripe não configurado")
 
-    # Normalizar nome do plano (aceitar aliases antigos)
     plan_key = _PLAN_ALIASES.get(payment.plan, payment.plan)
     _VALID_PAID_PLANS = {"essencial", "profissional", "completo"}
     if plan_key not in _VALID_PAID_PLANS:
@@ -1098,15 +1060,13 @@ async def create_checkout(
         )
 
     try:
-        price_in_cents = PLANS[plan_key]["price"]  # já está em centavos
+        price_in_cents = PLANS[plan_key]["price"]
+        stripe_price_id = PLANS[plan_key].get("stripe_price_id", "")
         frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
 
-        # Sanitizar: em dev, garantir que FRONTEND_URL aponta para o Vite dev server correto
         _env = os.getenv("ENVIRONMENT", "development")
         if _env != "production" and "localhost" in frontend_url:
-            # Corrigir problemas comuns: HTTPS em dev, porta errada
             frontend_url = frontend_url.replace("https://", "http://")
-            # Se porta não for 5173 (Vite default), corrigir
             import re as _re
             _port_match = _re.search(r":(\d+)$", frontend_url)
             if _port_match and _port_match.group(1) not in ("5173", "5174", "5175", "3000"):
@@ -1121,9 +1081,51 @@ async def create_checkout(
         }
         plan_display = _PLAN_DISPLAY_NAMES.get(plan_key, plan_key.capitalize())
 
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{
+        # TAREFA 3: Upgrade/downgrade se já existir subscription ativa
+        db_upgrade = _get_db_session()
+        try:
+            existing_sub = (
+                db_upgrade.query(Subscription)
+                .filter(
+                    Subscription.user_id == current_user["user_id"],
+                    Subscription.status == "active",
+                    Subscription.stripe_subscription_id.isnot(None),
+                )
+                .order_by(Subscription.created_at.desc())
+                .first()
+            )
+            if existing_sub and existing_sub.stripe_subscription_id:
+                stripe_sub = stripe.Subscription.retrieve(existing_sub.stripe_subscription_id)
+                if stripe_sub and stripe_sub.get("status") in ("active", "trialing"):
+                    items = stripe_sub.get("items", {}).get("data", [])
+                    if items and stripe_price_id:
+                        stripe.Subscription.modify(
+                            existing_sub.stripe_subscription_id,
+                            items=[{"id": items[0]["id"], "price": stripe_price_id}],
+                            proration_behavior="create_prorations",
+                        )
+                        user_obj = db_upgrade.query(User).filter(User.id == current_user["user_id"]).first()
+                        if user_obj:
+                            user_obj.plan = plan_key
+                        existing_sub.plan = plan_key
+                        db_upgrade.commit()
+                        return SubscriptionResponse(
+                            status="upgraded",
+                            checkout_url="",
+                            session_id=existing_sub.stripe_subscription_id or "",
+                        )
+        except HTTPException:
+            raise
+        except Exception as upg_err:
+            logger.warning(f"Upgrade inline falhou, prosseguindo com checkout: {upg_err}")
+        finally:
+            db_upgrade.close()
+
+        # Montar line_item com price_id fixo (produção) ou price_data inline (dev/fallback)
+        if stripe_price_id:
+            _line_item: dict = {"price": stripe_price_id}
+        else:
+            _line_item = {
                 "price_data": {
                     "currency": "brl",
                     "product_data": {
@@ -1132,9 +1134,12 @@ async def create_checkout(
                     },
                     "unit_amount": price_in_cents,
                     "recurring": {"interval": "month"},
-                },
-                "quantity": 1,
-            }],
+                }
+            }
+
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{**_line_item, "quantity": 1}],
             mode="subscription",
             success_url=f"{frontend_url}/success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{frontend_url}/pricing",
@@ -1157,12 +1162,46 @@ async def create_checkout(
 
 
 # ============================================================================
-# ADDON: PACOTE EXTRA DE CLIENTES/FORNECEDORES (+10 cada por R$12,90 — compra única)
+# STRIPE BILLING PORTAL
+# ============================================================================
+
+@router.post("/create-portal-session")
+async def create_portal_session(
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Cria sessão do Stripe Billing Portal para gerenciar assinatura."""
+    stripe = _init_stripe()
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Stripe não configurado")
+    db = _get_db_session()
+    try:
+        user = db.query(User).filter(User.id == current_user["user_id"]).first()
+        if not user or not getattr(user, 'stripe_customer_id', None):
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhuma assinatura Stripe encontrada. Faça checkout primeiro.",
+            )
+        frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
+        portal_session = stripe.billing_portal.Session.create(
+            customer=user.stripe_customer_id,
+            return_url=f"{frontend_url}/settings",
+        )
+        return {"url": portal_session.url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao criar portal session: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao abrir portal de gerenciamento.")
+    finally:
+        db.close()
+
+
+# ============================================================================
+# ADDON: PACOTE EXTRA DE CLIENTES/FORNECEDORES
 # ============================================================================
 
 class AddonCheckoutRequest(BaseModel):
-    """Request para comprar pacote extra de clientes/fornecedores."""
-    email: Optional[str] = None  # ignorado — backend usa email do usuário autenticado
+    email: Optional[str] = None
 
 
 @router.post("/checkout/addon-clients")
@@ -1173,7 +1212,6 @@ async def checkout_addon_clients(
     """Cria checkout Stripe para addon de +10 clientes/fornecedores (R$12,90 compra única).
     Disponível SOMENTE para plano gratuito. Compra única por usuário."""
 
-    # ---- Restrição: apenas plano gratuito ----
     plan = _normalize_plan(current_user.get("plan", "free"))
     if plan != "free":
         raise HTTPException(
@@ -1181,7 +1219,6 @@ async def checkout_addon_clients(
             detail="O addon de clientes extras está disponível apenas para o plano gratuito.",
         )
 
-    # ---- Restrição: compra única por usuário ----
     db = _get_db_session()
     try:
         user_check = db.query(User).filter(User.id == current_user["user_id"]).first()
@@ -1204,7 +1241,10 @@ async def checkout_addon_clients(
             frontend_url = frontend_url.replace("https://", "http://")
 
         session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
+            payment_method_types=["card", "pix"],
+            payment_method_options={
+                "pix": {"expires_after_seconds": 1800},
+            },
             line_items=[{
                 "price_data": {
                     "currency": "brl",
@@ -1212,7 +1252,7 @@ async def checkout_addon_clients(
                         "name": "NEXUS — Pacote Extra de Clientes e Fornecedores",
                         "description": "+10 clientes, +10 fornecedores e mensagens proporcionais (compra única)",
                     },
-                    "unit_amount": 1290,  # R$ 12,90 em centavos
+                    "unit_amount": 1290,
                 },
                 "quantity": 1,
             }],
@@ -1243,22 +1283,15 @@ async def checkout_addon_clients(
 # STRIPE WEBHOOK — Processamento real de pagamentos
 # ============================================================================
 
-def _init_stripe() -> Any:
-    """Inicializa Stripe SDK com a chave da env. Retorna o módulo stripe."""
-    import stripe  # type: ignore[import-untyped]
-    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-    return stripe
-
-
 @router.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
     """
     Webhook Stripe REAL (idempotente):
-    - checkout.session.completed → ativa plano (com idempotência via stripe_checkout_session_id)
+    - checkout.session.completed → ativa plano
     - customer.subscription.deleted → cancela plano
     - customer.subscription.updated → atualiza período
     - invoice.paid → renova período da subscription
-    - invoice.payment_failed → loga + marca subscription como past_due
+    - invoice.payment_failed → marca subscription como past_due
     """
     stripe = _init_stripe()
     webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
@@ -1284,7 +1317,33 @@ async def stripe_webhook(request: Request):
     event_type = event.type  # type: ignore[union-attr]
     logger.info(f"Stripe webhook: {event_type}")
 
+    # TAREFA 4: Idempotência global — verificar se já processamos este evento
+    event_id = event.get("id") if hasattr(event, "get") else getattr(event, "id", None)
+    if event_id:
+        _idem_db = _get_db_session()
+        try:
+            from database.models import StripeEvent as _StripeEventModel
+            existing_evt = _idem_db.query(_StripeEventModel).filter(
+                _StripeEventModel.stripe_event_id == event_id
+            ).first()
+            if existing_evt:
+                logger.info(f"⚠️ Evento Stripe já processado (idempotente): {event_id}")
+                return {"status": "already_processed", "event_id": event_id}
+            new_evt = _StripeEventModel(
+                stripe_event_id=event_id,
+                event_type=str(getattr(event, 'type', 'unknown')),
+            )
+            _idem_db.add(new_evt)
+            _idem_db.commit()
+        except ImportError:
+            pass
+        except Exception as idem_err:
+            logger.warning(f"Erro na verificação de idempotência: {idem_err}")
+        finally:
+            _idem_db.close()
+
     db = _get_db_session()
+
     try:
         if event_type == "checkout.session.completed":
             session_obj: Any = event.data.object  # type: ignore[union-attr]
@@ -1295,9 +1354,7 @@ async def stripe_webhook(request: Request):
             if user_id:
                 user = db.query(User).filter(User.id == int(user_id)).first()
                 if user:
-                    # Addon de clientes/fornecedores extras (compra única)
                     if addon_type == "extra_clients":
-                        # Idempotência: não reprocessar se já adquirido
                         if getattr(user, 'addon_clients_purchased', False):
                             logger.info(f"⚠️ Addon já processado para User {user_id} (idempotente)")
                         else:
@@ -1308,16 +1365,14 @@ async def stripe_webhook(request: Request):
                             if session_obj.customer:
                                 user.stripe_customer_id = session_obj.customer  # type: ignore[assignment]
                             db.commit()
-                            logger.info(f"✅ Addon clientes (compra única): User {user_id} → +{slots} slots (total: {user.extra_client_slots})")
+                            logger.info(f"✅ Addon clientes: User {user_id} → +{slots} slots (total: {user.extra_client_slots})")
                     else:
-                        # Idempotência: verificar se já processamos este checkout session
                         existing_sub = db.query(Subscription).filter(
                             Subscription.stripe_checkout_session_id == session_obj.id
                         ).first()
                         if existing_sub:
                             logger.info(f"⚠️ Checkout {session_obj.id} já processado (idempotente) — sub #{existing_sub.id}")
                         else:
-                            # Compra de plano normal
                             plan = _normalize_plan(raw_plan)
                             user.plan = plan  # type: ignore[assignment]
                             if session_obj.customer:
@@ -1338,7 +1393,6 @@ async def stripe_webhook(request: Request):
                             logger.info(f"✅ Plano atualizado: User {user_id} → {plan}")
 
         elif event_type == "invoice.paid":
-            # Renovação mensal — atualizar período da subscription
             invoice_obj: Any = event.data.object  # type: ignore[union-attr]
             stripe_sub_id = getattr(invoice_obj, "subscription", None)
             if stripe_sub_id:
@@ -1352,7 +1406,6 @@ async def stripe_webhook(request: Request):
                     logger.info(f"✅ Renovação paga: subscription {stripe_sub_id}")
 
         elif event_type == "customer.subscription.updated":
-            # Stripe atualiza status (active, past_due, trialing, etc.)
             sub_data: Any = event.data.object  # type: ignore[union-attr]
             sub = db.query(Subscription).filter(
                 Subscription.stripe_subscription_id == sub_data.id
@@ -1360,7 +1413,6 @@ async def stripe_webhook(request: Request):
             if sub:
                 new_status = getattr(sub_data, "status", "active")
                 sub.status = new_status  # type: ignore[assignment]
-                # Atualizar período se disponível
                 period_end = getattr(sub_data, "current_period_end", None)
                 if period_end:
                     sub.current_period_end = datetime.fromtimestamp(period_end, tz=timezone.utc)  # type: ignore[assignment]
@@ -1386,7 +1438,6 @@ async def stripe_webhook(request: Request):
             stripe_sub_id = getattr(invoice_obj, "subscription", None)
             customer_id = getattr(invoice_obj, "customer", "unknown")
             logger.warning(f"⚠️ Pagamento falhou: customer={customer_id}, subscription={stripe_sub_id}")
-            # Marcar subscription como past_due para que o frontend avise o usuário
             if stripe_sub_id:
                 sub = db.query(Subscription).filter(
                     Subscription.stripe_subscription_id == stripe_sub_id
@@ -1443,7 +1494,7 @@ async def check_rate_limit(current_user: dict[str, Any] = Depends(get_current_us
     """Valida limite de requisições por plano. Admins são isentos."""
     role = str(current_user.get("role", "user"))
     if role in ("admin", "superadmin"):
-        return current_user  # Admin isento de rate limit
+        return current_user
 
     plan = str(current_user.get("plan", "free"))
     daily_limit = PLANS[plan]["requests_per_day"]
@@ -1488,7 +1539,6 @@ async def admin_switch_plan(
         user.plan = plan  # type: ignore[assignment]
         db.commit()
 
-        # Gerar novo token com o plano atualizado (via create_jwt_token com iss/aud/jti)
         plan_config = PLANS.get(plan, PLANS["free"])
         new_token = create_jwt_token(user.id, user.email, plan, str(getattr(user, 'role', None) or 'user'))  # type: ignore[arg-type]
 
@@ -1504,20 +1554,16 @@ async def admin_switch_plan(
 
 
 # ============================================================================
-# OAUTH — Estado CSRF (proteção anti-forgery)
+# OAUTH — Estado CSRF
 # ============================================================================
 
-# Armazena states pendentes em memória (TTL ~10min na validação)
-# Em produção com múltiplos workers, usar Redis para compartilhar.
 _oauth_pending_states: dict[str, float] = {}
-_OAUTH_STATE_TTL = 600  # 10 minutos
+_OAUTH_STATE_TTL = 600
 
 
 def _create_oauth_state() -> str:
-    """Gera state CSRF criptograficamente seguro para OAuth."""
     import time
     state = token_urlsafe(32)
-    # Limpar states antigos (> 10 min)
     now = time.time()
     expired = [k for k, v in _oauth_pending_states.items() if now - v > _OAUTH_STATE_TTL]
     for k in expired:
@@ -1527,7 +1573,6 @@ def _create_oauth_state() -> str:
 
 
 def _validate_oauth_state(state: str | None) -> None:
-    """Valida e consome state CSRF. Levanta 403 se inválido."""
     import time
     if not state:
         raise HTTPException(status_code=403, detail="OAuth state ausente — possível ataque CSRF")
@@ -1739,18 +1784,15 @@ async def forgot_password(data: ForgotPasswordRequest):
     """Envia email real de recuperação de senha (previne enumeração)."""
     logger.info(f"Recuperação de senha solicitada: {data.email}")
 
-    # Sempre responde sucesso (previne enumeração de emails)
     db = _get_db_session()
     try:
         user = db.query(User).filter(User.email == data.email).first()
         if user:
-            # Gerar token e salvar no banco
             from app.api.email_service import generate_reset_token, send_password_reset_email  # type: ignore[import-unresolved]
             token = generate_reset_token()
             user.password_reset_token = token
             user.password_reset_expires = datetime.now(timezone.utc) + timedelta(hours=1)
             db.commit()
-            # Enviar email (não-bloqueante para o response)
             send_password_reset_email(data.email, token)
     except Exception as e:
         logger.error(f"Erro no forgot-password: {e}")
@@ -1784,7 +1826,6 @@ async def reset_password(data: ResetPasswordRequest):
         if not user:
             raise HTTPException(400, "Token inválido ou expirado")
 
-        # Verificar expiração
         if user.password_reset_expires:
             expires = user.password_reset_expires
             if hasattr(expires, 'tzinfo') and expires.tzinfo is None:
@@ -1792,7 +1833,6 @@ async def reset_password(data: ResetPasswordRequest):
             if datetime.now(timezone.utc) > expires:
                 raise HTTPException(400, "Token expirado. Solicite um novo link.")
 
-        # Atualizar senha
         user.password_hash = hash_password(data.new_password)
         user.password_reset_token = None
         user.password_reset_expires = None
@@ -1824,7 +1864,7 @@ async def change_password(
     data: ChangePasswordRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    """Altera a senha do usuário autenticado (precisa informar a senha atual)."""
+    """Altera a senha do usuário autenticado."""
     pwd_err = _validate_password_strength(data.new_password)
     if pwd_err:
         raise HTTPException(400, pwd_err)
@@ -1857,13 +1897,13 @@ async def change_password(
 
 
 # ============================================================================
-# PIN DE CONFIRMAÇÃO (senha para ações sensíveis nos agentes)
+# PIN DE CONFIRMAÇÃO
 # ============================================================================
 
 class SetConfirmationPinRequest(BaseModel):
-    login_password: str  # Senha de login para autenticar a operação
-    new_pin: str         # Novo PIN de confirmação (mín 4, máx 50 chars)
-    
+    login_password: str
+    new_pin: str
+
 class RemoveConfirmationPinRequest(BaseModel):
     login_password: str
 
@@ -1873,9 +1913,7 @@ async def set_confirmation_pin(
     data: SetConfirmationPinRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    """Define ou atualiza o PIN de confirmação para ações sensíveis.
-    Se definido, será usado no lugar da senha de login para confirmar
-    exclusões, edições críticas, etc."""
+    """Define ou atualiza o PIN de confirmação para ações sensíveis."""
     if len(data.new_pin) < 4:
         raise HTTPException(400, "PIN deve ter pelo menos 4 caracteres")
     if len(data.new_pin) > 50:
