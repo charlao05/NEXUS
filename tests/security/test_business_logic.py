@@ -27,8 +27,8 @@ class TestBusinessLogic:
         )
 
     def test_free_user_rate_limited(self, client: TestClient, free_headers: dict):
-        """User free acessa todos os agentes mas é rate-limited (429) ao exceder limite diário."""
-        agents = ["clientes", "cobranca", "agenda", "assistente"]
+        """User free acessa agentes de degustação mas é rate-limited (429) ao exceder limite diário."""
+        agents = ["clientes", "agenda", "contabilidade"]
         for agent in agents:
             resp = client.post(
                 f"/api/agents/{agent}/execute",
