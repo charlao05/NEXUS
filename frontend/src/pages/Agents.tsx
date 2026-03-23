@@ -1,7 +1,7 @@
 /**
  * Agents Page - NEXUS
  * Página de gerenciamento dos agentes de IA
- * Acesso baseado no plano freemium: free → 1 agente, essencial → 3, profissional+ → todos
+ * Acesso baseado no plano freemium: free → 2 cards (3 agentes backend), essencial → 2 cards + cobranças, profissional+ → todos
  */
 
 import { useNavigate } from 'react-router-dom';

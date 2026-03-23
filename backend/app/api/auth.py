@@ -366,7 +366,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "requests_per_day": 1000,
         "requests_per_month": 30000,
         "concurrent_requests": 5,
-        "features": ["contabilidade", "clientes", "cobranca"],
+        "features": ["contabilidade", "clientes", "cobranca", "agenda"],
         "price": 2990,
         "stripe_price_id": os.getenv("STRIPE_PRICE_ESSENCIAL", ""),
     },
@@ -391,7 +391,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "requests_per_day": 1000,
         "requests_per_month": 30000,
         "concurrent_requests": 5,
-        "features": ["contabilidade", "clientes", "cobranca"],
+        "features": ["contabilidade", "clientes", "cobranca", "agenda"],
         "price": 2990,
     },
     "enterprise": {

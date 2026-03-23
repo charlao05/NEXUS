@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { usePlanLimits } from '../hooks/usePlanLimits';
 import { createCheckout, createAddonCheckout , createPortalSession} from '../services/authService';
 import { Check, Zap, Crown, Gift, Rocket, ArrowLeft, Star, Users } from 'lucide-react';
 import axios from 'axios';
@@ -53,7 +54,7 @@ const plans: Plan[] = [
     buttonText: 'Assinar Essencial',
     features: [
       '200 mensagens/dia com IA',
-      '3 agentes: Fiscal, Clientes e Cobranças',
+      '4 agentes: Fiscal, Clientes/Agenda e Cobranças',
       'Até 100 clientes e 100 fornecedores',
       'Notas fiscais ilimitadas',
       'Lembretes automáticos',
@@ -103,6 +104,7 @@ const plans: Plan[] = [
 export default function Pricing() {
   const navigate = useNavigate();
   const { userPlan, userEmail } = useAuth();
+  const { limits } = usePlanLimits();
   const [isLoading, setIsLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   
@@ -318,7 +320,7 @@ export default function Pricing() {
       </div>
 
       {/* Addon: Pacote Extra de Clientes */}
-      {normalizedPlan === 'free' && (
+      {normalizedPlan === 'free' && !limits?.addon_clients_purchased && (
         <div className="max-w-6xl mx-auto mt-6">
           <div className="bg-gradient-to-r from-amber-500/10 to-orange-500/10 backdrop-blur-sm border border-amber-400/30 rounded-2xl p-5">
             <div className="flex flex-col md:flex-row items-center gap-4">

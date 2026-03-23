@@ -41,24 +41,44 @@ class BusinessLogicAgent(SecurityAgent):
 
     # ── Free user rate-limited após exceder limite diário ──────
     def _test_free_agent_access_gates(self) -> list[Finding]:
-        """Free acessa todos os agentes (degustação). Bypass seria contornar rate limit."""
+        """Free acessa agentes do plano (contabilidade, clientes, agenda).
+        Agentes fora do plano (cobranca, assistente) devem retornar 403."""
         findings: list[Finding] = []
-        # No modelo freemium, todos os agentes estão disponíveis.
-        # O controle é por rate limit (requests_per_day).
-        # Um bypass seria conseguir status 200 quando já deveria ser 429.
-        agents = ["clientes", "cobranca", "agenda", "assistente"]
-        for agent in agents:
+        # Agentes disponíveis no plano free
+        free_agents = ["clientes", "agenda", "contabilidade"]
+        # Agentes bloqueados no plano free (devem retornar 403)
+        blocked_agents = ["cobranca", "assistente"]
+
+        for agent in free_agents:
             resp = self.client.post(
                 f"/api/agents/{agent}/execute",
                 json={"action": "smart_chat", "message": "oi"},
                 headers=self.free_headers,
             )
-            # 200 e 429 são respostas válidas para free users
             if resp.status_code not in (200, 429):
                 findings.append(Finding(
                     title=f"Resposta inesperada para free user no agente '{agent}'",
                     description=f"Agente {agent} retornou {resp.status_code}; esperado 200 ou 429.",
                     severity=Severity.MEDIUM,
+                    category="business_logic",
+                    evidence={
+                        "endpoint": f"POST /api/agents/{agent}/execute",
+                        "user_plan": "free",
+                        "status": resp.status_code,
+                    },
+                ))
+
+        for agent in blocked_agents:
+            resp = self.client.post(
+                f"/api/agents/{agent}/execute",
+                json={"action": "smart_chat", "message": "oi"},
+                headers=self.free_headers,
+            )
+            if resp.status_code != 403:
+                findings.append(Finding(
+                    title=f"Agente bloqueado '{agent}' acessível por free user",
+                    description=f"Agente {agent} retornou {resp.status_code}; esperado 403 (bloqueado).",
+                    severity=Severity.HIGH,
                     category="business_logic",
                     evidence={
                         "endpoint": f"POST /api/agents/{agent}/execute",
