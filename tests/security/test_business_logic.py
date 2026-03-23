@@ -26,17 +26,20 @@ class TestBusinessLogic:
             + "\n".join(f"  - {f}" for f in critical)
         )
 
-    def test_free_user_blocked_from_paid_agents(
+    def test_free_user_rate_limited(
         self, client: TestClient, free_headers: dict
     ):
-        """User free NÃO pode executar agentes pagos."""
-        blocked = ["clientes", "cobranca", "agenda", "assistente"]
-        for agent in blocked:
+        """User free tem acesso a todos os agentes (degustação); o bloqueio
+        ocorre por rate limit (429) ao esgotar o limite diário, não por plano (403)."""
+        agents_degustacao = ["clientes", "agenda"]
+        for agent in agents_degustacao:
             resp = client.post(
                 f"/api/agents/{agent}/execute",
                 json={"action": "smart_chat", "message": "teste"},
                 headers=free_headers,
             )
-            assert resp.status_code in (403, 429), (
-                f"Free user acessou agente '{agent}' (status={resp.status_code})"
+            assert resp.status_code != 403, (
+                f"Free user bloqueado por plano no agente '{agent}' — "
+                f"deveria ser permitido (200) ou limitado por rate (429), "
+                f"não bloqueado por plano (status={resp.status_code})"
             )

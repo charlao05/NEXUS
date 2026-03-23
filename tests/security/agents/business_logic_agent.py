@@ -41,9 +41,10 @@ class BusinessLogicAgent(SecurityAgent):
 
     # ── Free user acessa agentes bloqueados ─────────────────────
     def _test_free_agent_access_gates(self) -> list[Finding]:
-        """Free só pode usar contabilidade. Testa acesso aos outros."""
+        """Free tem acesso a todos os agentes (degustação); apenas cobranca e
+        assistente podem ser restritos por lógica extra além do rate limit."""
         findings: list[Finding] = []
-        blocked_agents = ["clientes", "cobranca", "agenda", "assistente"]
+        blocked_agents = ["cobranca", "assistente"]
         for agent in blocked_agents:
             resp = self.client.post(
                 f"/api/agents/{agent}/execute",
