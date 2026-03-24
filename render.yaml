@@ -56,6 +56,14 @@ services:
         value: "2.0.0"
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_USERNAME
+        value: "appnexusapp_bot"
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: TELEGRAM_ADMIN_CHAT_ID
+        sync: false
 
   # -- Frontend SPA --
   - type: web
