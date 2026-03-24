@@ -15,7 +15,7 @@ const docs: Record<string, { title: string; content: string[] }> = {
       '',
       '### Primeiros Passos',
       '1. **Escolha um agente** - Acesse a página de Agentes e selecione qual automação deseja configurar',
-      '2. **Configure as integrações** - Conecte suas contas (Google Calendar, WhatsApp, etc)',
+      '2. **Configure as integrações** - Conecte suas contas (Google Calendar, Telegram, etc)',
       '3. **Defina as regras** - Configure quando e como cada automação deve executar',
       '4. **Monitore os resultados** - Acompanhe pelo Painel em tempo real',
       '',

@@ -134,8 +134,8 @@ class InvoiceCreate(BaseModel):
 
 class InteractionCreate(BaseModel):
     client_id: int
-    type: Literal["nota", "ligacao", "email", "reuniao", "whatsapp", "visita"] = "nota"
-    channel: Literal["manual", "sistema", "web", "telefone", "email", "whatsapp"] = "manual"
+    type: Literal["nota", "ligacao", "email", "reuniao", "telegram", "visita"] = "nota"
+    channel: Literal["manual", "sistema", "web", "telefone", "email", "telegram"] = "manual"
     summary: str = Field(..., min_length=1, max_length=500)
     details: str = Field("", max_length=2000)
     sentiment: Literal["positive", "neutral", "negative"] = "neutral"

@@ -14,7 +14,7 @@ Funcionalidades:
 - Cálculo inteligente de urgência (overdue, today, critical, urgent, soon, normal)
 - Geração de lembretes humanizados
 - Ações contextuais recomendadas por tipo
-- Suporte a notificações multi-canal (WhatsApp, Email, SMS)
+- Suporte a notificações multi-canal (Telegram, Email, SMS)
 - Integração com dados de obrigações MEI
 """
 from __future__ import annotations
@@ -172,7 +172,7 @@ class AgendaAgent:
                 "reminder_date": reminder_date.strftime("%Y-%m-%d"),
                 "actions": actions,
                 "auto_notify": auto_notify,
-                "notification_channels": ["email", "whatsapp", "sms"] if auto_notify else [],
+                "notification_channels": ["email", "telegram", "sms"] if auto_notify else [],
                 "emoji": self.TYPE_EMOJI.get(commitment_type, "⏰")
             }
             

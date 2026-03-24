@@ -410,6 +410,14 @@ try:
 except ImportError as e:
     logging.warning(f"Não foi possível importar billing routes: {e}")
 
+# Importar rotas do Telegram Bot (webhook)
+try:
+    from app.api.telegram import router as telegram_router  # type: ignore[import]
+    app.include_router(telegram_router)  # type: ignore[arg-type]
+    logging.info("✅ Rotas do Telegram Bot carregadas")
+except ImportError as e:
+    logging.warning(f"Não foi possível importar telegram routes: {e}")
+
 # ==================== ERROR HANDLERS ====================
 
 @app.exception_handler(Exception)

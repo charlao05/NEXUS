@@ -480,7 +480,7 @@ export default function Profile() {
                       className="w-full bg-slate-800/50 border border-slate-700/50 rounded-lg pl-10 pr-10 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-green-500/50 transition text-sm appearance-none cursor-pointer"
                     >
                       <option value="email">📧 Email</option>
-                      <option value="whatsapp">💬 WhatsApp</option>
+                      <option value="telegram">💬 Telegram</option>
                       <option value="sms">📱 SMS</option>
                     </select>
                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />

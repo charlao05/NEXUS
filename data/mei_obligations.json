@@ -115,6 +115,6 @@
   "settings": {
     "notification_days_before": [30, 14, 7, 1],
     "timezone": "America/Sao_Paulo",
-    "preferred_contact": "whatsapp"
+    "preferred_contact": "telegram"
   }
 }

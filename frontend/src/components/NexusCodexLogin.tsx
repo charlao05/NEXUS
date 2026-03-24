@@ -440,7 +440,7 @@ export default function NexusCodexLogin() {
                   <div className="grid grid-cols-3 gap-2">
                     {[
                       { id: 'email', label: 'Email', icon: '✉️' },
-                      { id: 'whatsapp', label: 'WhatsApp', icon: '📱' },
+                      { id: 'telegram', label: 'Telegram', icon: '📱' },
                       { id: 'sms', label: 'SMS', icon: '💬' },
                     ].map((opt) => (
                       <button

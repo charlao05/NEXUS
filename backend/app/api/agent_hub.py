@@ -147,7 +147,7 @@ agent_configs: Dict[str, AgentConfig] = {
     "agenda": AgentConfig(
         enabled=True,
         auto_notify=True,
-        notification_channels=["email", "whatsapp"],
+        notification_channels=["email", "telegram"],
         settings={
             "reminder_hours_before": 24,
             "daily_summary": True,
@@ -167,7 +167,7 @@ agent_configs: Dict[str, AgentConfig] = {
     "contabilidade": AgentConfig(
         enabled=True,
         auto_notify=True,
-        notification_channels=["email", "whatsapp"],
+        notification_channels=["email", "telegram"],
         settings={
             "alert_das_days_before": 5,
             "alert_dasn_days_before": 30,
@@ -182,7 +182,7 @@ agent_configs: Dict[str, AgentConfig] = {
     "cobranca": AgentConfig(
         enabled=True,
         auto_notify=True,
-        notification_channels=["whatsapp", "email"],
+        notification_channels=["telegram", "email"],
         settings={
             "auto_reminder_days": [3, 7, 15, 30],
             "friendly_tone": True,
@@ -274,7 +274,7 @@ def _setup_event_handlers(hub: AgentHub):
                 send_invoice_reminder(email, nome, valor, venc, inv_id)
         except Exception as e:
             logger.debug(f"Email de cobrança não enviado: {e}")
-        return {"acao": "cobranca_iniciada", "canal": "email+whatsapp"}
+        return {"acao": "cobranca_iniciada", "canal": "email+telegram"}
     
     hub.subscribe(AgentType.COBRANCA, EventType.PAGAMENTO_ATRASADO, on_pagamento_atrasado)
     

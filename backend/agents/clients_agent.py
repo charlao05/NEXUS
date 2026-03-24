@@ -214,7 +214,7 @@ class ClientsAgent:
             "appointment": appointment,
             "notification": notification_message,
             "reminders": reminders,
-            "channels": ["whatsapp", "sms", "email"],
+            "channels": ["telegram", "sms", "email"],
             "recommendations": self._generate_appointment_recommendations(attendance_score)
         }
     

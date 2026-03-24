@@ -65,6 +65,7 @@ Permite ao agente controlar o browser: abrir URLs, clicar, digitar, screenshot, 
 | `/api/admin` | admin | `backend/app/api/admin.py` |
 | `/api/orchestrator` | Orchestrator | `backend/app/api/orchestrator.py` (LangGraph) |
 | `/api/agents/automation` | Agent Automation | `backend/app/api/agent_automation.py` |
+| `/api/telegram` | telegram | `backend/app/api/telegram.py` (webhook do bot) |
 
 ### Endpoints Diretos
 - `GET /health` — status de DB, Redis, Sentry
@@ -191,6 +192,12 @@ VITE_GOOGLE_CLIENT_ID
 # Services
 REDIS_URL, SENTRY_DSN, RESEND_API_KEY, EMAIL_FROM
 CORS_ORIGINS, FRONTEND_URL, BACKEND_BASE_URL
+
+# Telegram Bot
+TELEGRAM_BOT_TOKEN              # Token do @BotFather
+TELEGRAM_BOT_USERNAME            # Username do bot (sem @)
+TELEGRAM_WEBHOOK_SECRET          # Secret para validar webhook
+TELEGRAM_ADMIN_CHAT_ID           # Chat ID do admin para alertas
 ```
 
 **IMPORTANTE**: Em dev, `VITE_API_URL` deve estar COMENTADO no `frontend/.env.local` — caso contrário, bypass do proxy Vite causa CORS.

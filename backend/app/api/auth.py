@@ -37,7 +37,7 @@ class UserSignup(BaseModel):
     email: EmailStr
     password: str
     full_name: str
-    communication_preference: str = "email"  # email, whatsapp, sms
+    communication_preference: str = "email"  # email, telegram, sms
 
 
 class UserLogin(BaseModel):
@@ -426,7 +426,7 @@ async def signup(user_data: UserSignup):
 
         hashed = hash_password(user_data.password)
         comm_pref = user_data.communication_preference
-        if comm_pref not in ("email", "whatsapp", "sms"):
+        if comm_pref not in ("email", "telegram", "sms"):
             comm_pref = "email"
 
         new_user = User(
@@ -677,7 +677,7 @@ async def update_preferences(
         if not user:
             raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
-        valid_prefs = ("email", "whatsapp", "sms")
+        valid_prefs = ("email", "telegram", "sms")
         if prefs.communication_preference:
             if prefs.communication_preference not in valid_prefs:
                 raise HTTPException(
@@ -740,8 +740,8 @@ async def update_profile(
             raise HTTPException(400, "person_type deve ser 'PF' ou 'PJ'")
         if data.address_state and len(data.address_state) != 2:
             raise HTTPException(400, "address_state deve ter 2 caracteres (UF)")
-        if data.communication_preference and data.communication_preference not in ("email", "whatsapp", "sms"):
-            raise HTTPException(400, "communication_preference deve ser 'email', 'whatsapp' ou 'sms'")
+        if data.communication_preference and data.communication_preference not in ("email", "telegram", "sms"):
+            raise HTTPException(400, "communication_preference deve ser 'email', 'telegram' ou 'sms'")
 
         _ALLOWED_FIELDS = {
             "full_name", "person_type", "cpf", "cnpj", "phone",

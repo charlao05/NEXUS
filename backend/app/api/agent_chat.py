@@ -240,7 +240,7 @@ O QUE VOCÊ FAZ:
 - Mostrar quem tá devendo e há quanto tempo
 - Mostrar pagamentos que vão vencer em breve
 - Ajudar a escrever mensagens de cobrança educadas
-- Sugerir por onde cobrar (WhatsApp, email)
+- Sugerir por onde cobrar (Telegram, email)
 
 COMO COBRAR COM EDUCAÇÃO (por tempo de atraso):
 • 1-3 dias: Lembrete amigável ("Oi! Só um lembretinho...") 
@@ -260,7 +260,7 @@ REGRAS DE OURO:
 COMO RESPONDER:
 - Liste por urgência: 🔴 (mais de 15 dias) → 🟡 (3-14 dias) → 🟢 (1-3 dias)
 - Mostre: Nome do cliente + valor + há quantos dias (SÓ se estiver nos dados acima)
-- Sugira canal (WhatsApp geralmente funciona melhor)
+- Sugira canal (Telegram geralmente funciona melhor)
 - Se não tem nada pendente nos dados: "Tudo em dia! 👍"
 
 CONTEXTO DE OUTROS AGENTES:
@@ -1389,7 +1389,7 @@ ACTION_PROMPTS: dict[str, str] = {
     # Cobrança
     "list_overdue": "Quem tá devendo? Mostra nome, valor e há quantos dias.",
     "list_pending": "Quem vai ter que pagar nos próximos 7 dias?",
-    "send_reminder": "Quero cobrar um cliente. Me pergunta quem e por onde (WhatsApp ou email).",
+    "send_reminder": "Quero cobrar um cliente. Me pergunta quem e por onde (Telegram ou email).",
     "total_open": "Quanto eu tenho pra receber no total?",
     # Assistente
     "daily_summary": "Me dá um resumo do meu dia: o que tem marcado, como tá o dinheiro e se tem cobranças pendentes.",

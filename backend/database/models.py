@@ -155,7 +155,7 @@ class ClientSource(str, enum.Enum):
     INSTAGRAM = "instagram"
     FACEBOOK = "facebook"
     GOOGLE = "google"
-    WHATSAPP = "whatsapp"
+    TELEGRAM = "telegram"
     SITE = "site"
     EVENTO = "evento"
     OUTRO = "outro"
@@ -173,7 +173,7 @@ class OpportunityStage(str, enum.Enum):
 
 class InteractionType(str, enum.Enum):
     LIGACAO = "ligacao"
-    WHATSAPP = "whatsapp"
+    TELEGRAM = "telegram"
     EMAIL = "email"
     REUNIAO = "reuniao"
     VISITA = "visita"
@@ -209,7 +209,11 @@ class User(Base):
     role = Column(String(20), default="user")  # user, admin, superadmin
     
     # Preferência de comunicação
-    communication_preference = Column(String(20), default="email")  # email, whatsapp, sms
+    communication_preference = Column(String(20), default="email")  # email, telegram, sms
+
+    # Telegram Bot
+    telegram_chat_id = Column(String(50), nullable=True)
+    telegram_connected_at = Column(DateTime, nullable=True)
     
     # OAuth (pode ter login social + senha)
     oauth_provider = Column(String(20), nullable=True)  # google, facebook
@@ -444,7 +448,7 @@ class Interaction(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=False, index=True)
     type = Column(String(20), default="nota")
-    channel = Column(String(20), default="manual")  # whatsapp, email, telefone...
+    channel = Column(String(20), default="manual")  # telegram, email, telefone...
     summary = Column(Text, nullable=False)
     details = Column(Text, default="")
     sentiment = Column(String(10), default="neutral")  # positive, neutral, negative
