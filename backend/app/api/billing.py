@@ -12,6 +12,22 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 
+# PLANOS: preco configurado via env vars (price_id do Stripe Dashboard)
+PLANS = {
+    "essencial": {
+        "stripe_price_id": os.getenv("STRIPE_PRICE_ESSENCIAL", ""),
+        "name": "Essencial",
+        "amount": 4700,
+        "currency": "brl",
+    },
+    "profissional": {
+        "stripe_price_id": os.getenv("STRIPE_PRICE_PROFISSIONAL", ""),
+        "name": "Profissional",
+        "amount": 9700,
+        "currency": "brl",
+    },
+}
+
 
 @router.get("/invoices", response_model=List[InvoiceOut])
 def list_invoices(
@@ -71,6 +87,34 @@ def create_checkout_session(
     """Cria sessao de checkout no Stripe e retorna URL de pagamento."""
     if not stripe.api_key:
         raise HTTPException(status_code=503, detail="Pagamentos nao configurados")
+
+    # Determina line_item: usa price_id do payload, depois do PLANS, senao fallback price_data
+    plan_key = payload.plan.lower()
+    plan_info = PLANS.get(plan_key, {})
+
+    # Prioridade: 1) price_id enviado pelo frontend, 2) price_id do PLANS, 3) price_data (fallback)
+    resolved_price_id = (
+        payload.price_id
+        or plan_info.get("stripe_price_id", "")
+    )
+
+    if resolved_price_id:
+        line_items = [{"price": resolved_price_id, "quantity": 1}]
+    else:
+        # Fallback: usa price_data inline para nao bloquear checkout
+        amount = plan_info.get("amount", 4700)
+        currency = plan_info.get("currency", "brl")
+        name = plan_info.get("name", payload.plan.capitalize())
+        line_items = [{
+            "price_data": {
+                "currency": currency,
+                "unit_amount": amount,
+                "recurring": {"interval": "month"},
+                "product_data": {"name": f"NEXUS {name}"},
+            },
+            "quantity": 1,
+        }]
+
     try:
         # Cria ou recupera customer no Stripe
         if not current_user.stripe_customer_id:
@@ -86,14 +130,13 @@ def create_checkout_session(
         session = stripe.checkout.Session.create(
             customer=current_user.stripe_customer_id,
             payment_method_types=["card"],
-            line_items=[{"price": payload.price_id, "quantity": 1}],
+            line_items=line_items,
             mode="subscription",
             success_url=f"{frontend_url}/dashboard?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{frontend_url}/planos?checkout=cancelled",
             metadata={"user_id": str(current_user.id), "plan": payload.plan},
         )
         return {"checkout_url": session.url, "session_id": session.id}
-
     except stripe.error.StripeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -114,10 +157,8 @@ def cancel_subscription(
     )
     if not subscription:
         raise HTTPException(status_code=404, detail="Nenhuma assinatura ativa encontrada")
-
     if not stripe.api_key:
         raise HTTPException(status_code=503, detail="Pagamentos nao configurados")
-
     try:
         if subscription.stripe_subscription_id:
             stripe.Subscription.modify(
@@ -140,10 +181,8 @@ async def stripe_webhook(
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
     endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-
     if not endpoint_secret:
         raise HTTPException(status_code=503, detail="Webhook secret nao configurado")
-
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
     except ValueError:
