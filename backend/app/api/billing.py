@@ -17,13 +17,19 @@ PLANS = {
     "essencial": {
         "stripe_price_id": os.getenv("STRIPE_PRICE_ESSENCIAL", ""),
         "name": "Essencial",
-        "amount": 4700,
+        "amount": 3990,
         "currency": "brl",
     },
     "profissional": {
         "stripe_price_id": os.getenv("STRIPE_PRICE_PROFISSIONAL", ""),
         "name": "Profissional",
-        "amount": 9700,
+        "amount": 6990,
+        "currency": "brl",
+    },
+    "completo": {
+        "stripe_price_id": os.getenv("STRIPE_PRICE_COMPLETO", ""),
+        "name": "Completo",
+        "amount": 9990,
         "currency": "brl",
     },
 }
@@ -102,7 +108,7 @@ def create_checkout_session(
         line_items = [{"price": resolved_price_id, "quantity": 1}]
     else:
         # Fallback: usa price_data inline para nao bloquear checkout
-        amount = plan_info.get("amount", 4700)
+        amount = plan_info.get("amount", 3990)
         currency = plan_info.get("currency", "brl")
         name = plan_info.get("name", payload.plan.capitalize())
         line_items = [{
