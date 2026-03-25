@@ -138,6 +138,7 @@ def create_checkout_session(
             payment_method_types=["card"],
             line_items=line_items,
             mode="subscription",
+                        allow_promotion_codes=True,
             success_url=f"{frontend_url}/dashboard?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{frontend_url}/planos?checkout=cancelled",
             metadata={"user_id": str(current_user.id), "plan": payload.plan},
@@ -178,6 +179,46 @@ def cancel_subscription(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+
+@router.post("/subscription/update-card")
+async def update_subscription_card(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Cria sessão de checkout no Stripe para atualizar cartão."""
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Pagamentos nao configurados")
+
+    # Buscar assinatura ativa do usuário
+    subscription = (
+        db.query(Subscription)
+        .filter(Subscription.user_id == current_user.id)
+        .filter(Subscription.status == "active")
+        .first()
+    )
+    if not subscription:
+        raise HTTPException(status_code=404, detail="Nenhuma assinatura ativa encontrada")
+
+    if not subscription.stripe_subscription_id:
+        raise HTTPException(status_code=400, detail="Assinatura sem ID do Stripe")
+
+    try:
+        # Obter customer do Stripe
+        stripe_sub = stripe.Subscription.retrieve(subscription.stripe_subscription_id)
+        stripe_customer_id = stripe_sub.customer
+
+        # Criar sessão de checkout no modo setup para atualizar cartão
+        frontend_url = os.getenv("FRONTEND_URL", "https://nexxusapp.com.br")
+        session = stripe.checkout.Session.create(
+            customer=stripe_customer_id,
+            payment_method_types=["card"],
+            mode="setup",
+            success_url=f"{frontend_url}/dashboard?card_update=success",
+            cancel_url=f"{frontend_url}/dashboard?card_update=cancelled",
+        )
+        return {"checkout_url": session.url}
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 @router.post("/webhook")
 async def stripe_webhook(
     request: Request,
