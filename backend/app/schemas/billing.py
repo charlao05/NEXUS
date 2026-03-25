@@ -15,7 +15,6 @@ class InvoiceOut(BaseModel):
     status: str
     reminders_sent: int = 0
     created_at: Optional[datetime] = None
-
     model_config = {"from_attributes": True}
 
 
@@ -34,17 +33,23 @@ class SubscriptionOut(BaseModel):
     currency: str = "brl"
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-
     model_config = {"from_attributes": True}
 
 
 class SubscriptionCreate(BaseModel):
     """Schema de entrada para criar assinatura via Stripe."""
-    price_id: str
+    price_id: Optional[str] = ""  # pode ser vazio; billing.py resolve via PLANS ou fallback
     plan: str
 
 
 class CheckoutSessionOut(BaseModel):
     """Retorno da criacao de sessao de checkout Stripe."""
+    checkout_url: str
+    session_id: str
+
+
+class SubscriptionResponse(BaseModel):
+    """Resposta da criacao/upgrade de assinatura."""
+    status: str  # 'pending' | 'upgraded'
     checkout_url: str
     session_id: str
