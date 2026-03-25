@@ -6,7 +6,7 @@ from app.schemas.billing import InvoiceOut, SubscriptionOut, SubscriptionCreate 
 from typing import List, Optional
 import stripe
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -170,8 +170,8 @@ async def stripe_webhook(
                 stripe_checkout_session_id=session_obj.get("id"),
                 plan=plan,
                 status="active",
-                current_period_start=datetime.utcfromtimestamp(stripe_sub["current_period_start"]),
-                current_period_end=datetime.utcfromtimestamp(stripe_sub["current_period_end"]),
+                current_period_start=datetime.fromtimestamp(stripe_sub["current_period_start"], tz=timezone.utc),
+                current_period_end=datetime.fromtimestamp(stripe_sub["current_period_end"], tz=timezone.utc),
                 amount=(session_obj.get("amount_total") or 0) / 100,
                 currency=(session_obj.get("currency") or "brl").upper(),
             )
@@ -193,7 +193,7 @@ async def stripe_webhook(
         )
         if sub:
             sub.status = stripe_sub["status"]
-            sub.current_period_end = datetime.utcfromtimestamp(stripe_sub["current_period_end"])
+            sub.current_period_end = datetime.fromtimestamp(stripe_sub["current_period_end"], tz=timezone.utc)
             db.commit()
 
     elif event_type == "customer.subscription.deleted":

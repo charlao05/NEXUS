@@ -1142,6 +1142,7 @@ async def create_checkout(
             payment_method_types=["card"],
             line_items=[{**_line_item, "quantity": 1}],
             mode="subscription",
+            allow_promotion_codes=True,
             success_url=f"{frontend_url}/success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{frontend_url}/pricing",
             customer_email=current_user["email"],
@@ -1198,41 +1199,76 @@ async def create_portal_session(
 
 
 # ============================================================================
-# ADDON: PACOTE EXTRA DE CLIENTES/FORNECEDORES
+# STRIPE CARD UPDATE — Atualizar método de pagamento
 # ============================================================================
 
-# ============================================================================
-# STRIPE BILLING PORTAL
-# ============================================================================
-@router.post("/create-portal-session")
-async def create_portal_session(
+@router.post("/subscription/update-card")
+async def update_subscription_card(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    """Cria sessão do Stripe Billing Portal para gerenciar assinatura."""
+    """Cria sessão de checkout em modo 'setup' para atualizar método de pagamento.
+    Requer subscription ativa."""
     stripe = _init_stripe()
     if not stripe.api_key:
         raise HTTPException(status_code=503, detail="Stripe não configurado")
+    
     db = _get_db_session()
     try:
+        # Buscar subscription ativa do usuário
         user = db.query(User).filter(User.id == current_user["user_id"]).first()
         if not user or not getattr(user, 'stripe_customer_id', None):
             raise HTTPException(
                 status_code=400,
-                detail="Nenhuma assinatura Stripe encontrada. Faça checkout primeiro.",
+                detail="Nenhuma assinatura Stripe encontrada. Faça um checkout primeiro.",
             )
-        frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
-        portal_session = stripe.billing_portal.Session.create(
-            customer=user.stripe_customer_id,
-            return_url=f"{frontend_url}/settings",
+        
+        subscription = (
+            db.query(Subscription)
+            .filter(
+                Subscription.user_id == current_user["user_id"],
+                Subscription.status == "active",
+            )
+            .first()
         )
-        return {"url": portal_session.url}
+        if not subscription:
+            raise HTTPException(
+                status_code=404,
+                detail="Nenhuma assinatura ativa encontrada.",
+            )
+        
+        frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
+        
+        # Criar sessão em modo "setup" para atualizar cartão
+        session = stripe.checkout.Session.create(
+            customer=user.stripe_customer_id,
+            payment_method_types=["card"],
+            mode="setup",
+            success_url=f"{frontend_url}/dashboard?card_updated=true",
+            cancel_url=f"{frontend_url}/settings",
+            metadata={
+                "action": "update_card",
+                "user_id": str(current_user["user_id"]),
+                "subscription_id": str(subscription.stripe_subscription_id),
+            },
+        )
+        
+        return {
+            "checkout_url": session.url or "",
+            "session_id": session.id,
+        }
+    
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Erro ao criar portal session: {e}")
-        raise HTTPException(status_code=500, detail="Erro ao abrir portal de gerenciamento.")
+        logger.error(f"Erro ao criar sessão update card: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao criar sessão de atualização. Tente novamente.")
     finally:
         db.close()
+
+
+# ============================================================================
+# ADDON: PACOTE EXTRA DE CLIENTES/FORNECEDORES
+# ============================================================================
 
 class AddonCheckoutRequest(BaseModel):
     email: Optional[str] = None
