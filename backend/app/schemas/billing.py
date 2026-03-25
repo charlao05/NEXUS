@@ -46,3 +46,10 @@ class CheckoutSessionOut(BaseModel):
     """Retorno da criacao de sessao de checkout Stripe."""
     checkout_url: str
     session_id: str
+
+
+class SubscriptionResponse(BaseModel):
+    """Resposta da criacao/upgrade de assinatura."""
+    status: str  # 'pending' | 'upgraded'
+    checkout_url: str
+    session_id: str
