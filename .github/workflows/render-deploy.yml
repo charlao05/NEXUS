@@ -12,6 +12,10 @@ jobs:
     steps:
       - name: Trigger Render Deploy
         run: |
-          curl -X POST "$RENDER_DEPLOY_HOOK"
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "Error: Secret RENDER_DEPLOY_HOOK_URL is not set."
+            exit 1
+          fi
+          curl -fsS --retry 3 -X POST "$RENDER_DEPLOY_HOOK_URL"
         env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
