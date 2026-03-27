@@ -38,6 +38,7 @@ jobs:
     steps:
       - name: Trigger Render Deploy
         run: |
-          curl -X POST "$RENDER_DEPLOY_HOOK"
-        env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "Secret RENDER_DEPLOY_HOOK_URL is not set"; exit 1
+          fi
+          curl -fsS --retry 3 "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" -o /dev/null
