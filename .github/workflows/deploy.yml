@@ -1,0 +1,18 @@
+name: Deploy to Render
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Render Deploy
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "Secret RENDER_DEPLOY_HOOK_URL is not set"; exit 1
+          fi
+          curl -fsS --retry 3 "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" -o /dev/null
