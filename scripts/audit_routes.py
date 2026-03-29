@@ -8,7 +8,7 @@ BASE = "http://localhost:8000"
 
 # Login
 try:
-    r = requests.post(f"{BASE}/api/auth/login", json={"email":"charles.rsilva05@gmail.com","password":"Admin@123"}, timeout=10)
+    r = requests.post(f"{BASE}/api/auth/login", json={"email":"appnexxus.app@gmail.com","password":"Admin@123"}, timeout=10)
     login_data = r.json()
     tok = login_data.get("access_token","")
     refresh_tok = login_data.get("refresh_token","")

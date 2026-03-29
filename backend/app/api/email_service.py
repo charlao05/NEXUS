@@ -14,8 +14,8 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
-FROM_EMAIL = os.getenv("EMAIL_FROM", "NEXUS <onboarding@resend.dev>")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173")
+FROM_EMAIL = os.getenv("EMAIL_FROM", "NEXUS <appnexxus.app@gmail.com>")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://app.nexxusapp.com.br")
 
 
 def _get_resend():

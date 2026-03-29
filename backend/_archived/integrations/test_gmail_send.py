@@ -48,7 +48,7 @@ if __name__ == "__main__":
     # Interatividade
     recipient = input("Destinatário (email): ").strip()
     if not recipient:
-        recipient = "charles.rsilva05@gmail.com"
+        recipient = "appnexxus.app@gmail.com"
         print(f"[Default] Usando: {recipient}")
 
     subject = input("Assunto (padrão 'Teste de Gmail'): ").strip()

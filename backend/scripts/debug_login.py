@@ -7,7 +7,7 @@ from database.models import SessionLocal, User
 
 db = SessionLocal()
 try:
-    email = "charles.rsilva05@gmail.com"
+    email = "appnexxus.app@gmail.com"
     password = "Teste1234"
     
     print("1. Querying user...")

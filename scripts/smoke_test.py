@@ -20,7 +20,7 @@ check("Health endpoint", r.status_code == 200, f"db={r.json().get('database')}")
 
 # 2. Login
 r = S.post(f"{BASE}/api/auth/login", json={
-    "email": "charles.rsilva05@gmail.com",
+    "email": "appnexxus.app@gmail.com",
     "password": "Admin@123"
 }, timeout=10)
 login_data = r.json()
@@ -31,7 +31,7 @@ h = {"Authorization": f"Bearer {tok}"}
 # 3. /me
 r = S.get(f"{BASE}/api/auth/me", headers=h, timeout=5)
 me = r.json()
-check("/me retorna dados corretos", r.status_code == 200 and me.get("email") == "charles.rsilva05@gmail.com",
+check("/me retorna dados corretos", r.status_code == 200 and me.get("email") == "appnexxus.app@gmail.com",
       f"plan={me.get('plan')}")
 
 # 4. Switch plan free -> pro -> enterprise -> free
@@ -114,7 +114,7 @@ for method, path in removed:
 
 # 16. Checkout Stripe
 r = S.post(f"{BASE}/api/auth/checkout", headers=h, json={
-    "plan": "pro", "email": "charles.rsilva05@gmail.com"
+    "plan": "pro", "email": "appnexxus.app@gmail.com"
 }, timeout=10)
 check("Stripe checkout", r.status_code == 200 and "checkout_url" in r.json())
 

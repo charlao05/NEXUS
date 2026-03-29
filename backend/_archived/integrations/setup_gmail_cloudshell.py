@@ -43,7 +43,7 @@ def setup_gmail_cloudshell():
         print(f"\n[Success] Credenciais configuradas: {os.path.abspath(output_file)}")
         print("\nAdicione no seu .env:")
         print(f'GMAIL_CREDENTIALS_FILE="{os.path.abspath(output_file)}"')
-        print('SENDER_EMAIL="charles.rsilva05@gmail.com"')
+        print('SENDER_EMAIL="appnexxus.app@gmail.com"')
         print('GOOGLE_CALENDAR_ID="primary"')
         print()
         return True

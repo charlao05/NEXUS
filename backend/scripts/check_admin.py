@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.models import SessionLocal, User
 
 db = SessionLocal()
-u = db.query(User).filter(User.email == "charles.rsilva05@gmail.com").first()
+u = db.query(User).filter(User.email == "appnexxus.app@gmail.com").first()
 if u:
     print(f"full_name: {u.full_name}")
     print(f"role: {u.role}")

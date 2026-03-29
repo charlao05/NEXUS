@@ -4,7 +4,7 @@ import requests
 # Login first
 login_r = requests.post(
     "http://127.0.0.1:8000/api/auth/login",
-    json={"email": "charles.rsilva05@gmail.com", "password": "Admin@123"},
+    json={"email": "appnexxus.app@gmail.com", "password": "Admin@123"},
     timeout=10,
 )
 token = login_r.json()["access_token"]

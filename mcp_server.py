@@ -382,7 +382,7 @@ def project_overview() -> str:
 
 
 @mcp.tool()
-def test_login(email: str = "charles.rsilva05@gmail.com", password: str = "Admin@123") -> str:
+def test_login(email: str = "appnexxus.app@gmail.com", password: str = "Admin@123") -> str:
     """Testa login no backend NEXUS e retorna resultado (plan, uid, token status).
 
     Args:
