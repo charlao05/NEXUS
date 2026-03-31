@@ -184,6 +184,8 @@ O QUE VOCÊ FAZ:
 5. Ver quanto entrou e saiu no mês, na semana ou no dia
 6. Avisar sobre limite MEI — quanto já usou e quanto falta
 7. Mostrar vendas por FORMA DE PAGAMENTO (PIX, dinheiro, cartão débito/crédito, fiado, boleto, etc.)
+8. Listar faturas e cobranças emitidas (use list_invoices)
+9. Verificar plano e limite de clientes do NEXUS (use get_subscription_info)
 
 FORMAS DE PAGAMENTO ACEITAS:
 • PIX, Dinheiro, Cartão de Débito, Cartão de Crédito
@@ -239,6 +241,7 @@ Responda SEMPRE em português brasileiro simples.""",
 O QUE VOCÊ FAZ:
 - Mostrar quem tá devendo e há quanto tempo
 - Mostrar pagamentos que vão vencer em breve
+- Listar faturas por status (use list_invoices: pendente, paga, vencida, todas)
 - Ajudar a escrever mensagens de cobrança educadas
 - Sugerir por onde cobrar (Telegram, email)
 
@@ -294,6 +297,9 @@ O QUE VOCÊ FAZ:
 - Cadastrar clientes novos (use a ferramenta create_client)
 - Editar dados de clientes (use a ferramenta update_client — o sistema cuida da confirmação com senha)
 - Excluir/apagar clientes (use a ferramenta delete_client — o sistema cuida da confirmação com senha)
+- Ver agenda do dia ou da semana (use list_appointments)
+- Listar faturas e cobranças (use list_invoices)
+- Verificar plano e limite de clientes do NEXUS (use get_subscription_info)
 
 REGRA CRÍTICA PARA EXCLUIR E EDITAR:
 - Para excluir/editar clientes: CHAME DIRETAMENTE a ferramenta (delete_client ou update_client)
@@ -303,90 +309,71 @@ REGRA CRÍTICA PARA EXCLUIR E EDITAR:
 
 AUTOMAÇÃO WEB (IMPORTANTE — leia com atenção):
 O sistema NEXUS possui automação web integrada com Playwright.
-Quando o usuário pede automação web, o SISTEMA detecta e mostra um plano com botões de aprovar/cancelar.
-Se você está recebendo esta mensagem, é porque a detecção de automação NÃO foi ativada para este pedido.
-Por isso, NÃO diga que a página foi aberta, que a automação está em andamento ou que executou algo no navegador.
-Se o usuário pedir para acessar um site ou portal, responda:
-"Vou preparar a automação web para isso. Por favor, clique no botão 'Automação Web' nas Ações Rápidas
-ou reformule seu pedido mencionando o site específico (ex: 'consultar CPF na Receita Federal')."
-NUNCA invente que abriu uma página, que preencheu um formulário, ou que a automação foi concluída.
-NUNCA diga "simulação de fluxo" — a automação existe mas precisa ser ativada pelo sistema, não por você.
+Quando o usuário pede automação web, o SISTEMA detecta e mostra um plano com
+etapas numeradas. Após aprovação do usuário, o sistema executa automaticamente.
+Você NÃO executa a automação — o sistema cuida disso.
 
-DADOS REAIS DO SISTEMA (use SOMENTE estes):
+SEUS DADOS ATUAIS:
 {crm_context}
 
 REGRAS DE OURO:
-1. NUNCA invente dados, números, estatísticas, nomes de clientes ou valores que não estejam nos DADOS REAIS acima
-2. Se não tem dados acima, diga "ainda não tem informações cadastradas" e sugira o que fazer primeiro
-3. Fale de forma simples e direta
-4. Sugira próximos passos práticos baseados APENAS no que existe nos dados
-
-COMO RESPONDER:
-- Resumo do dia: Baseie-se SOMENTE nos DADOS REAIS acima
-- Sugestões: Liste em ordem de importância (o mais urgente primeiro)
-- Alertas: 🚨 pra coisa urgente, ⚠️ pra atenção, ✅ pra tudo ok
-- Se tudo está vazio: sugira cadastrar clientes, registrar vendas, marcar compromissos
+1. NUNCA invente dados — use SOMENTE os DADOS REAIS acima
+2. Para qualquer operação de cliente, USE as ferramentas disponíveis
+3. Se não tem dados, diga honestamente e sugira o próximo passo
+4. Priorize sempre o que é mais urgente para o negócio
 
 CONTEXTO DE OUTROS AGENTES:
-Você pode receber um bloco extra chamado "CONTEXTO DE OUTROS AGENTES" com resumo das últimas
-conversas em outros agentes (Clientes, Financeiro, Cobranças, Agenda). USE esse contexto para:
-- Dar respostas integradas sem que o usuário precise repetir informações
-- Saber o que já foi discutido e decidido em outro agente
-- Evitar pedir dados que o usuário já forneceu em outro agente
-Se esse contexto não aparecer, significa que não há conversas recentes em outros agentes.
+Você pode receber um bloco "CONTEXTO DE OUTROS AGENTES" — use para dar respostas
+mais completas e integradas sem repetir perguntas já respondidas em outros agentes.
 
 Data de hoje: {date}
-Responda SEMPRE em português brasileiro simples e amigável."""
+Responda SEMPRE em português brasileiro simples e objetivo.""",
 }
 
-
 # ============================================================================
-# OPENAI CLIENT (singleton)
-# ============================================================================
-
-_openai_client = None
-
-
-def get_openai_client():
-    """Inicializa o cliente OpenAI GPT-4.1 de forma lazy"""
-    global _openai_client
-    if _openai_client is not None:
-        return _openai_client
-    
-    try:
-        from helpers.openai_client import OpenAIClient
-        _openai_client = OpenAIClient(
-            model=os.getenv("OPENAI_MODEL", "gpt-4.1"),
-        )
-        logger.info("✅ OpenAI Client inicializado para agentes")
-        return _openai_client
-    except Exception as e:
-        logger.warning(f"⚠️ OpenAI não disponível: {e}")
-        return None
-
-
-# ============================================================================
-# CRM TOOLS — Function Calling para ações reais no banco de dados
+# FERRAMENTAS CRM — Definições para function calling (OpenAI)
 # ============================================================================
 
 CRM_TOOLS_DEFINITIONS: list[dict] = [
+    # ── CLIENTES ──────────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "search_clients",
+            "description": "Busca e lista clientes do CRM. Use quando o usuário pedir para ver, buscar ou listar clientes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Nome, telefone ou email para buscar. Deixe vazio para listar todos.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Máximo de resultados. Padrão: 10.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
             "name": "create_client",
-            "description": "Cadastra um novo cliente no CRM. Use quando o usuário pedir para cadastrar, registrar ou adicionar um cliente.",
+            "description": "Cadastra um novo cliente no CRM.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "Nome completo do cliente"},
-                    "phone": {"type": "string", "description": "Telefone com DDD (ex: 27999887766)"},
-                    "email": {"type": "string", "description": "Email do cliente"},
-                    "cpf_cnpj": {"type": "string", "description": "CPF ou CNPJ"},
-                    "segment": {"type": "string", "enum": ["lead", "prospect", "standard", "premium", "vip"], "description": "Segmento do cliente"},
-                    "notes": {"type": "string", "description": "Observações"},
-                    "address": {"type": "string", "description": "Endereço"},
-                    "city": {"type": "string", "description": "Cidade"},
-                    "state": {"type": "string", "description": "Estado (UF)"},
+                    "name": {"type": "string", "description": "Nome completo do cliente."},
+                    "phone": {"type": "string", "description": "Telefone com DDD."},
+                    "email": {"type": "string", "description": "Email do cliente."},
+                    "notes": {"type": "string", "description": "Observações sobre o cliente."},
+                    "segment": {
+                        "type": "string",
+                        "enum": ["lead", "prospect", "standard", "premium", "vip"],
+                        "description": "Segmento do cliente. Padrão: standard.",
+                    },
                 },
                 "required": ["name"],
             },
@@ -395,87 +382,21 @@ CRM_TOOLS_DEFINITIONS: list[dict] = [
     {
         "type": "function",
         "function": {
-            "name": "create_appointment",
-            "description": "Cria um agendamento/compromisso. Use quando o usuário pedir para marcar, agendar ou criar reunião, consulta, etc.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string", "description": "Título do compromisso"},
-                    "scheduled_at": {"type": "string", "description": "Data e hora ISO 8601 (ex: 2026-03-20T15:00:00)"},
-                    "description": {"type": "string", "description": "Detalhes do compromisso"},
-                    "duration_minutes": {"type": "integer", "description": "Duração em minutos (padrão: 60)"},
-                    "appointment_type": {"type": "string", "enum": ["reuniao", "ligacao", "consulta", "visita", "outro"], "description": "Tipo"},
-                    "client_id": {"type": "integer", "description": "ID do cliente associado (se houver)"},
-                },
-                "required": ["title", "scheduled_at"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "record_transaction",
-            "description": "Registra transação financeira (receita ou despesa). Use quando o usuário pedir para anotar venda, pagamento, gasto, entrada ou saída. SEMPRE pergunte a forma de pagamento se o usuário não informar.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "type": {"type": "string", "enum": ["receita", "despesa"], "description": "receita=entrada, despesa=saída"},
-                    "amount": {"type": "number", "description": "Valor em reais"},
-                    "description": {"type": "string", "description": "Descrição da transação"},
-                    "category": {"type": "string", "description": "Categoria (ex: vendas, material, aluguel)"},
-                    "payment_method": {"type": "string", "enum": ["pix", "dinheiro", "cartao_debito", "cartao_credito", "credito_proprio", "fiado", "boleto", "transferencia", "parcelado", "entrada_parcelado", "cheque", "nao_informado"], "description": "Forma de pagamento: pix, dinheiro, cartao_debito, cartao_credito, credito_proprio (crediário próprio), fiado, boleto, transferencia, parcelado, entrada_parcelado (entrada + parcelas), cheque"},
-                    "client_id": {"type": "integer", "description": "ID do cliente associado"},
-                    "notes": {"type": "string", "description": "Observações"},
-                },
-                "required": ["type", "amount", "description"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_invoice",
-            "description": "Cria fatura/cobrança para um cliente. Use quando pedir para criar cobrança ou conta a receber.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "client_id": {"type": "integer", "description": "ID do cliente"},
-                    "description": {"type": "string", "description": "Descrição do serviço/produto"},
-                    "amount": {"type": "number", "description": "Valor em reais"},
-                    "due_date": {"type": "string", "description": "Data de vencimento (YYYY-MM-DD)"},
-                },
-                "required": ["client_id", "description", "amount", "due_date"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_clients",
-            "description": "Busca clientes pelo nome, telefone ou email. Use SEMPRE que o usuário perguntar sobre clientes: listar todos, buscar por nome, ver quem tem cadastrado. Para listar TODOS, use query vazio ('').",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Texto para buscar (nome, telefone ou email). Use '' (vazio) para listar todos os clientes."},
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "update_client",
-            "description": "Atualiza dados de um cliente existente. Use quando pedir para alterar telefone, email, nome ou segmento. IMPORTANTE: esta ação requer confirmação com senha.",
+            "description": "Atualiza dados de um cliente existente. REQUER SENHA — o sistema exibe popup automático.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "client_id": {"type": "integer", "description": "ID do cliente a atualizar"},
-                    "name": {"type": "string", "description": "Novo nome"},
-                    "phone": {"type": "string", "description": "Novo telefone"},
-                    "email": {"type": "string", "description": "Novo email"},
-                    "segment": {"type": "string", "description": "Novo segmento"},
-                    "notes": {"type": "string", "description": "Novas observações"},
+                    "client_id": {"type": "integer", "description": "ID do cliente a atualizar."},
+                    "name": {"type": "string", "description": "Novo nome."},
+                    "phone": {"type": "string", "description": "Novo telefone."},
+                    "email": {"type": "string", "description": "Novo email."},
+                    "notes": {"type": "string", "description": "Novas observações."},
+                    "segment": {
+                        "type": "string",
+                        "enum": ["lead", "prospect", "standard", "premium", "vip", "churned"],
+                    },
+                    "is_active": {"type": "boolean", "description": "Ativar ou desativar cliente."},
                 },
                 "required": ["client_id"],
             },
@@ -485,24 +406,105 @@ CRM_TOOLS_DEFINITIONS: list[dict] = [
         "type": "function",
         "function": {
             "name": "delete_client",
-            "description": "Exclui/desativa um cliente do CRM. Use quando o usuário pedir para apagar, excluir, remover ou deletar um cliente. IMPORTANTE: esta ação requer confirmação com senha.",
+            "description": "Remove ou desativa um cliente do CRM. REQUER SENHA — o sistema exibe popup automático.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "client_id": {"type": "integer", "description": "ID do cliente a remover"},
-                    "client_name": {"type": "string", "description": "Nome do cliente (para confirmação)"},
-                    "hard_delete": {"type": "boolean", "description": "Se true, remove permanentemente. Se false (padrão), apenas desativa."},
+                    "client_id": {"type": "integer", "description": "ID do cliente a remover."},
+                    "soft": {
+                        "type": "boolean",
+                        "description": "True = desativa (padrão). False = apaga permanentemente.",
+                    },
                 },
                 "required": ["client_id"],
             },
         },
     },
-    # ── Ferramentas de Fluxo de Caixa ──
+    # ── AGENDAMENTOS ──────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "create_appointment",
+            "description": "Cria um novo agendamento/compromisso.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Título do compromisso."},
+                    "scheduled_at": {
+                        "type": "string",
+                        "description": "Data e hora no formato ISO 8601 (ex: 2026-04-01T15:00:00).",
+                    },
+                    "client_id": {"type": "integer", "description": "ID do cliente relacionado (opcional)."},
+                    "description": {"type": "string", "description": "Descrição ou notas do compromisso."},
+                    "duration_minutes": {"type": "integer", "description": "Duração em minutos. Padrão: 60."},
+                    "appointment_type": {
+                        "type": "string",
+                        "enum": ["reuniao", "ligacao", "consulta", "entrega", "visita", "outro"],
+                        "description": "Tipo do compromisso.",
+                    },
+                },
+                "required": ["title", "scheduled_at"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_appointments",
+            "description": (
+                "Lista compromissos agendados. Use quando o usuário perguntar 'o que tenho hoje', "
+                "'minha agenda', 'compromissos da semana', 'o que tem marcado'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "type": "string",
+                        "enum": ["hoje", "semana", "todos"],
+                        "description": "Filtro de período. Padrão: 'hoje'.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    # ── FINANCEIRO ────────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "record_transaction",
+            "description": "Registra uma receita (venda) ou despesa (gasto) no financeiro.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": ["receita", "despesa"],
+                        "description": "Tipo da transação.",
+                    },
+                    "amount": {"type": "number", "description": "Valor em reais."},
+                    "description": {"type": "string", "description": "Descrição da transação."},
+                    "category": {"type": "string", "description": "Categoria (ex: venda, aluguel, fornecedor)."},
+                    "payment_method": {
+                        "type": "string",
+                        "enum": [
+                            "pix", "dinheiro", "cartao_debito", "cartao_credito",
+                            "credito_proprio", "fiado", "boleto", "transferencia",
+                            "parcelado", "entrada_parcelado", "cheque", "nao_informado",
+                        ],
+                        "description": "Forma de pagamento.",
+                    },
+                    "client_id": {"type": "integer", "description": "ID do cliente (opcional)."},
+                },
+                "required": ["type", "amount", "description"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
             "name": "get_daily_cashflow",
-            "description": "Use SEMPRE que o usuário perguntar sobre hoje: 'quanto entrou hoje', 'quanto saiu hoje', 'saldo do dia', 'como foi hoje'. Retorna entradas, saídas e saldo do dia atual.",
+            "description": "Retorna resumo financeiro do dia atual (entradas, saídas e saldo).",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -510,31 +512,120 @@ CRM_TOOLS_DEFINITIONS: list[dict] = [
         "type": "function",
         "function": {
             "name": "get_weekly_cashflow",
-            "description": "Use quando o usuário perguntar sobre a semana: 'como foi essa semana', 'total da semana', 'melhor dia da semana', 'quanto entrei essa semana'.",
+            "description": "Retorna resumo financeiro da semana atual (entradas, saídas e saldo).",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
     {
         "type": "function",
         "function": {
-            "name": "get_cashflow_by_range",
-            "description": "Use quando o usuário especificar um período personalizado: 'últimos 15 dias', 'de segunda a sexta', 'entre dia X e Y'.",
+            "name": "get_payment_breakdown",
+            "description": "Mostra vendas agrupadas por forma de pagamento (PIX, dinheiro, cartão, etc.).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "start_date": {"type": "string", "description": "Data início ISO: YYYY-MM-DD"},
-                    "end_date": {"type": "string", "description": "Data fim ISO: YYYY-MM-DD"},
+                    "start_date": {"type": "string", "description": "Data início YYYY-MM-DD (opcional)."},
+                    "end_date": {"type": "string", "description": "Data fim YYYY-MM-DD (opcional)."},
                 },
-                "required": ["start_date", "end_date"],
+                "required": [],
             },
         },
     },
-    # ── Ferramentas de Estoque / Inventário ──
+    # ── COBRANÇAS / FATURAS ───────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "create_invoice",
+            "description": "Cria uma fatura/cobrança para um cliente.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "client_id": {"type": "integer", "description": "ID do cliente."},
+                    "description": {"type": "string", "description": "Descrição da cobrança."},
+                    "amount": {"type": "number", "description": "Valor em reais."},
+                    "due_date": {"type": "string", "description": "Data de vencimento YYYY-MM-DD."},
+                },
+                "required": ["client_id", "description", "amount", "due_date"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_invoices",
+            "description": (
+                "Lista faturas e cobranças. Use quando o usuário perguntar sobre 'notas fiscais', "
+                "'faturas emitidas', 'cobranças do mês', 'quem pagou', 'faturas vencidas', "
+                "'contas a receber'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["todas", "pendente", "paga", "vencida"],
+                        "description": "Filtro de status. Padrão: 'todas'.",
+                    },
+                    "start_date": {"type": "string", "description": "Data início YYYY-MM-DD (opcional)."},
+                    "end_date": {"type": "string", "description": "Data fim YYYY-MM-DD (opcional)."},
+                },
+                "required": [],
+            },
+        },
+    },
+    # ── ASSINATURA / PLANO ────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_subscription_info",
+            "description": (
+                "Retorna informações sobre a assinatura e limite do plano do usuário no NEXUS: "
+                "plano ativo, limite de clientes, uso atual, data de renovação, se é trial. "
+                "Use quando o usuário perguntar sobre 'meu plano', 'limite de clientes', "
+                "'quantos clientes posso ter', 'quando renova', 'assinar o NEXUS'."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    # ── FORNECEDORES ──────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "list_suppliers",
+            "description": "Lista fornecedores cadastrados.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Busca por nome ou categoria."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_supplier",
+            "description": "Cadastra um novo fornecedor.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Nome do fornecedor."},
+                    "phone": {"type": "string", "description": "Telefone."},
+                    "email": {"type": "string", "description": "Email."},
+                    "category": {"type": "string", "description": "Categoria/segmento do fornecedor."},
+                    "notes": {"type": "string", "description": "Observações."},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    # ── ESTOQUE ───────────────────────────────────────────────────────────────
     {
         "type": "function",
         "function": {
             "name": "get_stock_summary",
-            "description": "Retorna resumo do estoque: total de produtos, valor total, alertas de estoque baixo, movimentações do dia e da semana. Use quando o usuário perguntar sobre estoque, inventário, produtos em estoque.",
+            "description": "Retorna resumo do estoque: total de produtos, valor em estoque, alertas de estoque baixo.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -542,1234 +633,598 @@ CRM_TOOLS_DEFINITIONS: list[dict] = [
         "type": "function",
         "function": {
             "name": "search_products",
-            "description": "Busca produtos no estoque por nome, SKU ou categoria. Use '' para listar todos. Use quando perguntar sobre produtos, estoque de itens, listar produtos.",
+            "description": "Busca produtos no estoque por nome ou categoria.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Texto para buscar (nome, SKU ou categoria). Use '' para listar todos."},
-                    "low_stock": {"type": "boolean", "description": "Se true, retorna apenas produtos abaixo do estoque mínimo"},
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "register_stock_entry",
-            "description": "Registra entrada de estoque (compra, produção, devolução). Use quando o usuário disser que comprou, recebeu ou entrou mercadoria.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "product_id": {"type": "integer", "description": "ID do produto"},
-                    "quantity": {"type": "number", "description": "Quantidade que entrou"},
-                    "unit_price": {"type": "number", "description": "Preço unitário de compra"},
-                    "reason": {"type": "string", "description": "Motivo: compra, producao, devolucao, ajuste"},
-                    "notes": {"type": "string", "description": "Observações"},
-                },
-                "required": ["product_id", "quantity"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "register_stock_exit",
-            "description": "Registra saída de estoque (venda, uso, perda). Use quando o usuário disser que vendeu, usou ou saiu mercadoria.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "product_id": {"type": "integer", "description": "ID do produto"},
-                    "quantity": {"type": "number", "description": "Quantidade que saiu"},
-                    "unit_price": {"type": "number", "description": "Preço de venda unitário"},
-                    "reason": {"type": "string", "description": "Motivo: venda, uso, perda, ajuste"},
-                    "notes": {"type": "string", "description": "Observações"},
-                },
-                "required": ["product_id", "quantity"],
-            },
-        },
-    },
-    # ── Ferramenta de Breakdown por Forma de Pagamento ──
-    {
-        "type": "function",
-        "function": {
-            "name": "get_payment_breakdown",
-            "description": "Retorna vendas agrupadas por forma de pagamento (PIX, dinheiro, cartão débito/crédito, fiado, boleto, etc). Use quando pedir vendas por forma de pagamento, breakdown de recebimentos, ou como recebeu.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "start_date": {"type": "string", "description": "Data início ISO: YYYY-MM-DD (padrão: início do mês)"},
-                    "end_date": {"type": "string", "description": "Data fim ISO: YYYY-MM-DD (padrão: hoje)"},
+                    "query": {"type": "string", "description": "Nome ou categoria do produto."},
+                    "low_stock_only": {
+                        "type": "boolean",
+                        "description": "Se True, retorna apenas produtos com estoque baixo.",
+                    },
                 },
                 "required": [],
-            },
-        },
-    },
-    # ── Ferramenta de Listar Fornecedores ──
-    {
-        "type": "function",
-        "function": {
-            "name": "list_suppliers",
-            "description": "Lista fornecedores cadastrados. Fornecedores são contatos com tipo 'supplier'. Use quando o usuário perguntar sobre fornecedores.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Texto para buscar (nome, telefone). Use '' para listar todos."},
-                },
-                "required": [],
-            },
-        },
-    },
-    # ── Ferramenta de Cadastrar Fornecedor ──
-    {
-        "type": "function",
-        "function": {
-            "name": "create_supplier",
-            "description": "Cadastra um novo fornecedor. Use quando o usuário pedir para cadastrar, registrar ou adicionar um fornecedor.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "Nome do fornecedor"},
-                    "phone": {"type": "string", "description": "Telefone com DDD"},
-                    "email": {"type": "string", "description": "Email do fornecedor"},
-                    "cpf_cnpj": {"type": "string", "description": "CPF ou CNPJ"},
-                    "notes": {"type": "string", "description": "Observações (produtos que fornece, condições, etc)"},
-                    "address": {"type": "string", "description": "Endereço"},
-                    "city": {"type": "string", "description": "Cidade"},
-                    "state": {"type": "string", "description": "Estado (UF)"},
-                },
-                "required": ["name"],
             },
         },
     },
 ]
 
-# Ferramentas disponíveis por agente
+# ============================================================================
+# FERRAMENTAS DISPONÍVEIS POR AGENTE
+# ============================================================================
+
 AGENT_AVAILABLE_TOOLS: dict[str, list[str]] = {
-    "clientes": ["create_client", "search_clients", "update_client", "delete_client", "create_appointment", "search_products", "get_stock_summary", "list_suppliers", "create_supplier"],
-    "agenda": ["create_appointment", "create_client", "list_suppliers", "create_supplier", "get_stock_summary"],
-    "contabilidade": ["record_transaction", "create_client", "create_invoice", "get_stock_summary", "get_daily_cashflow", "get_weekly_cashflow", "get_cashflow_by_range", "get_payment_breakdown"],
-    "financeiro": ["record_transaction", "get_daily_cashflow", "get_weekly_cashflow", "get_cashflow_by_range", "get_stock_summary", "get_payment_breakdown"],
-    "cobranca": ["search_clients", "create_invoice"],
-    "assistente": ["create_client", "create_appointment", "record_transaction", "create_invoice", "search_clients", "update_client", "delete_client", "get_stock_summary", "search_products", "register_stock_entry", "register_stock_exit", "get_daily_cashflow", "get_weekly_cashflow", "get_cashflow_by_range", "get_payment_breakdown", "list_suppliers", "create_supplier"],
+    "agenda": [
+        "create_appointment",
+        "list_appointments",
+        "search_clients",
+    ],
+    "clientes": [
+        "search_clients",
+        "create_client",
+        "update_client",
+        "delete_client",
+        "list_suppliers",
+        "create_supplier",
+        "get_stock_summary",
+        "search_products",
+    ],
+    "contabilidade": [
+        "record_transaction",
+        "get_daily_cashflow",
+        "get_weekly_cashflow",
+        "get_payment_breakdown",
+        "list_invoices",
+        "get_subscription_info",
+        "search_clients",
+    ],
+    "cobranca": [
+        "create_invoice",
+        "list_invoices",
+        "search_clients",
+    ],
+    "assistente": [
+        "search_clients",
+        "create_client",
+        "update_client",
+        "delete_client",
+        "create_appointment",
+        "list_appointments",
+        "record_transaction",
+        "get_daily_cashflow",
+        "get_weekly_cashflow",
+        "get_payment_breakdown",
+        "create_invoice",
+        "list_invoices",
+        "get_subscription_info",
+        "list_suppliers",
+        "get_stock_summary",
+        "search_products",
+    ],
 }
 
-# Ferramentas que requerem confirmação com senha do usuário
-SENSITIVE_TOOLS: set[str] = {"delete_client", "update_client"}
+# ============================================================================
+# ADDENDUM DE INSTRUÇÕES DE FERRAMENTAS (anexado a todos os prompts)
+# ============================================================================
 
 _TOOLS_ADDENDUM = """
+FERRAMENTAS DISPONÍVEIS — USE-AS PROATIVAMENTE:
 
-FERRAMENTAS DISPONÍVEIS (IMPORTANTE):
-Você tem ferramentas que executam ações REAIS no sistema.
+Para CLIENTES (buscar, cadastrar, editar, excluir):
+- search_clients: lista/busca clientes por nome, telefone ou email
+- create_client: cadastra novo cliente
+- update_client: atualiza dados (REQUER SENHA — popup automático)
+- delete_client: remove/desativa (REQUER SENHA — popup automático)
+REGRA: Para excluir ou editar, CHAME a ferramenta diretamente. NÃO peça senha no chat.
 
-Para CONSULTAR dados (listar, buscar, ver, mostrar clientes, procurar):
-- USE a ferramenta search_clients para listar ou buscar clientes
-- Com query="" (vazio) para listar TODOS os clientes
-- Com query="nome" para buscar um específico
-- SEMPRE use a ferramenta ao invés de responder com base apenas no resumo do sistema
+Para FINANCEIRO (registrar e consultar movimentações):
+- record_transaction: registra venda (receita) ou gasto (despesa) — SEMPRE pergunte a forma de pagamento
+- get_daily_cashflow: resumo financeiro do dia
+- get_weekly_cashflow: resumo financeiro da semana
+- get_payment_breakdown: vendas por forma de pagamento
 
-Para AÇÕES (cadastrar, agendar, registrar, anotar, criar):
-1. USE as ferramentas disponíveis para executar a ação de verdade
-2. NUNCA diga que fez algo sem usar a ferramenta — as ferramentas são a ÚNICA forma de executar ações
-3. Se a ferramenta retornar erro, informe o usuário
-4. Se faltar informação obrigatória (como nome do cliente), PERGUNTE antes de usar a ferramenta
-5. Após executar, confirme com os dados reais retornados pela ferramenta
+Para COBRANÇAS (criar e listar faturas):
+- create_invoice: cria fatura/cobrança para um cliente
+- list_invoices: lista faturas com filtro de status (todas/pendente/paga/vencida) e período
+REGRA: Use list_invoices quando o usuário perguntar sobre notas fiscais, faturas emitidas,
+cobranças do mês, contas a receber ou faturas vencidas.
 
-REGRA: Quando o usuário perguntar sobre clientes (quem são, quantos, nomes, buscar), SEMPRE use search_clients.
+Para AGENDAMENTOS (marcar e consultar compromissos):
+- create_appointment: marca novo compromisso
+- list_appointments: lista compromissos com filtro 'hoje', 'semana' ou 'todos'
+REGRA: Use list_appointments quando o usuário perguntar 'o que tenho hoje',
+'minha agenda', 'compromissos da semana', 'o que tem marcado'.
 
-Para ESTOQUE/INVENTÁRIO (produtos, mercadoria, material, quantidade):
-- get_stock_summary: resumo geral do estoque (valor, alertas, movimentações)
-- search_products: buscar ou listar produtos no estoque
-- register_stock_entry: registrar compra/entrada de mercadoria
-- register_stock_exit: registrar venda/saída de mercadoria
-REGRA: Quando o usuário perguntar sobre estoque, produtos ou inventário, use as ferramentas de estoque.
+Para ASSINATURA E PLANO NEXUS:
+- get_subscription_info: retorna plano ativo, limite de clientes, uso atual e data de renovação
+REGRA: Use quando o usuário perguntar sobre 'meu plano', 'limite de clientes',
+'quantos clientes posso ter', 'quando renova' ou 'assinar o NEXUS'.
 
-Para FLUXO DE CAIXA (quanto entrou/saiu hoje, essa semana, período):
-- get_daily_cashflow: entradas, saídas e saldo do dia atual
-- get_weekly_cashflow: resumo da semana (segunda a hoje) + melhor dia
-- get_cashflow_by_range: período personalizado com agrupamento diário
-- get_payment_breakdown: vendas agrupadas por forma de pagamento (PIX, dinheiro, cartão, fiado, etc.)
-REGRA: Quando o usuário perguntar sobre entradas/saídas de dinheiro hoje ou na semana, use as ferramentas de cashflow.
-REGRA: Quando perguntar sobre formas de pagamento, como recebeu, ou breakdown, use get_payment_breakdown.
+Para FORNECEDORES:
+- list_suppliers: lista fornecedores
+- create_supplier: cadastra fornecedor
 
-Para FORNECEDORES (cadastrar, listar, buscar fornecedores):
-- list_suppliers: lista fornecedores cadastrados (query="" para todos, ou buscar por nome/telefone)
-- create_supplier: cadastra um novo fornecedor (nome obrigatório, outros opcionais)
-REGRA: Fornecedores são separados dos clientes. Use essas ferramentas específicas.
-
-FORMA DE PAGAMENTO (IMPORTANTE):
-Ao registrar vendas/transações com record_transaction, SEMPRE pergunte a forma de pagamento ao usuário.
-Formas aceitas: pix, dinheiro, cartao_debito, cartao_credito, credito_proprio (crediário próprio), fiado, boleto, transferencia, parcelado, entrada_parcelado (entrada + parcelas), cheque.
-
-Para EDITAR clientes (mudar nome, telefone, email, segmento):
-- USE a ferramenta update_client com o client_id e os campos a alterar
-- Primeiro busque o cliente com search_clients se não souber o ID
-- O sistema exibe um popup seguro de confirmação com senha automaticamente
-
-Para EXCLUIR/APAGAR clientes:
-- USE a ferramenta delete_client com o client_id
-- O sistema exibe um popup seguro de confirmação com senha automaticamente
-- Para apagar múltiplos clientes, chame delete_client para cada um
-
-⛔ REGRA ABSOLUTA PARA EDIÇÃO E EXCLUSÃO:
-- NUNCA peça senha, PIN ou qualquer tipo de confirmação pelo chat
-- NUNCA diga "digite sua senha", "informe sua senha de confirmação", "preciso que confirme com senha"
-- NUNCA condicione a ação à digitação de senha — simplesmente CHAME a ferramenta
-- O sistema intercepta automaticamente e mostra uma janela segura de senha ao usuário
-- Se você pedir senha pelo chat, estará QUEBRANDO A SEGURANÇA do sistema"""
+Para ESTOQUE:
+- get_stock_summary: resumo do estoque
+- search_products: busca produtos por nome ou categoria
+"""
 
 
-def _get_agent_tools(agent_id: str) -> list[dict]:
-    """Retorna as definições de ferramentas disponíveis para o agente."""
-    tool_names = AGENT_AVAILABLE_TOOLS.get(agent_id, [])
-    if not tool_names:
-        return []
-    return [t for t in CRM_TOOLS_DEFINITIONS if t["function"]["name"] in tool_names]
+# ============================================================================
+# EXECUÇÃO DE FERRAMENTAS CRM
+# ============================================================================
+
+def _log_activity(user_id: int, action: str, detail: str) -> None:
+    """Registra atividade do agente no log."""
+    logger.info(f"[AGENT] user={user_id} action={action} | {detail}")
 
 
-def _get_raw_openai_client():
-    """Retorna o cliente OpenAI SDK cru para function calling."""
-    wrapper = get_openai_client()
-    if wrapper and hasattr(wrapper, "client"):
-        return wrapper.client
-    return None
-
-
-def _notify_hub_event(event_name: str, payload: dict) -> None:
-    """Dispara evento no Agent Hub (fire-and-forget, não bloqueia).
-    CRITICAL FIX #2: Pub/Sub agora é disparado automaticamente após ações CRM."""
-    try:
-        from agents.agent_hub import hub, EventType, AgentType, AgentMessage
-        import asyncio
-
-        _event_map = {
-            "CLIENTE_CRIADO": (EventType.CLIENTE_CRIADO, AgentType.CLIENTES),
-            "CLIENTE_ATUALIZADO": (EventType.CLIENTE_ATUALIZADO, AgentType.CLIENTES),
-            "COMPROMISSO_CRIADO": (EventType.COMPROMISSO_CRIADO, AgentType.AGENDA),
-            "PAGAMENTO_RECEBIDO": (EventType.PAGAMENTO_RECEBIDO, AgentType.CONTABILIDADE),
-            "NF_EMITIDA": (EventType.NF_EMITIDA, AgentType.CONTABILIDADE),
-        }
-        if event_name not in _event_map:
-            return
-        event_type, from_agent = _event_map[event_name]
-        msg = AgentMessage(
-            from_agent=from_agent,
-            to_agent=None,  # broadcast
-            event_type=event_type,
-            payload=payload,
-            priority=5,
-        )
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(hub.publish(msg))
-        except RuntimeError:
-            pass  # No event loop — skip (non-critical)
-        logger.debug(f"📡 Hub event {event_name} dispatched")
-    except Exception as e:
-        logger.debug(f"Hub notification skipped: {e}")
-
-
-def _log_activity(user_id: int | None, action: str, details: str) -> None:
-    """Registra ação no ActivityLog para audit trail (LOW #22)."""
-    try:
-        from database.models import ActivityLog, SessionLocal
-        if not user_id:
-            return
-        db = SessionLocal()
-        try:
-            log = ActivityLog(
-                user_id=user_id,
-                action=action,
-                details=details,
-            )
-            db.add(log)
-            db.commit()
-        finally:
-            db.close()
-    except Exception as e:
-        logger.debug(f"ActivityLog skipped: {e}")
-
-
-def _push_user_notification(user_id: int | None, type: str, title: str, message: str, severity: str = "info", data: dict | None = None) -> None:
-    """Envia notificação em tempo real para o usuário (SSE/polling)."""
-    if not user_id:
-        return
-    try:
-        import asyncio
-        from app.api.notifications import send_notification
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(send_notification(user_id, type, title, message, data=data, severity=severity))
-        else:
-            asyncio.run(send_notification(user_id, type, title, message, data=data, severity=severity))
-    except RuntimeError:
-        # No event loop — create one
-        try:
-            import asyncio as _aio
-            from app.api.notifications import send_notification as _sn
-            _aio.run(_sn(user_id, type, title, message, data=data, severity=severity))
-        except Exception:
-            pass
-    except Exception as e:
-        logger.debug(f"User notification skipped: {e}")
-
-
-def _execute_crm_tool(tool_name: str, arguments: dict, user_id: int | None) -> dict:
-    """Executa uma ferramenta CRM e retorna o resultado.
-    Após cada operação bem-sucedida, dispara evento Pub/Sub e registra no ActivityLog."""
-    try:
-        from database.crm_service import CRMService
-
-        if tool_name == "create_client":
-            result = CRMService.create_client(
-                name=arguments.get("name", ""),
-                user_id=user_id,
-                phone=arguments.get("phone"),
-                email=arguments.get("email"),
-                cpf_cnpj=arguments.get("cpf_cnpj"),
-                segment=arguments.get("segment", "standard"),
-                notes=arguments.get("notes", ""),
-                address=arguments.get("address"),
-                city=arguments.get("city"),
-                state=arguments.get("state"),
-            )
-            if result.get("status") == "created":
-                _notify_hub_event("CLIENTE_CRIADO", result.get("client", {}))
-                _log_activity(user_id, "create_client", f"Cadastrou o cliente '{arguments.get('name')}'")
-                _push_user_notification(user_id, "client_created", "Novo Cliente", f"'{arguments.get('name')}' cadastrado com sucesso", severity="success")
-            return result
-
-        elif tool_name == "create_appointment":
-            scheduled_str = arguments.get("scheduled_at", "")
-            try:
-                scheduled = datetime.fromisoformat(scheduled_str)
-            except (ValueError, TypeError):
-                scheduled = datetime.now()
-            result = CRMService.create_appointment(
-                title=arguments.get("title", "Compromisso"),
-                scheduled_at=scheduled,
-                client_id=arguments.get("client_id"),
-                description=arguments.get("description", ""),
-                duration_minutes=arguments.get("duration_minutes", 60),
-                appointment_type=arguments.get("appointment_type", "reuniao"),
-                user_id=user_id,
-            )
-            if result.get("status") == "created":
-                _notify_hub_event("COMPROMISSO_CRIADO", result.get("appointment", {}))
-                _log_activity(user_id, "create_appointment", f"Marcou o compromisso '{arguments.get('title')}'")
-                _push_user_notification(user_id, "appointment_created", "Novo Compromisso", f"'{arguments.get('title')}' agendado", severity="info", data={"scheduled_at": str(scheduled)})
-            return result
-
-        elif tool_name == "record_transaction":
-            result = CRMService.record_transaction(
-                type=arguments.get("type", "receita"),
-                amount=arguments.get("amount", 0),
-                description=arguments.get("description", ""),
-                category=arguments.get("category", "geral"),
-                client_id=arguments.get("client_id"),
-                notes=arguments.get("notes", ""),
-                user_id=user_id,
-                payment_method=arguments.get("payment_method", "nao_informado"),
-            )
-            if result.get("status") == "created":
-                _notify_hub_event("PAGAMENTO_RECEBIDO", result.get("transaction", {}))
-                _log_activity(user_id, "record_transaction", f"Registrou {arguments.get('type', 'receita')} de R${arguments.get('amount', 0):.2f}")
-                _tx_type = arguments.get('type', 'receita')
-                _push_user_notification(user_id, "transaction_recorded", "Transação Registrada", f"{_tx_type.capitalize()} de R${arguments.get('amount', 0):.2f}", severity="success" if _tx_type == "receita" else "warning")
-            return result
-
-        elif tool_name == "create_invoice":
-            from datetime import date as _date
-            due_str = arguments.get("due_date", "")
-            try:
-                due = _date.fromisoformat(due_str)
-            except (ValueError, TypeError):
-                due = _date.today()
-            result = CRMService.create_invoice(
-                client_id=arguments.get("client_id", 0),
-                description=arguments.get("description", ""),
-                amount=arguments.get("amount", 0),
-                due_date=due,
-                user_id=user_id,
-            )
-            if result.get("status") == "created":
-                _notify_hub_event("NF_EMITIDA", result.get("invoice", {}))
-                _log_activity(user_id, "create_invoice", f"Criou fatura de R${arguments.get('amount', 0):.2f}")
-                _push_user_notification(user_id, "invoice_created", "Nova Fatura", f"Fatura de R${arguments.get('amount', 0):.2f} criada", severity="info")
-            return result
-
-        elif tool_name == "search_clients":
-            return CRMService.search_clients(
-                query=arguments.get("query", ""),
-                user_id=user_id,
-            )
-
-        elif tool_name == "update_client":
-            cid = arguments.get("client_id")
-            if not cid:
-                return {"status": "error", "message": "client_id é obrigatório para atualizar"}
-            allowed = {k: v for k, v in arguments.items() if k != "client_id" and v is not None}
-            result = CRMService.update_client(cid, user_id=user_id, **allowed)
-            if result.get("status") == "updated":
-                _notify_hub_event("CLIENTE_ATUALIZADO", {"client_id": cid, **allowed})
-                _log_activity(user_id, "update_client", f"Atualizou dados do cliente #{cid}")
-                _push_user_notification(user_id, "client_updated", "Cliente Atualizado", f"Dados do cliente #{cid} atualizados", severity="info")
-            return result
-
-        elif tool_name == "delete_client":
-            cid = arguments.get("client_id")
-            if not cid:
-                return {"status": "error", "message": "client_id é obrigatório para excluir"}
-            hard = arguments.get("hard_delete", False)
-            client_name = arguments.get("client_name", f"#{cid}")
-            result = CRMService.delete_client(client_id=cid, soft=not hard, user_id=user_id)
-            if result.get("status") in ("deactivated", "deleted"):
-                _log_activity(user_id, "delete_client", f"{'Removeu' if hard else 'Desativou'} o cliente '{client_name}'")
-                _push_user_notification(user_id, "client_deleted", "Cliente Removido", f"'{client_name}' foi {'excluído' if hard else 'desativado'}", severity="warning")
-            return result
-
-        # ── Ferramentas de Fluxo de Caixa ──
-        elif tool_name == "get_daily_cashflow":
-            result = CRMService.get_daily_summary(user_id=user_id)
-            _log_activity(user_id, "daily_cashflow", "Viu o resumo financeiro do dia")
-            return result
-
-        elif tool_name == "get_weekly_cashflow":
-            result = CRMService.get_weekly_summary(user_id=user_id)
-            _log_activity(user_id, "weekly_cashflow", "Viu o resumo financeiro da semana")
-            return result
-
-        elif tool_name == "get_cashflow_by_range":
-            from datetime import date as _date
-            start_str = arguments.get("start_date", "")
-            end_str = arguments.get("end_date", "")
-            try:
-                s = _date.fromisoformat(start_str)
-                e = _date.fromisoformat(end_str)
-            except (ValueError, TypeError):
-                return {"status": "error", "message": "Datas inválidas. Use formato YYYY-MM-DD"}
-            result = CRMService.get_financial_summary_by_range(s, e, user_id=user_id)
-            _log_activity(user_id, "range_cashflow", f"Viu o resumo financeiro de {start_str} a {end_str}")
-            return result
-
-        # ── Ferramentas de Estoque / Inventário ──
-        elif tool_name == "get_stock_summary":
-            from database.inventory_service import InventoryService
-            return InventoryService.get_stock_summary(user_id)
-
-        elif tool_name == "search_products":
-            from database.inventory_service import InventoryService
-            return InventoryService.get_products(
-                user_id=user_id,
-                search=arguments.get("query", ""),
-                low_stock_only=arguments.get("low_stock", False),
-            )
-
-        elif tool_name == "register_stock_entry":
-            from database.inventory_service import InventoryService
-            result = InventoryService.register_entry(
-                user_id=user_id,
-                product_id=arguments.get("product_id", 0),
-                quantity=arguments.get("quantity", 0),
-                unit_price=arguments.get("unit_price"),
-                reason=arguments.get("reason", "compra"),
-                notes=arguments.get("notes"),
-            )
-            if result.get("status") == "created":
-                _log_activity(user_id, "stock_entry", f"Registrou entrada de {arguments.get('quantity', 0)} unidades no estoque")
-            return result
-
-        elif tool_name == "register_stock_exit":
-            from database.inventory_service import InventoryService
-            result = InventoryService.register_exit(
-                user_id=user_id,
-                product_id=arguments.get("product_id", 0),
-                quantity=arguments.get("quantity", 0),
-                unit_price=arguments.get("unit_price"),
-                reason=arguments.get("reason", "venda"),
-                notes=arguments.get("notes"),
-            )
-            if result.get("status") == "created":
-                _log_activity(user_id, "stock_exit", f"Registrou saída de {arguments.get('quantity', 0)} unidades do estoque")
-            return result
-
-        # ── Ferramenta de Breakdown por Forma de Pagamento ──
-        elif tool_name == "get_payment_breakdown":
-            from datetime import date as _date
-            start_str = arguments.get("start_date", "")
-            end_str = arguments.get("end_date", "")
-            try:
-                s = _date.fromisoformat(start_str) if start_str else None
-            except (ValueError, TypeError):
-                s = None
-            try:
-                e = _date.fromisoformat(end_str) if end_str else None
-            except (ValueError, TypeError):
-                e = None
-            result = CRMService.get_payment_breakdown(start_date=s, end_date=e, user_id=user_id)
-            _log_activity(user_id, "payment_breakdown", "Viu as vendas por forma de pagamento")
-            return result
-
-        # ── Ferramentas de Fornecedores ──
-        elif tool_name == "list_suppliers":
-            from database.models import Client as _ClientModel, get_session as _get_sess
-            _session = _get_sess()
-            try:
-                q = _session.query(_ClientModel).filter(
-                    _ClientModel.contact_type == "supplier",
-                    _ClientModel.is_active == True,
-                )
-                if user_id:
-                    q = q.filter(_ClientModel.user_id == user_id)
-                search_q = arguments.get("query", "")
-                if search_q:
-                    term = f"%{search_q}%"
-                    from sqlalchemy import or_
-                    q = q.filter(or_(_ClientModel.name.ilike(term), _ClientModel.phone.ilike(term)))
-                suppliers = q.order_by(_ClientModel.name).limit(50).all()
-                return {
-                    "total": len(suppliers),
-                    "suppliers": [s.to_dict() for s in suppliers],
-                }
-            finally:
-                _session.close()
-
-        elif tool_name == "create_supplier":
-            result = CRMService.create_client(
-                name=arguments.get("name", ""),
-                phone=arguments.get("phone"),
-                email=arguments.get("email"),
-                cpf_cnpj=arguments.get("cpf_cnpj"),
-                notes=arguments.get("notes", ""),
-                address=arguments.get("address"),
-                city=arguments.get("city"),
-                state=arguments.get("state"),
-                contact_type="supplier",
-                user_id=user_id,
-            )
-            if result.get("status") == "created":
-                _log_activity(user_id, "create_supplier", f"Cadastrou o fornecedor '{arguments.get('name')}'")
-                _push_user_notification(user_id, "supplier_created", "Novo Fornecedor", f"'{arguments.get('name')}' cadastrado", severity="success")
-            return result
-
-        return {"status": "error", "message": f"Ferramenta desconhecida: {tool_name}"}
-
-    except Exception as e:
-        logger.error(f"Erro ao executar tool {tool_name}: {e}", exc_info=True)
-        return {"status": "error", "message": str(e)}
-
-
-def _call_with_tools(messages: list[dict], agent_id: str, user_id: int | None, confirmed_action: str | None = None) -> str:
-    """Chama OpenAI com function calling e executa as ferramentas CRM.
-    Retorna a resposta final como string, ou string vazia se falhar.
-    
-    Args:
-        confirmed_action: Se fornecido, nome da tool que já foi confirmada com senha.
-                         Permite execução direta sem nova solicitação de confirmação.
-    Raises:
-        SensitiveActionRequired: Quando uma ação sensível precisa de confirmação com senha.
+def _execute_crm_tool(tool_name: str, arguments: dict, user_id: int) -> Any:
     """
-    raw_client = _get_raw_openai_client()
-    if not raw_client:
-        return ""
+    Executa uma ferramenta CRM e retorna o resultado.
+    Cada tool_name corresponde a um método de CRMService ou InventoryService.
+    """
+    from database.crm_service import CRMService
 
-    agent_tools = _get_agent_tools(agent_id)
-    if not agent_tools:
-        return ""
+    # ── CLIENTES ──────────────────────────────────────────────────────────────
+    if tool_name == "search_clients":
+        query = arguments.get("query", "")
+        limit = arguments.get("limit", 10)
+        contact_type = arguments.get("contact_type", "client")
+        result = CRMService.search_clients(
+            query=query, limit=limit, user_id=user_id,
+            segment=arguments.get("segment"),
+        )
+        _log_activity(user_id, "search_clients", f"query='{query}' limit={limit}")
+        return result
 
-    model = os.getenv("OPENAI_MODEL", "gpt-4.1")
+    elif tool_name == "create_client":
+        result = CRMService.create_client(
+            name=arguments["name"],
+            user_id=user_id,
+            phone=arguments.get("phone"),
+            email=arguments.get("email"),
+            notes=arguments.get("notes", ""),
+            segment=arguments.get("segment", "standard"),
+        )
+        _log_activity(user_id, "create_client", f"name={arguments['name']}")
+        return result
 
-    try:
-        # Primeira chamada com ferramentas
-        response = raw_client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=agent_tools,
-            tool_choice="auto",
-            temperature=0.15,
-            max_tokens=800,
+    elif tool_name == "update_client":
+        client_id = arguments.get("client_id")
+        if not client_id:
+            return {"status": "error", "message": "client_id é obrigatório"}
+        # Ação sensível — requer senha
+        raise SensitiveActionRequired(
+            tool_name="update_client",
+            arguments=arguments,
+            description=f"Atualizar dados do cliente ID {client_id}",
         )
 
-        assistant_msg = response.choices[0].message
+    elif tool_name == "delete_client":
+        client_id = arguments.get("client_id")
+        if not client_id:
+            return {"status": "error", "message": "client_id é obrigatório"}
+        # Ação sensível — requer senha
+        raise SensitiveActionRequired(
+            tool_name="delete_client",
+            arguments=arguments,
+            description=f"Excluir cliente ID {client_id}",
+        )
 
-        # Se não há tool calls, retorna conteúdo direto
-        if not assistant_msg.tool_calls:
-            return assistant_msg.content or ""
+    # ── AGENDAMENTOS ──────────────────────────────────────────────────────────
+    elif tool_name == "create_appointment":
+        from datetime import datetime as dt
+        scheduled_at_raw = arguments.get("scheduled_at")
+        try:
+            scheduled_at = dt.fromisoformat(scheduled_at_raw)
+        except (TypeError, ValueError):
+            return {"status": "error", "message": f"Data inválida: {scheduled_at_raw}. Use formato ISO 8601."}
+        result = CRMService.create_appointment(
+            title=arguments["title"],
+            scheduled_at=scheduled_at,
+            client_id=arguments.get("client_id"),
+            description=arguments.get("description", ""),
+            duration_minutes=arguments.get("duration_minutes", 60),
+            appointment_type=arguments.get("appointment_type", "reuniao"),
+            user_id=user_id,
+        )
+        _log_activity(user_id, "create_appointment", f"title={arguments['title']} at={scheduled_at_raw}")
+        return result
 
-        # Executar cada tool call
-        logger.info(f"🔧 Agent {agent_id}: {len(assistant_msg.tool_calls)} tool call(s)")
+    elif tool_name == "list_appointments":
+        filtro = arguments.get("filter", "hoje")
+        result = CRMService.list_appointments(filter=filtro, user_id=user_id)
+        _log_activity(user_id, "list_appointments", f"filter={filtro}")
+        return result
 
-        # Adicionar mensagem do assistente com tool_calls ao contexto
-        tool_calls_dicts = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments,
-                },
-            }
-            for tc in assistant_msg.tool_calls
-        ]
-        messages.append({
-            "role": "assistant",
-            "content": assistant_msg.content,
-            "tool_calls": tool_calls_dicts,
-        })
+    # ── FINANCEIRO ────────────────────────────────────────────────────────────
+    elif tool_name == "record_transaction":
+        from datetime import date
+        result = CRMService.record_transaction(
+            type=arguments["type"],
+            amount=float(arguments["amount"]),
+            description=arguments["description"],
+            category=arguments.get("category", "geral"),
+            payment_method=arguments.get("payment_method", "nao_informado"),
+            client_id=arguments.get("client_id"),
+            transaction_date=date.today(),
+            user_id=user_id,
+        )
+        _log_activity(
+            user_id, "record_transaction",
+            f"type={arguments['type']} amount={arguments['amount']} method={arguments.get('payment_method','nao_informado')}"
+        )
+        return result
 
-        # Executar ferramentas e adicionar resultados
-        # Coletar TODAS as ações sensíveis antes de levantar exceção (batch)
-        _sensitive_actions: list[dict] = []
+    elif tool_name == "get_daily_cashflow":
+        result = CRMService.get_daily_summary(user_id=user_id)
+        _log_activity(user_id, "get_daily_cashflow", "consultou fluxo do dia")
+        return result
 
-        for tc in assistant_msg.tool_calls:
+    elif tool_name == "get_weekly_cashflow":
+        result = CRMService.get_weekly_summary(user_id=user_id)
+        _log_activity(user_id, "get_weekly_cashflow", "consultou fluxo da semana")
+        return result
+
+    elif tool_name == "get_payment_breakdown":
+        result = CRMService.get_payment_breakdown(
+            start_date=arguments.get("start_date"),
+            end_date=arguments.get("end_date"),
+            user_id=user_id,
+        )
+        _log_activity(user_id, "get_payment_breakdown", "consultou breakdown por pagamento")
+        return result
+
+    # ── COBRANÇAS / FATURAS ───────────────────────────────────────────────────
+    elif tool_name == "create_invoice":
+        from datetime import date
+        due_date_raw = arguments.get("due_date")
+        try:
+            due_date = date.fromisoformat(due_date_raw)
+        except (TypeError, ValueError):
+            return {"status": "error", "message": f"Data de vencimento inválida: {due_date_raw}. Use YYYY-MM-DD."}
+        result = CRMService.create_invoice(
+            client_id=arguments["client_id"],
+            description=arguments["description"],
+            amount=float(arguments["amount"]),
+            due_date=due_date,
+            user_id=user_id,
+        )
+        _log_activity(user_id, "create_invoice", f"client_id={arguments['client_id']} amount={arguments['amount']}")
+        return result
+
+    elif tool_name == "list_invoices":
+        status = arguments.get("status", "todas")
+        result = CRMService.list_invoices(
+            status=status,
+            start=arguments.get("start_date"),
+            end=arguments.get("end_date"),
+            user_id=user_id,
+        )
+        _log_activity(user_id, "list_invoices", f"status={status}")
+        return result
+
+    # ── ASSINATURA / PLANO ────────────────────────────────────────────────────
+    elif tool_name == "get_subscription_info":
+        try:
+            from database.models import SessionLocal
+            from sqlalchemy import text
+            db = SessionLocal()
             try:
-                args = json.loads(tc.function.arguments)
-            except json.JSONDecodeError:
-                args = {}
-
-            # Interceptar ferramentas sensíveis que requerem confirmação com senha
-            if tc.function.name in SENSITIVE_TOOLS and tc.function.name != confirmed_action:
-                _desc = ""
-                if tc.function.name == "delete_client":
-                    cname = args.get("client_name", f"#{args.get('client_id', '?')}")
-                    _desc = f"Excluir cliente {cname}"
-                elif tc.function.name == "update_client":
-                    cname = args.get("name", f"#{args.get('client_id', '?')}")
-                    _fields = [k for k in args if k not in ("client_id",)]
-                    _desc = f"Editar cliente {cname} (campos: {', '.join(_fields)})"
+                # Tenta buscar via tabela user_subscriptions se existir
+                result_row = db.execute(
+                    text(
+                        "SELECT plan_name, client_limit, clients_used, renewal_date, is_trial, is_active "
+                        "FROM user_subscriptions WHERE user_id = :uid AND is_active = TRUE LIMIT 1"
+                    ),
+                    {"uid": user_id},
+                ).fetchone()
+                if result_row:
+                    row = dict(result_row._mapping)
+                    _log_activity(user_id, "get_subscription_info", f"plano={row.get('plan_name')}")
+                    return {
+                        "status": "ok",
+                        "plan": row.get("plan_name", "Desconhecido"),
+                        "client_limit": row.get("client_limit", 0),
+                        "clients_used": row.get("clients_used", 0),
+                        "renewal_date": str(row.get("renewal_date", "")),
+                        "is_trial": bool(row.get("is_trial", False)),
+                    }
                 else:
-                    _desc = f"Ação sensível: {tc.function.name}"
-                _sensitive_actions.append({
-                    "tool_name": tc.function.name,
-                    "arguments": args,
-                    "description": _desc,
-                })
-                continue  # Não executa agora — será agrupado no raise abaixo
+                    # Sem assinatura ativa — retorna status informativo
+                    _log_activity(user_id, "get_subscription_info", "sem assinatura ativa")
+                    return {
+                        "status": "no_subscription",
+                        "message": "Nenhuma assinatura ativa encontrada para este usuário.",
+                    }
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning(f"get_subscription_info: tabela não encontrada ou erro — {e}")
+            return {
+                "status": "unavailable",
+                "message": "Informações de assinatura não disponíveis no momento.",
+            }
 
-            logger.info(f"  🔧 Executando {tc.function.name}({json.dumps(args, ensure_ascii=False)[:200]})")
-            result = _execute_crm_tool(tc.function.name, args, user_id)
-            logger.info(f"  ✅ Resultado: {result.get('status', 'unknown')}")
+    # ── FORNECEDORES ──────────────────────────────────────────────────────────
+    elif tool_name == "list_suppliers":
+        query = arguments.get("query", "")
+        result = CRMService.search_clients(
+            query=query, limit=20, user_id=user_id,
+            segment="supplier",
+        )
+        _log_activity(user_id, "list_suppliers", f"query='{query}'")
+        return result
 
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": json.dumps(result, ensure_ascii=False, default=str),
-            })
+    elif tool_name == "create_supplier":
+        result = CRMService.create_client(
+            name=arguments["name"],
+            user_id=user_id,
+            phone=arguments.get("phone"),
+            email=arguments.get("email"),
+            notes=arguments.get("notes", ""),
+            segment=arguments.get("category", "supplier"),
+            contact_type="supplier",
+        )
+        _log_activity(user_id, "create_supplier", f"name={arguments['name']}")
+        return result
 
-        # Se houve ações sensíveis coletadas, levantar exceção com TODAS de uma vez
-        if _sensitive_actions:
-            combined_desc = " | ".join(a["description"] for a in _sensitive_actions)
-            raise SensitiveActionRequired(
-                tool_name=_sensitive_actions[0]["tool_name"],
-                arguments=_sensitive_actions[0]["arguments"],
-                description=combined_desc,
-                pending_actions=_sensitive_actions,
+    # ── ESTOQUE ───────────────────────────────────────────────────────────────
+    elif tool_name == "get_stock_summary":
+        try:
+            from database.inventory_service import InventoryService
+            result = InventoryService.get_stock_summary(user_id=user_id)
+        except ImportError:
+            result = {"status": "unavailable", "message": "Módulo de estoque não instalado."}
+        _log_activity(user_id, "get_stock_summary", "consultou resumo do estoque")
+        return result
+
+    elif tool_name == "search_products":
+        try:
+            from database.inventory_service import InventoryService
+            result = InventoryService.search_products(
+                query=arguments.get("query", ""),
+                low_stock_only=arguments.get("low_stock_only", False),
+                user_id=user_id,
             )
+        except ImportError:
+            result = {"status": "unavailable", "message": "Módulo de estoque não instalado."}
+        _log_activity(user_id, "search_products", f"query={arguments.get('query','')}")
+        return result
 
-        # Segunda chamada para resposta natural baseada nos resultados
-        response2 = raw_client.chat.completions.create(
+    # ── FERRAMENTA DESCONHECIDA ───────────────────────────────────────────────
+    else:
+        logger.warning(f"Ferramenta desconhecida solicitada: {tool_name}")
+        return {"status": "error", "message": f"Ferramenta '{tool_name}' não reconhecida."}
+
+
+# ============================================================================
+# LOOP DE FUNCTION CALLING — OpenAI GPT-4.1
+# ============================================================================
+
+def _call_with_tools(
+    client,
+    model: str,
+    messages: list[dict],
+    tools: list[dict],
+    user_id: int,
+    max_rounds: int = 5,
+) -> str:
+    """
+    Executa o loop de function calling com o modelo OpenAI.
+    Retorna o texto final da resposta após todas as tool calls serem resolvidas.
+    """
+    current_messages = messages.copy()
+
+    for round_num in range(max_rounds):
+        response = client.chat.completions.create(
             model=model,
-            messages=messages,
-            temperature=0.15,
-            max_tokens=800,
+            messages=current_messages,
+            tools=tools if tools else None,
+            tool_choice="auto" if tools else None,
+            temperature=0.3,
+            max_tokens=1500,
         )
 
-        final_msg = response2.choices[0].message
+        choice = response.choices[0]
 
-        # Tratar caso raro de tool calls encadeados (máximo 1 rodada extra)
-        if final_msg.tool_calls:
-            tc_dicts2 = [
-                {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                for tc in final_msg.tool_calls
-            ]
-            messages.append({"role": "assistant", "content": final_msg.content, "tool_calls": tc_dicts2})
+        # Sem tool call → resposta final
+        if choice.finish_reason == "stop" or not choice.message.tool_calls:
+            return choice.message.content or ""
 
-            _sensitive_actions_r2: list[dict] = []
+        # Processar tool calls
+        tool_calls = choice.message.tool_calls
+        current_messages.append(choice.message)
 
-            for tc in final_msg.tool_calls:
+        # Verificar se há ações sensíveis em lote
+        sensitive_actions = []
+        for tc in tool_calls:
+            tool_name = tc.function.name
+            if tool_name in ("delete_client", "update_client"):
                 try:
                     args = json.loads(tc.function.arguments)
                 except json.JSONDecodeError:
                     args = {}
-
-                # Interceptar ferramentas sensíveis no round 2 também (batch)
-                if tc.function.name in SENSITIVE_TOOLS and tc.function.name != confirmed_action:
-                    _desc = ""
-                    if tc.function.name == "delete_client":
-                        cname = args.get("client_name", f"#{args.get('client_id', '?')}")
-                        _desc = f"Excluir cliente {cname}"
-                    elif tc.function.name == "update_client":
-                        cname = args.get("name", f"#{args.get('client_id', '?')}")
-                        _fields = [k for k in args if k not in ("client_id",)]
-                        _desc = f"Editar cliente {cname} (campos: {', '.join(_fields)})"
-                    else:
-                        _desc = f"Ação sensível: {tc.function.name}"
-                    _sensitive_actions_r2.append({
-                        "tool_name": tc.function.name,
-                        "arguments": args,
-                        "description": _desc,
-                    })
-                    continue
-
-                logger.info(f"  🔧 Executando (round 2) {tc.function.name}")
-                result = _execute_crm_tool(tc.function.name, args, user_id)
-                messages.append({
-                    "role": "tool",
+                sensitive_actions.append({
                     "tool_call_id": tc.id,
-                    "content": json.dumps(result, ensure_ascii=False, default=str),
+                    "tool_name": tool_name,
+                    "arguments": args,
+                    "description": f"{'Excluir' if tool_name == 'delete_client' else 'Atualizar'} cliente ID {args.get('client_id', '?')}",
                 })
 
-            if _sensitive_actions_r2:
-                combined_desc = " | ".join(a["description"] for a in _sensitive_actions_r2)
-                raise SensitiveActionRequired(
-                    tool_name=_sensitive_actions_r2[0]["tool_name"],
-                    arguments=_sensitive_actions_r2[0]["arguments"],
-                    description=combined_desc,
-                    pending_actions=_sensitive_actions_r2,
-                )
-
-            response3 = raw_client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0.15,
-                max_tokens=800,
+        if sensitive_actions:
+            first = sensitive_actions[0]
+            raise SensitiveActionRequired(
+                tool_name=first["tool_name"],
+                arguments=first["arguments"],
+                description=first["description"],
+                pending_actions=sensitive_actions,
             )
-            return response3.choices[0].message.content or ""
 
-        return final_msg.content or ""
+        # Executar ferramentas normais
+        for tc in tool_calls:
+            tool_name = tc.function.name
+            try:
+                arguments = json.loads(tc.function.arguments)
+            except json.JSONDecodeError:
+                arguments = {}
 
-    except SensitiveActionRequired:
-        raise  # Propagar para o caller (agent_hub.py) tratar
-    except Exception as e:
-        logger.warning(f"⚠️ Function calling falhou para {agent_id}: {e}", exc_info=True)
-        return ""  # Fallback para chamada sem ferramentas
+            try:
+                tool_result = _execute_crm_tool(tool_name, arguments, user_id)
+                result_content = json.dumps(tool_result, ensure_ascii=False, default=str)
+            except SensitiveActionRequired:
+                raise
+            except Exception as e:
+                logger.error(f"Erro ao executar ferramenta {tool_name}: {e}")
+                result_content = json.dumps({"status": "error", "message": str(e)})
+
+            current_messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": result_content,
+            })
+
+    # Fallback: última resposta disponível
+    logger.warning(f"Loop de tools atingiu max_rounds={max_rounds}")
+    last = current_messages[-1]
+    if isinstance(last, dict) and last.get("role") == "tool":
+        return "Processamento concluído. Verifique os dados acima."
+    return last.get("content", "") if isinstance(last, dict) else ""
 
 
 # ============================================================================
-# CHAT INTELIGENTE COM LLM
+# ENTRADA PRINCIPAL — get_llm_response
 # ============================================================================
 
-async def get_llm_response(agent_id: str, user_message: str, history: list[dict] | None = None, user_id: int | None = None, confirmed_action: str | None = None) -> str:
+def get_llm_response(
+    agent_type: str,
+    user_message: str,
+    crm_context: str = "",
+    conversation_history: list[dict] = None,
+    user_id: int = None,
+    confirmed_actions: list[dict] = None,
+) -> str:
     """
-    Gera resposta inteligente usando OpenAI GPT-4.1
-    com system prompt especializado por agente.
-    Suporta function calling para ações reais (cadastrar, agendar, etc.).
-    Filtra dados pelo user_id autenticado.
-    
+    Gera resposta do LLM para o agente especificado.
+
     Args:
-        confirmed_action: Nome da tool que foi confirmada com senha (bypass de confirmação).
-    Raises:
-        SensitiveActionRequired: Quando uma ação requer confirmação com senha.
+        agent_type: Tipo do agente (agenda, clientes, contabilidade, cobranca, assistente)
+        user_message: Mensagem do usuário
+        crm_context: Contexto CRM pré-formatado para injetar no prompt
+        conversation_history: Histórico de mensagens anteriores
+        user_id: ID do usuário autenticado
+        confirmed_actions: Ações sensíveis confirmadas com senha (ex: delete_client)
+
+    Returns:
+        Texto da resposta do agente
     """
-    # Mutable default fix
-    if history is None:
-        history = []
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        logger.error("OPENAI_API_KEY não configurada")
+        return "Serviço de IA temporariamente indisponível. Verifique a configuração."
 
-    # Resolver aliases legados (financeiro/documentos → contabilidade)
-    from app.core.agent_aliases import resolve_agent_id as _resolve_alias
-    agent_id = _resolve_alias(agent_id)
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+    except ImportError:
+        return "Biblioteca OpenAI não instalada. Execute: pip install openai"
 
-    # Buscar contexto real do CRM para enriquecer prompts (filtrado por user_id)
-    crm_context = _get_crm_context(user_id=user_id)
+    model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
-    # ── RESPOSTA DIRETA PARA DADOS VAZIOS ────────────────────────
-    # Se o CRM não tem dados e a pergunta é sobre dados específicos,
-    # respondemos DIRETAMENTE sem passar pelo LLM (elimina alucinação).
-    _empty_markers = ("Nenhum cliente cadastrado", "Sem dados cadastrados ainda")
-    _crm_is_empty = any(m in crm_context for m in _empty_markers)
-
-    if _crm_is_empty:
-        direct = _get_direct_empty_response(agent_id, user_message)
-        if direct:
-            return direct
-
-    # Montar system prompt com data atual e dados reais
-    system_prompt = AGENT_SYSTEM_PROMPTS.get(agent_id, AGENT_SYSTEM_PROMPTS["assistente"])
-    system_prompt = system_prompt.format(
-        date=datetime.now().strftime("%d/%m/%Y %H:%M"),
-        crm_context=crm_context,
+    # Obter prompt base do agente
+    base_prompt = AGENT_SYSTEM_PROMPTS.get(
+        agent_type,
+        AGENT_SYSTEM_PROMPTS["assistente"]
     )
 
-    # Adicionar instruções de ferramentas se o agente tem tools
-    agent_tool_names = AGENT_AVAILABLE_TOOLS.get(agent_id, [])
-    if agent_tool_names:
-        system_prompt += _TOOLS_ADDENDUM
+    # Formatar prompt com contexto
+    today_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+    system_prompt = base_prompt.format(
+        crm_context=crm_context or "Nenhum dado disponível no momento.",
+        date=today_str,
+    ) + _TOOLS_ADDENDUM
 
-    # ── Contexto cross-agent (resumo de outros agentes) ──────────
-    if user_id:
-        try:
-            from app.services.chat_context import load_cross_agent_summary
-            cross_ctx = load_cross_agent_summary(user_id, agent_id, msgs_per_agent=4)
-            if cross_ctx:
-                system_prompt += cross_ctx
-        except Exception:
-            pass  # Não bloquear se falhar
+    # Montar mensagens
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
-    messages: list[dict] = [
-        {"role": "system", "content": system_prompt}
-    ]
+    if conversation_history:
+        messages.extend(conversation_history[-10:])  # Últimas 10 mensagens
 
-    # Adicionar histórico (últimas 10 mensagens para contexto)
-    for msg in history[-10:]:
-        messages.append({
-            "role": msg.get("role", "user"),
-            "content": msg.get("content", "")
-        })
-
-    # Adicionar mensagem atual
     messages.append({"role": "user", "content": user_message})
 
-    # ── Tentar com function calling (permite ações reais) ─────────
-    if agent_tool_names:
-        # Cópia da lista para que _call_with_tools não corrompa o original
-        # (ela adiciona tool_calls/tool results que quebram o fallback sem tools)
-        messages_for_tools = list(messages)
-        tool_response = _call_with_tools(messages_for_tools, agent_id, user_id, confirmed_action=confirmed_action)
-        if tool_response:
-            return tool_response
+    # Filtrar ferramentas disponíveis para este agente
+    allowed_tool_names = set(AGENT_AVAILABLE_TOOLS.get(agent_type, []))
+    tools = [
+        t for t in CRM_TOOLS_DEFINITIONS
+        if t["function"]["name"] in allowed_tool_names
+    ]
 
-    # ── Fallback: chamada sem ferramentas ─────────────────────────
-    client = get_openai_client()
-    if client:
-        try:
-            response = client.chat_completion(
-                messages=messages,
-                temperature=0.15,
-                max_tokens=800,
-            )
-            if response:
-                return response
-        except Exception as e:
-            logger.error(f"Erro ao gerar resposta LLM: {e}")
+    # Processar ações confirmadas (sensitive actions com senha validada)
+    if confirmed_actions:
+        for action in confirmed_actions:
+            tool_name = action.get("tool_name")
+            arguments = action.get("arguments", {})
+            tool_call_id = action.get("tool_call_id", f"confirmed_{tool_name}")
 
-    # ── Último recurso: fallback por palavras-chave (LLM indisponível) ──
-    keyword_fallback = _get_keyword_fallback(agent_id, user_message)
-    if keyword_fallback:
-        return keyword_fallback
-
-    return ""
-
-
-# ============================================================================
-# MAPEAMENTO DE AÇÕES RÁPIDAS → PROMPTS PARA O LLM
-# ============================================================================
-
-ACTION_PROMPTS: dict[str, str] = {
-    # Agenda
-    "list_today": "O que eu tenho marcado pra hoje?",
-    "list_week": "Mostra minha agenda da semana.",
-    "add_appointment": "Quero marcar um compromisso. Me pergunta o dia, hora e o que vou fazer.",
-    "list_reminders": "Quais são meus lembretes?",
-    # Clientes
-    "list_clients": "Mostra meus clientes. Lista simples com nome, telefone e se tá ativo. Sem tabela complicada, sem scores, sem termos em inglês.",
-    "add_client": "Quero cadastrar um cliente novo. Me pergunta nome, telefone e email.",
-    "search_client": "Quero procurar um cliente. Me pergunta o nome ou telefone.",
-    "list_followup": "Quais clientes eu preciso entrar em contato? Mostra só quem faz tempo que não falo.",
-    "pipeline_summary": "Me mostra um resumo das minhas vendas: quantos clientes ativos, quanto faturei e quais negócios estão abertos.",
-    # Fornecedores e Estoque
-    "list_suppliers": "Mostra meus fornecedores. Lista simples com nome, telefone e se tá ativo. Se não tenho nenhum, me explica como cadastrar.",
-    "stock_summary": "Como tá meu estoque? Mostra quantos produtos tenho, valor total e se tem algum com estoque baixo.",
-    # Financeiro (unifica contabilidade)
-    "monthly_summary": "Como tá meu mês? Quanto entrou, quanto saiu e quanto sobrou. Separe por forma de pagamento se tiver (PIX, dinheiro, cartão débito, cartão crédito, fiado, boleto, transferência, etc).",
-    "daily_summary_fin": "Como foi meu dia hoje? Quanto entrou e saiu HOJE, detalhando por forma de pagamento (PIX, dinheiro, cartão débito, crédito, fiado, etc).",
-    "weekly_summary_fin": "Como foi minha semana? Quanto entrou e saiu ESSA SEMANA, mostrando o melhor dia e detalhando por forma de pagamento.",
-    "payment_breakdown": "Me mostra as vendas separadas por forma de pagamento: à vista, a prazo, cartão de débito, cartão de crédito, crédito próprio, fiado, entrada + parcelado, parcelado, PIX, dinheiro, transferência, boleto. Mostra do mês e da semana.",
-    "get_balance": "Qual meu saldo? Quanto tenho, quanto falta receber e quanto falta pagar.",
-    "mei_status": "Como tá meu limite do MEI? Quanto já usei do limite de R$ 81.000.",
-    "das_status": "Quando vence meu DAS? Quanto é e como pago?",
-    "dasn_status": "Preciso fazer a declaração anual (DASN)? Qual o prazo?",
-    "calendario_fiscal": "Quais são minhas obrigações fiscais? Mostra os prazos.",
-    "checklist_mensal": "O que eu preciso fazer esse mês?",
-    "emit_nf": "Quero emitir uma Nota Fiscal. Me pergunta pra quem, valor e o que fiz.",
-    "list_nf": "Mostra as notas fiscais que emiti esse mês.",
-    "irpf_calculo": "Como funciona meu imposto de renda como MEI?",
-    "generate_report": "Quais relatórios eu posso ver?",
-    "generate_contract": "Quero fazer um contrato. Me pergunta o tipo e os detalhes.",
-    "penalidades": "O que acontece se eu atrasar o DAS ou a DASN?",
-    # Cobrança
-    "list_overdue": "Quem tá devendo? Mostra nome, valor e há quantos dias.",
-    "list_pending": "Quem vai ter que pagar nos próximos 7 dias?",
-    "send_reminder": "Quero cobrar um cliente. Me pergunta quem e por onde (Telegram ou email).",
-    "total_open": "Quanto eu tenho pra receber no total?",
-    # Assistente
-    "daily_summary": "Me dá um resumo do meu dia: o que tem marcado, como tá o dinheiro e se tem cobranças pendentes.",
-    "suggest_tasks": "O que é mais importante eu fazer agora?",
-    "get_alerts": "Tem algum alerta importante? Prazo, cobrança, alguma coisa urgente?",
-    "help": "Explique todas as minhas capacidades, incluindo automação web com aprovação humana.",
-    "web_automation": "O usuário quer usar a automação web. Pergunte o que ele gostaria de automatizar. Exemplos: consultar CPF na Receita Federal, acessar o Simples Nacional, emitir nota fiscal no portal da prefeitura. Diga que você vai gerar um plano de ações e pedir aprovação antes de executar qualquer coisa.",
-}
-
-
-# ============================================================================
-# RESPOSTAS DIRETAS PARA DADOS VAZIOS (anti-alucinação)
-# ============================================================================
-
-# Mapeamento: prompt do quick action → resposta direta quando CRM vazio
-_EMPTY_DATA_RESPONSES: dict[str, dict[str, str]] = {
-    "contabilidade": {
-        "Como tá meu mês": "📊 Ainda não tem movimentações registradas este mês.\n\nPra eu poder te mostrar o resumo financeiro, você precisa registrar suas entradas (vendas) e saídas (gastos).\n\n💡 Dica: Me diga algo como \"recebi R$ 500 do cliente fulano\" ou \"gastei R$ 100 no fornecedor\" que eu anoto pra você!",
-        "Quando vence meu DAS": "📅 **DAS MEI - Fevereiro/2026**\n\nVence dia **20 de cada mês**.\n\n• Comércio/Indústria: **R$ 82,05**\n• Serviços: **R$ 86,05**\n• Comércio + Serviços: **R$ 87,05**\n\n💳 Pague pelo app do banco, site do Simples Nacional (pgmei.receita.gov.br) ou em qualquer lotérica.\n\n⚠️ Se atrasar: multa de 0,33% por dia (máximo 20%) + juros.",
-        "Como tá meu limite do MEI": "📊 **Limite MEI 2026: R$ 81.000/ano** (~R$ 6.750/mês)\n\nAinda não tem faturamento registrado no sistema, então não consigo calcular quanto você já usou.\n\n💡 Registre suas vendas comigo que eu acompanho automaticamente!\n\nSe ultrapassar:\n• Até 20% acima (R$ 97.200): paga sobre o excedente, desenquadra em janeiro\n• Mais de 20%: desenquadra retroativamente",
-        "Quem tá devendo": "✅ Não encontrei cobranças pendentes no sistema.\n\nTudo em dia! 👍\n\n💡 Quando quiser registrar uma venda a prazo, é só me avisar que eu acompanho os pagamentos.",
-        "Quem vai ter que pagar": "✅ Não encontrei pagamentos próximos do vencimento.\n\n💡 Registre suas vendas a prazo comigo que eu aviso quando estiver perto de vencer.",
-        "Quero emitir uma Nota Fiscal": "📝 **Emissão de Nota Fiscal (NFS-e)**\n\nPra emitir a nota, preciso de:\n1. **Nome/Razão Social** do cliente\n2. **CPF ou CNPJ** do cliente\n3. **Valor** do serviço/produto\n4. **Descrição** do que foi feito\n\nMe passe essas informações que eu monto a nota pra você! 😊",
-        "Qual meu saldo": "💰 Ainda não tem movimentações registradas no sistema.\n\nPra eu calcular seu saldo, registre suas entradas e saídas.\n\n💡 Me diga: \"recebi R$ X\" ou \"gastei R$ X em Y\" que eu anoto tudo!",
-        "previsão": "📊 Preciso de mais dados pra fazer previsões.\n\nRegistre suas vendas e gastos que, com o tempo, vou conseguir te mostrar tendências e previsões! 📈",
-    },
-    "clientes": {
-        "Mostra meus clientes": "👥 Você ainda não tem clientes cadastrados.\n\nQuer cadastrar o primeiro? Me diz o **nome**, **telefone** e **email** que eu registro rapidinho! 😊",
-        "Quero cadastrar um cliente": "👤 **Novo Cliente**\n\nPra cadastrar, preciso de:\n1. **Nome completo**\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
-        "Quais clientes eu preciso entrar em contato": "📞 Você ainda não tem clientes cadastrados.\n\nQuando tiver clientes registrados, eu aviso quando fizer tempo que você não fala com alguém.\n\n💡 Comece cadastrando seus clientes!",
-        "resumo das minhas vendas": "📊 Ainda não tem clientes ou vendas registradas.\n\nRegistre seus clientes e vendas que eu faço o resumo pra você!\n\n💡 Me diga: \"cadastrar cliente João, telefone 11999998888\"",
-        "cadastrar cliente": "👤 **Novo Cliente**\n\nPra cadastrar, preciso de:\n1. **Nome completo**\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
-        "novo cliente": "👤 **Novo Cliente**\n\nPra cadastrar, preciso de:\n1. **Nome completo**\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
-        "cadastrar fornecedor": "🚚 **Novo Fornecedor**\n\nPra cadastrar, preciso de:\n1. **Nome** do fornecedor\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
-        "novo fornecedor": "🚚 **Novo Fornecedor**\n\nPra cadastrar, preciso de:\n1. **Nome** do fornecedor\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
-        "meu estoque": "📦 Você ainda não tem produtos cadastrados no estoque.\n\nPra começar a controlar, cadastre seus produtos primeiro!",
-        "fornecedores": "🚚 Você ainda não tem fornecedores cadastrados.\n\nQuer cadastrar o primeiro? Me diz o **nome** e **telefone**! 😊",
-    },
-    "agenda": {
-        "O que eu tenho marcado pra hoje": "📅 Dia livre! Você não tem nada marcado pra hoje.\n\nQuer agendar algo? Me diz o que, o dia e o horário! 😊",
-        "Mostra minha agenda da semana": "📅 Semana livre! Nenhum compromisso agendado.\n\nQuer marcar algo? Me diz: \"reunião amanhã às 14h\" por exemplo.",
-        "Quero marcar um compromisso": "📅 **Novo Compromisso**\n\nMe diz:\n1. **O que** vai fazer (reunião, consulta, ligação...)\n2. **Quando** (dia e hora)\n3. **Onde** (opcional)\n\n💡 Exemplo: \"dentista amanhã 15h\"",
-        "cadastrar cliente": "👤 **Novo Cliente**\n\nPra cadastrar, preciso de:\n1. **Nome completo**\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
-        "novo cliente": "👤 **Novo Cliente**\n\nPra cadastrar, preciso de:\n1. **Nome completo**\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
-        "cadastrar fornecedor": "🚚 **Novo Fornecedor**\n\nPra cadastrar, preciso de:\n1. **Nome** do fornecedor\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
-        "novo fornecedor": "🚚 **Novo Fornecedor**\n\nPra cadastrar, preciso de:\n1. **Nome** do fornecedor\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
-        "meus clientes": "👥 Você ainda não tem clientes cadastrados.\n\nQuer cadastrar o primeiro? Me diz o **nome**, **telefone** e **email** que eu registro rapidinho! 😊",
-        "meu estoque": "📦 Você ainda não tem produtos cadastrados no estoque.\n\nPra começar a controlar, cadastre seus produtos primeiro!",
-        "fornecedores": "🚚 Você ainda não tem fornecedores cadastrados.\n\nQuer cadastrar o primeiro? Me diz o **nome** e **telefone**! 😊",
-    },
-    "cobranca": {
-        "Quem tá devendo": "✅ Não encontrei cobranças pendentes no sistema. Tudo em dia! 👍\n\n💡 Quando registrar vendas a prazo, eu acompanho os pagamentos automaticamente.",
-        "Quem vai ter que pagar": "✅ Não encontrei pagamentos próximos do vencimento.\n\n💡 Registre suas vendas a prazo que eu aviso quando estiver perto de vencer.",
-        "Quero cobrar um cliente": "📱 Primeiro preciso saber quem vai cobrar!\n\nVocê ainda não tem cobranças pendentes registradas. Registre uma venda a prazo e eu acompanho pra você.",
-        "Quanto eu tenho pra receber": "💰 Não encontrei valores a receber no sistema.\n\nRegistre suas vendas a prazo que eu calculo tudo automaticamente!",
-    },
-    "assistente": {
-        "resumo do meu dia": "📋 **Resumo do dia**\n\n• 📅 Agenda: Nenhum compromisso marcado\n• 💰 Financeiro: Sem movimentações registradas\n• 🔔 Cobranças: Nenhuma pendência\n• 👥 Clientes: Nenhum cadastrado ainda\n\n💡 **Sugestão**: Que tal começar cadastrando seus clientes e registrando suas vendas? Assim consigo te dar um resumo completo!",
-        "O que é mais importante": "🎯 Pelo que vejo no sistema, você está começando. Sugiro:\n\n1. **Cadastrar seus clientes** — é a base de tudo\n2. **Registrar suas vendas** do mês — pra acompanhar o faturamento\n3. **Verificar o DAS** — vence dia 20 de cada mês\n\nPor qual quer começar?",
-        "algum alerta importante": "✅ Nenhum alerta no momento.\n\n⚠️ Lembre-se:\n• DAS vence dia **20 de cada mês**\n• DASN (declaração anual) até **31 de maio**\n\n💡 Registre suas movimentações que eu aviso sobre tudo automaticamente!",
-        "cadastrar cliente": "👤 **Novo Cliente**\n\nPra cadastrar, preciso de:\n1. **Nome completo**\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
-        "cadastrar fornecedor": "🚚 **Novo Fornecedor**\n\nPra cadastrar, preciso de:\n1. **Nome** do fornecedor\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
-        "novo fornecedor": "🚚 **Novo Fornecedor**\n\nPra cadastrar, preciso de:\n1. **Nome** do fornecedor\n2. **Telefone** (com DDD)\n3. **Email** (opcional)\n\nMe passe as informações! 😊",
-        "meu estoque": "📦 Você ainda não tem produtos cadastrados no estoque.\n\nPra começar a controlar, cadastre seus produtos primeiro!",
-    },
-}
-
-
-def _get_direct_empty_response(agent_id: str, user_message: str) -> str:
-    """Retorna resposta direta (sem LLM) quando o CRM está vazio.
-    Busca match parcial do user_message nas chaves do mapeamento.
-    Retorna string vazia se nenhum match → LLM será chamado normalmente.
-    """
-    agent_responses = _EMPTY_DATA_RESPONSES.get(agent_id, {})
-    msg_lower = user_message.lower()
-    for key, response in agent_responses.items():
-        if key.lower() in msg_lower:
-            return response
-    return ""
-
-
-def _get_keyword_fallback(agent_id: str, user_message: str) -> str:
-    """Fallback de último recurso quando o LLM está indisponível.
-    Detecta intenção por palavras-chave e retorna orientação útil.
-    Retorna string vazia se não reconhecer a intenção.
-    """
-    msg = user_message.lower()
-
-    if any(kw in msg for kw in ("cadastrar cliente", "novo cliente", "registrar cliente", "adicionar cliente")):
-        return (
-            "👤 **Novo Cliente**\n\n"
-            "Pra cadastrar, preciso de:\n"
-            "1. **Nome completo**\n"
-            "2. **Telefone** (com DDD)\n"
-            "3. **Email** (opcional)\n\n"
-            "Me passe as informações! 😊"
-        )
-
-    if any(kw in msg for kw in ("cadastrar fornecedor", "novo fornecedor", "registrar fornecedor", "adicionar fornecedor")):
-        return (
-            "🚚 **Novo Fornecedor**\n\n"
-            "Pra cadastrar, preciso de:\n"
-            "1. **Nome** do fornecedor\n"
-            "2. **Telefone** (com DDD)\n"
-            "3. **Email** (opcional)\n\n"
-            "Me passe as informações! 😊"
-        )
-
-    if any(kw in msg for kw in ("marcar compromisso", "agendar reunião", "agendar reuniao", "novo compromisso", "marcar reunião", "marcar reuniao")):
-        return (
-            "📅 **Novo Compromisso**\n\n"
-            "Me diz:\n"
-            "1. **O que** vai fazer (reunião, consulta, ligação...)\n"
-            "2. **Quando** (dia e hora)\n"
-            "3. **Onde** (opcional)\n\n"
-            "💡 Exemplo: \"dentista amanhã 15h\""
-        )
-
-    if any(kw in msg for kw in ("anotar venda", "registrar venda", "recebi", "gastei", "paguei", "anotar gasto")):
-        return (
-            "💰 **Registrar Transação**\n\n"
-            "Me diz:\n"
-            "1. **Tipo**: entrada (venda) ou saída (gasto)\n"
-            "2. **Valor**: quanto\n"
-            "3. **Descrição**: o que foi\n"
-            "4. **Forma de pagamento**: PIX, dinheiro, cartão, etc.\n\n"
-            "💡 Exemplo: \"recebi R$ 500 do João por PIX\""
-        )
-
-    if any(kw in msg for kw in ("meus clientes", "listar clientes", "ver clientes", "quantos clientes")):
-        return "👥 Use o botão **Meus Clientes** nas Ações Rápidas para ver a lista! Ou me diga o nome de quem procura."
-
-    if any(kw in msg for kw in ("meus fornecedores", "listar fornecedores", "ver fornecedores")):
-        return "🚚 Use o botão **Meus Fornecedores** nas Ações Rápidas para ver a lista! Ou me diga o nome de quem procura."
-
-    if any(kw in msg for kw in ("meu estoque", "estoque", "inventário", "inventario", "produtos")):
-        return "📦 Use o botão **Meu Estoque** nas Ações Rápidas para ver o resumo! Ou me pergunte sobre um produto específico."
-
-    if any(kw in msg for kw in ("nota fiscal", "emitir nf", "emitir nota")):
-        return (
-            "📝 **Emissão de Nota Fiscal (NFS-e)**\n\n"
-            "Pra emitir a nota, preciso de:\n"
-            "1. **Nome/Razão Social** do cliente\n"
-            "2. **CPF ou CNPJ** do cliente\n"
-            "3. **Valor** do serviço/produto\n"
-            "4. **Descrição** do que foi feito\n\n"
-            "Me passe essas informações! 😊"
-        )
-
-    return ""
-
-
-# ============================================================================
-# ENRIQUECIMENTO COM DADOS REAIS DO CRM
-# ============================================================================
-
-def _get_crm_context(user_id: int | None = None) -> str:
-    """Busca dados reais do CRM para enriquecer os prompts dos agentes.
-    Retorna string formatada em português simples, sem jargão técnico.
-    Filtra tudo pelo user_id quando disponível.
-    Graceful fallback se DB não estiver disponível.
-    """
-    try:
-        from database.crm_service import CRMService
-
-        # ── Dados do perfil do proprietário (PF/PJ) ─────────────────
-        # Disponibiliza para agentes: nome, CPF/CNPJ, endereço, telefone, etc.
-        _profile_lines: list[str] = []
-        if user_id:
             try:
-                from database.models import SessionLocal, User as _UserModel
-                _pdb = SessionLocal()
-                try:
-                    _usr = _pdb.query(_UserModel).filter(_UserModel.id == user_id).first()
-                    if _usr:
-                        _pf = []
-                        if getattr(_usr, "full_name", None):
-                            _pf.append(f"Nome: {_usr.full_name}")
-                        _pt = getattr(_usr, "person_type", None)
-                        if _pt:
-                            _pf.append(f"Tipo: {'Pessoa Física' if _pt == 'PF' else 'Pessoa Jurídica'}")
-                        if getattr(_usr, "cpf", None):
-                            _pf.append(f"CPF: {_usr.cpf}")
-                        if getattr(_usr, "cnpj", None):
-                            _pf.append(f"CNPJ: {_usr.cnpj}")
-                        if getattr(_usr, "company_name", None):
-                            _pf.append(f"Razão Social: {_usr.company_name}")
-                        if getattr(_usr, "trade_name", None):
-                            _pf.append(f"Nome Fantasia: {_usr.trade_name}")
-                        if getattr(_usr, "phone", None):
-                            _pf.append(f"Telefone: {_usr.phone}")
-                        if getattr(_usr, "state_registration", None):
-                            _pf.append(f"IE: {_usr.state_registration}")
-                        if getattr(_usr, "municipal_registration", None):
-                            _pf.append(f"IM: {_usr.municipal_registration}")
-                        # Endereço compacto
-                        _addr_parts = []
-                        for _af in ("address_street", "address_number", "address_complement", "address_neighborhood", "address_city", "address_state", "address_zip"):
-                            _av = getattr(_usr, _af, None)
-                            if _av:
-                                _addr_parts.append(str(_av))
-                        if _addr_parts:
-                            _pf.append(f"Endereço: {', '.join(_addr_parts)}")
-                        if getattr(_usr, "business_type", None):
-                            _pf.append(f"Tipo de Negócio: {_usr.business_type}")
-                        if _pf:
-                            _profile_lines.append("🧑‍💼 DADOS DO PROPRIETÁRIO/EMPRESA:")
-                            _profile_lines.extend(f"  {l}" for l in _pf)
-                finally:
-                    _pdb.close()
-            except Exception:
-                pass  # Não bloquear se perfil indisponível
-
-        # Dashboard geral (filtrado por user_id)
-        dashboard = CRMService.get_crm_dashboard(user_id=user_id)
-
-        # Clientes para follow-up (inatividade > 7 dias)
-        followup = CRMService.get_clients_for_followup(days_inactive=7, user_id=user_id)
-
-        # Faturas vencidas
-        overdue = CRMService.get_overdue_invoices(user_id=user_id)
-
-        # Próximas faturas (7 dias)
-        upcoming = CRMService.get_upcoming_invoices(days=7, user_id=user_id)
-
-        # Aniversariantes do dia
-        birthdays = CRMService.get_birthday_clients(user_id=user_id)
-
-        # Resumo financeiro do mês atual
-        today = datetime.now()
-        fin_summary = CRMService.get_financial_summary(month=today.month, year=today.year, user_id=user_id)
-
-        # Montar contexto textual — linguagem simples
-        lines = []
-
-        clients_info = dashboard.get("clients", {})
-        revenue_info = dashboard.get("revenue", {})
-        # dashboard.total já conta só os ativos; inactive é contagem separada
-        active_cl = clients_info.get("total", 0)
-        inactive_cl = clients_info.get("inactive", 0)
-        total_cl = active_cl + inactive_cl
-
-        if active_cl > 0:
-            lines.append(f"👥 Você tem {active_cl} cliente(s) ativo(s)" + (f" (e {inactive_cl} inativo(s))" if inactive_cl else ""))
-            # Incluir nomes dos clientes no contexto para o LLM
-            try:
-                from database.crm_service import CRMService as _CRM2
-                _search = _CRM2.search_clients(query="", user_id=user_id, limit=10)
-                _cl_list = _search.get("clients", [])
-                if _cl_list:
-                    _cl_names = [f"  - {c.get('name', '?')} | {c.get('phone', 'sem tel')} | {'Ativo' if c.get('is_active') else 'Inativo'}" for c in _cl_list[:10]]
-                    lines.append("Lista de clientes:\n" + "\n".join(_cl_names))
-            except Exception:
-                pass
-            need_fu = clients_info.get("need_followup", 0)
-            if need_fu > 0:
-                lines.append(f"⚠️ {need_fu} cliente(s) sem contato há mais de 7 dias")
-            total_rev = revenue_info.get("total", 0)
-            if total_rev > 0:
-                ticket = revenue_info.get("avg_ticket", 0)
-                lines.append(f"💰 Receita total: R$ {total_rev:,.2f} | Média por cliente: R$ {ticket:,.2f}")
-        elif inactive_cl > 0:
-            lines.append(f"👥 Nenhum cliente ativo ({inactive_cl} inativo(s)/excluído(s))")
-        else:
-            lines.append("👥 Nenhum cliente cadastrado ainda")
-
-        # Clientes que precisam de contato
-        if followup:
-            names = [f"{c['name']} ({c.get('days_inactive', '?')} dias)" for c in followup[:5]]
-            lines.append(f"📞 Precisam de contato ({len(followup)}): {', '.join(names)}")
-
-        # Cobranças
-        if overdue:
-            total_overdue = sum(i.get("amount", 0) for i in overdue)
-            lines.append(f"🔴 Pagamentos atrasados: {len(overdue)} (R$ {total_overdue:,.2f})")
-        if upcoming:
-            total_upcoming = sum(i.get("amount", 0) for i in upcoming)
-            lines.append(f"📅 Pagamentos nos próximos 7 dias: {len(upcoming)} (R$ {total_upcoming:,.2f})")
-
-        # Aniversários
-        if birthdays:
-            bday_names = [c.get("name", "") for c in birthdays[:3]]
-            lines.append(f"🎂 Aniversariante(s) hoje: {', '.join(bday_names)}")
-
-        # Financeiro do mês
-        receitas = fin_summary.get("receitas", 0)
-        despesas = fin_summary.get("despesas", 0)
-        lucro = fin_summary.get("lucro", 0)
-        if receitas > 0 or despesas > 0:
-            lines.append(f"💵 Este mês: Entrou R$ {receitas:,.2f} | Saiu R$ {despesas:,.2f} | Sobrou R$ {lucro:,.2f}")
-
-        # Fluxo de caixa do dia
-        try:
-            daily = CRMService.get_daily_summary(user_id=user_id)
-            if daily["transactions_count"] > 0:
-                lines.append(
-                    f"💵 Hoje: Entrou R$ {daily['receitas']:,.2f} | "
-                    f"Saiu R$ {daily['despesas']:,.2f} | "
-                    f"Saldo R$ {daily['saldo']:,.2f}"
-                )
-            else:
-                lines.append("💵 Hoje: nenhuma transação registrada ainda")
-        except Exception:
-            pass
-
-        # Fluxo de caixa da semana
-        try:
-            weekly = CRMService.get_weekly_summary(user_id=user_id)
-            if weekly["transactions_count"] > 0:
-                lines.append(
-                    f"📅 Esta semana: Entrou R$ {weekly['receitas']:,.2f} | "
-                    f"Saiu R$ {weekly['despesas']:,.2f}"
-                )
-                if weekly["best_day"]:
-                    lines.append(
-                        f"🏆 Melhor dia: {weekly['best_day']['date']} "
-                        f"(R$ {weekly['best_day']['receitas']:,.2f})"
+                from database.crm_service import CRMService
+                if tool_name == "delete_client":
+                    result = CRMService.delete_client(
+                        client_id=arguments["client_id"],
+                        soft=arguments.get("soft", True),
+                        user_id=user_id,
                     )
-        except Exception:
-            pass
+                elif tool_name == "update_client":
+                    client_id = arguments.pop("client_id")
+                    result = CRMService.update_client(
+                        client_id=client_id,
+                        user_id=user_id,
+                        **arguments,
+                    )
+                else:
+                    result = {"status": "error", "message": f"Ação '{tool_name}' não suportada em confirmed_actions"}
 
-        # Agendamentos hoje
-        appts_today = dashboard.get("appointments_today", 0)
-        if appts_today > 0:
-            lines.append(f"📆 {appts_today} compromisso(s) pra hoje")
+                _log_activity(user_id, f"confirmed_{tool_name}", f"args={arguments}")
 
-        # Estoque / Inventário
-        try:
-            from database.inventory_service import InventoryService
-            stock = InventoryService.get_stock_summary(user_id)
-            total_prods = stock.get("total_products", 0)
-            if total_prods > 0:
-                stock_val = stock.get("total_stock_value", 0)
-                lines.append(f"📦 Estoque: {total_prods} produto(s) | Valor total: R$ {stock_val:,.2f}")
-                alerts = stock.get("low_stock_alerts", [])
-                if alerts:
-                    alert_names = [a.get("name", "?") for a in alerts[:3]]
-                    lines.append(f"⚠️ Estoque baixo ({len(alerts)}): {', '.join(alert_names)}")
-                mov_today = stock.get("movements_today", {})
-                if mov_today.get("total", 0) > 0:
-                    lines.append(f"📊 Movimentações hoje: {mov_today.get('entradas', 0)} entrada(s), {mov_today.get('saidas', 0)} saída(s)")
-        except Exception:
-            pass
+                # Injetar resultado no contexto
+                messages.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{
+                        "id": tool_call_id,
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "arguments": json.dumps(action.get("arguments", {})),
+                        },
+                    }],
+                })
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": json.dumps(result, ensure_ascii=False, default=str),
+                })
+                messages.append({
+                    "role": "user",
+                    "content": "A ação foi confirmada e executada. Por favor, confirme o resultado ao usuário.",
+                })
 
-        # Fornecedores
-        try:
-            from database.models import Client as _SuppClient, get_session as _supp_gs
-            _supp_s = _supp_gs()
-            try:
-                supp_q = _supp_s.query(_SuppClient).filter(
-                    _SuppClient.contact_type == "supplier",
-                    _SuppClient.is_active == True,
-                )
-                if user_id:
-                    supp_q = supp_q.filter(_SuppClient.user_id == user_id)
-                supp_count = supp_q.count()
-                if supp_count > 0:
-                    supps = supp_q.order_by(_SuppClient.name).limit(5).all()
-                    supp_names = [f"  - {s.name} | {s.phone or 'sem tel'}" for s in supps]
-                    lines.append(f"🚚 Fornecedores: {supp_count} cadastrado(s)")
-                    lines.append("Lista:\n" + "\n".join(supp_names))
-            finally:
-                _supp_s.close()
-        except Exception:
-            pass
+            except Exception as e:
+                logger.error(f"Erro ao executar ação confirmada {tool_name}: {e}")
+                return f"Erro ao executar a operação: {str(e)}"
 
-        # Resumo por forma de pagamento (mês atual)
-        try:
-            pb = CRMService.get_payment_breakdown(user_id=user_id)
-            by_pm = pb.get("by_payment_method", {})
-            if by_pm:
-                pm_lines = [f"  - {k}: R$ {v['total']:,.2f} ({v['percent']}%)" for k, v in by_pm.items() if v['total'] > 0]
-                if pm_lines:
-                    lines.append("💳 Vendas por forma de pgto (mês):")
-                    lines.extend(pm_lines)
-        except Exception:
-            pass
-
-        return "\n".join(_profile_lines + lines) if (_profile_lines or lines) else "Sem dados cadastrados ainda."
-
+    # Executar chamada ao modelo com tools
+    try:
+        return _call_with_tools(
+            client=client,
+            model=model,
+            messages=messages,
+            tools=tools,
+            user_id=user_id or 0,
+        )
+    except SensitiveActionRequired:
+        raise
     except Exception as e:
-        logger.warning(f"CRM context indisponível: {e}")
-        return "Dados não disponíveis no momento."
+        logger.error(f"Erro na chamada ao modelo {model}: {e}", exc_info=True)
+        return f"Desculpe, ocorreu um erro ao processar sua solicitação. Tente novamente em instantes."
