@@ -527,6 +527,51 @@ class CRMService:
         finally:
             session.close()
 
+    @staticmethod
+    def list_appointments(filter: str = "hoje", user_id: int = None) -> dict:
+        """Lista agendamentos por filtro simples: 'hoje', 'semana' ou 'todos'.
+        Retorna lista formatada para uso direto pelo LLM via function calling.
+        """
+        session = get_session()
+        try:
+            today = date.today()
+            q = session.query(Appointment)
+            if user_id:
+                q = q.filter(Appointment.user_id == user_id)
+
+            if filter == "hoje":
+                start = datetime.combine(today, datetime.min.time())
+                end = datetime.combine(today, datetime.max.time())
+                q = q.filter(Appointment.scheduled_at.between(start, end))
+            elif filter == "semana":
+                week_start = today - timedelta(days=today.weekday())
+                week_end = week_start + timedelta(days=6)
+                start = datetime.combine(week_start, datetime.min.time())
+                end = datetime.combine(week_end, datetime.max.time())
+                q = q.filter(Appointment.scheduled_at.between(start, end))
+            # "todos" não aplica filtro de data
+
+            appointments = q.order_by(Appointment.scheduled_at).limit(50).all()
+            items = []
+            for a in appointments:
+                d = a.to_dict()
+                # Adicionar nome do cliente se existir
+                if a.client_id:
+                    client = session.query(Client).filter(Client.id == a.client_id).first()
+                    d["client_name"] = client.name if client else None
+                items.append(d)
+
+            return {
+                "filter": filter,
+                "total": len(items),
+                "appointments": items,
+            }
+        except Exception as e:
+            logger.error(f"Erro ao listar agendamentos: {e}")
+            return {"filter": filter, "total": 0, "appointments": [], "error": str(e)}
+        finally:
+            session.close()
+
     # ========================================================================
     # MÉTRICAS E DASHBOARD
     # ========================================================================
@@ -690,6 +735,71 @@ class CRMService:
         except Exception as e:
             session.rollback()
             return {"status": "error", "message": str(e)}
+        finally:
+            session.close()
+
+    @staticmethod
+    def list_invoices(
+        status: str = "todas",
+        start: str = None,
+        end: str = None,
+        user_id: int = None,
+        limit: int = 50,
+    ) -> dict:
+        """Lista faturas/cobranças com filtros de status e período.
+        status: 'todas' | 'pendente' | 'paga' | 'vencida'
+        start/end: strings ISO YYYY-MM-DD (opcionais)
+        """
+        session = get_session()
+        try:
+            today = date.today()
+            q = session.query(Invoice)
+            if user_id:
+                q = q.filter(Invoice.user_id == user_id)
+
+            # Filtro de status
+            if status == "pendente":
+                q = q.filter(Invoice.status == "pending", Invoice.due_date >= today)
+            elif status == "paga":
+                q = q.filter(Invoice.status == "paid")
+            elif status == "vencida":
+                q = q.filter(Invoice.status == "pending", Invoice.due_date < today)
+            # "todas" não filtra por status
+
+            # Filtro de período
+            if start:
+                try:
+                    q = q.filter(Invoice.due_date >= date.fromisoformat(start))
+                except ValueError:
+                    pass
+            if end:
+                try:
+                    q = q.filter(Invoice.due_date <= date.fromisoformat(end))
+                except ValueError:
+                    pass
+
+            invoices = q.order_by(Invoice.due_date.desc()).limit(limit).all()
+            items = []
+            for inv in invoices:
+                d = inv.to_dict()
+                client = session.query(Client).filter(Client.id == inv.client_id).first()
+                d["client_name"] = client.name if client else "Desconhecido"
+                if inv.status == "pending" and inv.due_date < today:
+                    d["days_overdue"] = (today - inv.due_date).days
+                elif inv.status == "pending":
+                    d["days_until_due"] = (inv.due_date - today).days
+                items.append(d)
+
+            total_value = sum(inv.get("amount", 0) for inv in items)
+            return {
+                "status_filter": status,
+                "total": len(items),
+                "total_value": round(total_value, 2),
+                "invoices": items,
+            }
+        except Exception as e:
+            logger.error(f"Erro ao listar faturas: {e}")
+            return {"status_filter": status, "total": 0, "total_value": 0.0, "invoices": [], "error": str(e)}
         finally:
             session.close()
 
