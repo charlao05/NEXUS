@@ -15,7 +15,7 @@ Acesse: https://dashboard.stripe.com/apikeys
 
 Cole as chaves em `.env.local`:
 ```env
-NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_51Sb8zu... (a que você já tem)
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_COLE_SUA_CHAVE_PUBLICA_AQUI
 STRIPE_SECRET_KEY=sk_live_... (cole a chave secreta completa)
 ```
 

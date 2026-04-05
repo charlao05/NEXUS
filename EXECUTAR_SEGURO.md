@@ -77,7 +77,7 @@ cd C:\Users\Charles\Desktop\NEXUS\frontend
 │  .env.local (NUNCA commitado)                       │
 │  - STRIPE_SECRET_KEY=sk_live_...                    │
 │  - CLERK_SECRET_KEY=sk_test_...                     │
-│  - JWT_SECRET=mAZus71k...                           │
+│  - JWT_SECRET=<gerado com openssl rand -hex 64>     │
 └─────────────┬───────────────────────────────────────┘
               │
               ▼
