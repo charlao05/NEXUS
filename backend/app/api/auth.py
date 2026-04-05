@@ -354,37 +354,40 @@ def increment_request_count(user_id: int) -> int:
 # PLANOS
 # ============================================================================
 
+# Preços e stripe_price_id vêm de plan_limits.py (fonte única de verdade)
+from app.core.plan_limits import PLAN_LIMITS, Plan as _Plan  # type: ignore[import]
+
 PLANS: dict[str, dict[str, Any]] = {
     "free": {
         "requests_per_day": 100,
         "requests_per_month": 2000,
         "concurrent_requests": 1,
         "features": ["contabilidade", "clientes", "agenda"],
-        "price": 0,
+        "price": PLAN_LIMITS[_Plan.FREE]["price"],
     },
     "essencial": {
         "requests_per_day": 1000,
         "requests_per_month": 30000,
         "concurrent_requests": 5,
         "features": ["contabilidade", "clientes", "cobranca", "agenda"],
-        "price": 2990,
-        "stripe_price_id": os.getenv("STRIPE_PRICE_ESSENCIAL", ""),
+        "price": PLAN_LIMITS[_Plan.ESSENCIAL]["price"],
+        "stripe_price_id": PLAN_LIMITS[_Plan.ESSENCIAL]["stripe_price_id"],
     },
     "profissional": {
         "requests_per_day": 10000,
         "requests_per_month": 300000,
         "concurrent_requests": 10,
         "features": ["contabilidade", "clientes", "cobranca", "agenda", "assistente"],
-        "price": 5990,
-        "stripe_price_id": os.getenv("STRIPE_PRICE_PROFISSIONAL", ""),
+        "price": PLAN_LIMITS[_Plan.PROFISSIONAL]["price"],
+        "stripe_price_id": PLAN_LIMITS[_Plan.PROFISSIONAL]["stripe_price_id"],
     },
     "completo": {
         "requests_per_day": 999999,
         "requests_per_month": 999999,
         "concurrent_requests": 999999,
         "features": ["full_api", "dedicated_support", "custom_integration"],
-        "price": 8990,
-        "stripe_price_id": os.getenv("STRIPE_PRICE_COMPLETO", ""),
+        "price": PLAN_LIMITS[_Plan.COMPLETO]["price"],
+        "stripe_price_id": PLAN_LIMITS[_Plan.COMPLETO]["stripe_price_id"],
     },
     # Aliases retrocompatíveis
     "pro": {
@@ -392,14 +395,14 @@ PLANS: dict[str, dict[str, Any]] = {
         "requests_per_month": 30000,
         "concurrent_requests": 5,
         "features": ["contabilidade", "clientes", "cobranca", "agenda"],
-        "price": 2990,
+        "price": PLAN_LIMITS[_Plan.ESSENCIAL]["price"],
     },
     "enterprise": {
         "requests_per_day": 999999,
         "requests_per_month": 999999,
         "concurrent_requests": 999999,
         "features": ["full_api", "dedicated_support", "custom_integration"],
-        "price": 8990,
+        "price": PLAN_LIMITS[_Plan.COMPLETO]["price"],
     },
 }
 
