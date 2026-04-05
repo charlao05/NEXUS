@@ -1,6 +1,6 @@
 """
-NEXUS - API REST para CRM e Automação Web
-===========================================
+NEXUS - API REST para CRM
+==========================
 Endpoints REST protegidos por autenticação.
 Multi-tenant: todas as operações filtradas por user_id.
 """
@@ -14,7 +14,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/crm", tags=["crm"])
-automation_router = APIRouter(prefix="/api/automation", tags=["automation"])
 
 
 # ============================================================================
@@ -139,14 +138,6 @@ class InteractionCreate(BaseModel):
     summary: str = Field(..., min_length=1, max_length=500)
     details: str = Field("", max_length=2000)
     sentiment: Literal["positive", "neutral", "negative"] = "neutral"
-
-
-class WebTaskRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=1000)
-
-
-class TaskApproval(BaseModel):
-    approved_by: str = "user"
 
 
 # ============================================================================
@@ -473,72 +464,3 @@ async def export_transactions_csv(
         )
     finally:
         db.close()
-
-
-# ============================================================================
-# AUTOMAÇÃO WEB ENDPOINTS
-# ============================================================================
-
-@automation_router.post("/tasks/plan")
-async def plan_web_task(data: WebTaskRequest, user: dict = Depends(_get_current_user_dep())):
-    """Gera plano de automação via LLM (não executa ainda)"""
-    from services.web_automation import generate_automation_plan, create_web_task
-    plan = await generate_automation_plan(data.message)
-    if "error" in plan:
-        raise HTTPException(500, plan["error"])
-
-    # Salvar como tarefa pendente
-    task = create_web_task(
-        title=plan.get("title", "Automação Web"),
-        description=data.message,
-        target_url=plan.get("target_url", ""),
-        plan=plan,
-    )
-    return task
-
-
-@automation_router.get("/tasks")
-async def list_tasks(status: str = None, limit: int = 20, user: dict = Depends(_get_current_user_dep())):
-    """Lista tarefas de automação"""
-    from services.web_automation import get_pending_tasks, get_task_history
-    if status == "pending":
-        return {"tasks": get_pending_tasks()}
-    return {"tasks": get_task_history(limit)}
-
-
-@automation_router.get("/tasks/{task_id}")
-async def get_task_detail(task_id: int, user: dict = Depends(_get_current_user_dep())):
-    from services.web_automation import get_task
-    task = get_task(task_id)
-    if not task:
-        raise HTTPException(404, "Tarefa não encontrada")
-    return task
-
-
-@automation_router.post("/tasks/{task_id}/approve")
-async def approve_task_endpoint(task_id: int, data: TaskApproval, user: dict = Depends(_get_current_user_dep())):
-    """Aprova tarefa para execução"""
-    from services.web_automation import approve_task
-    result = approve_task(task_id, data.approved_by)
-    if result.get("status") == "not_found":
-        raise HTTPException(404, "Tarefa não encontrada")
-    return result
-
-
-@automation_router.post("/tasks/{task_id}/reject")
-async def reject_task_endpoint(task_id: int, user: dict = Depends(_get_current_user_dep())):
-    """Rejeita tarefa"""
-    from services.web_automation import reject_task
-    return reject_task(task_id)
-
-
-@automation_router.post("/tasks/{task_id}/execute")
-async def execute_task_endpoint(task_id: int, user: dict = Depends(_get_current_user_dep())):
-    """Executa tarefa APROVADA no navegador"""
-    from services.web_automation import execute_approved_task
-    result = execute_approved_task(task_id)
-    if result.get("status") == "not_found":
-        raise HTTPException(404, "Tarefa não encontrada")
-    if result.get("status") == "not_approved":
-        raise HTTPException(400, "Tarefa precisa ser aprovada antes de executar")
-    return result

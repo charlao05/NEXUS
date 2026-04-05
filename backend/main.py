@@ -308,10 +308,8 @@ try:
 except ImportError as e:
     logging.warning(f"Não foi possível importar auth routes: {e}")
 
-# Importar rotas LLM — REMOVIDO: legado, substituído por agent_chat.get_llm_response
-# Endpoints /api/llm/* não possuem consumidores no frontend
-# from routes import llm_routes
-# app.include_router(llm_routes.router)
+# Rotas LLM legadas removidas — movidas para _archived/api/llm_routes.py
+# Substituídas por agent_chat.get_llm_response (sem endpoints públicos /api/llm/*)
 
 # Importar rotas do Agent Hub (comunicação entre agentes)
 try:

@@ -25,6 +25,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 
 from app.api.auth import get_current_user  # type: ignore[import]
+from app.core.llm import get_raw_openai  # type: ignore[import]
 
 logger = logging.getLogger(__name__)
 
@@ -43,19 +44,6 @@ ALLOWED_DOC    = {
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
-
-
-def _get_openai_raw():
-    """Retorna cliente OpenAI cru (não o wrapper) para chamadas diretas (Whisper, Vision)."""
-    try:
-        from openai import OpenAI
-        api_key = os.getenv("OPENAI_API_KEY", "")
-        if not api_key or api_key.startswith("sk-proj-test"):
-            return None
-        return OpenAI(api_key=api_key)
-    except Exception as e:
-        logger.warning(f"OpenAI client raw não disponível: {e}")
-        return None
 
 
 # ============================================================================
@@ -87,7 +75,7 @@ async def transcribe_audio(
         raise HTTPException(400, "Áudio muito curto. Grave pelo menos 1 segundo.")
 
     # Transcrever via Whisper
-    client = _get_openai_raw()
+    client = get_raw_openai()
     if not client:
         raise HTTPException(503, "Serviço de transcrição indisponível. Configure OPENAI_API_KEY.")
 
@@ -207,7 +195,7 @@ async def upload_and_process(
     processed_files = []
     extracted_texts = []
 
-    client = _get_openai_raw()
+    client = get_raw_openai()
 
     for f in files:
         content = await f.read()
