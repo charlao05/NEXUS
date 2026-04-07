@@ -73,6 +73,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Security Headers Middleware ───────────────────────────────────────────────
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as _Request
+from starlette.responses import Response as _Response
+
+
+class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: _Request, call_next):  # type: ignore[override]
+        response: _Response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        if _is_prod:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+
+app.add_middleware(_SecurityHeadersMiddleware)
+
 # ── Rate Limit Middleware (opcional) ─────────────────────────────────────────
 try:
     from app.api.rate_limit import NexusRateLimitMiddleware
