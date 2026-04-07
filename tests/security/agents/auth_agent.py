@@ -74,7 +74,8 @@ class AuthAgent(SecurityAgent):
             else:
                 resp = self.client.post(path, json={})
 
-            if resp.status_code not in (401, 403, 405, 307):
+            # 404 é aceitável — rota não existe, não houve bypass de autenticação
+            if resp.status_code not in (401, 403, 404, 405, 307):
                 findings.append(Finding(
                     title=f"Endpoint sem autenticação: {method} {path}",
                     description=f"Retornou {resp.status_code} sem header Authorization.",

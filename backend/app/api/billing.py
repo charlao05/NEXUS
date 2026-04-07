@@ -8,7 +8,7 @@ import stripe
 import os
 from datetime import datetime, timezone
 
-router = APIRouter(prefix="/billing", tags=["billing"])
+router = APIRouter(prefix="/api/billing", tags=["billing"])
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 
