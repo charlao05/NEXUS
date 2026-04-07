@@ -6,7 +6,10 @@ from app.schemas.billing import InvoiceOut, SubscriptionOut, SubscriptionCreate 
 from typing import List, Optional
 import stripe
 import os
+import logging
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 
@@ -17,19 +20,19 @@ PLANS = {
     "essencial": {
         "stripe_price_id": os.getenv("STRIPE_PRICE_ESSENCIAL", ""),
         "name": "Essencial",
-        "amount": 3990,
+        "amount": 2990,
         "currency": "brl",
     },
     "profissional": {
         "stripe_price_id": os.getenv("STRIPE_PRICE_PROFISSIONAL", ""),
         "name": "Profissional",
-        "amount": 6990,
+        "amount": 5990,
         "currency": "brl",
     },
     "completo": {
         "stripe_price_id": os.getenv("STRIPE_PRICE_COMPLETO", ""),
         "name": "Completo",
-        "amount": 9990,
+        "amount": 8990,
         "currency": "brl",
     },
 }
@@ -94,21 +97,21 @@ def create_checkout_session(
     if not stripe.api_key:
         raise HTTPException(status_code=503, detail="Pagamentos nao configurados")
 
-    # Determina line_item: usa price_id do payload, depois do PLANS, senao fallback price_data
     plan_key = payload.plan.lower()
     plan_info = PLANS.get(plan_key, {})
 
-    # Prioridade: 1) price_id enviado pelo frontend, 2) price_id do PLANS, 3) price_data (fallback)
+    logger.info(f"Checkout request: plan={plan_key}, user={current_user.email}")
+
     resolved_price_id = (
-        payload.price_id
+        getattr(payload, 'price_id', None)
         or plan_info.get("stripe_price_id", "")
     )
 
     if resolved_price_id:
         line_items = [{"price": resolved_price_id, "quantity": 1}]
+        logger.info(f"Using price_id: {resolved_price_id[:20]}...")
     else:
-        # Fallback: usa price_data inline para nao bloquear checkout
-        amount = plan_info.get("amount", 3990)
+        amount = plan_info.get("amount", 2990)
         currency = plan_info.get("currency", "brl")
         name = plan_info.get("name", payload.plan.capitalize())
         line_items = [{
@@ -120,9 +123,9 @@ def create_checkout_session(
             },
             "quantity": 1,
         }]
+        logger.info(f"Using price_data fallback: {name} {amount} {currency}")
 
     try:
-        # Cria ou recupera customer no Stripe
         if not current_user.stripe_customer_id:
             customer = stripe.Customer.create(
                 email=current_user.email,
@@ -131,8 +134,9 @@ def create_checkout_session(
             )
             current_user.stripe_customer_id = customer.id
             db.commit()
+            logger.info(f"Stripe customer created: {customer.id}")
 
-        frontend_url = os.getenv("FRONTEND_URL", "https://nexxusapp.com.br")
+        frontend_url = os.getenv("FRONTEND_URL", "https://app.nexxusapp.com.br")
         session = stripe.checkout.Session.create(
             customer=current_user.stripe_customer_id,
             payment_method_types=["card"],
@@ -143,9 +147,70 @@ def create_checkout_session(
             cancel_url=f"{frontend_url}/planos?checkout=cancelled",
             metadata={"user_id": str(current_user.id), "plan": payload.plan},
         )
+        logger.info(f"Checkout session created: {session.id}")
         return {"checkout_url": session.url, "session_id": session.id}
     except stripe.error.StripeError as e:
+        logger.error(f"Stripe checkout error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected checkout error: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao criar checkout")
+
+
+@router.post("/checkout/addon-clients")
+def create_addon_checkout(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Cria sessao de checkout para addon +10 clientes/fornecedores (compra unica R$12,90)."""
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Pagamentos nao configurados")
+
+    logger.info(f"Addon checkout request: user={current_user.email}")
+
+    try:
+        if not current_user.stripe_customer_id:
+            customer = stripe.Customer.create(
+                email=current_user.email,
+                name=current_user.full_name or current_user.email,
+                metadata={"user_id": str(current_user.id)},
+            )
+            current_user.stripe_customer_id = customer.id
+            db.commit()
+
+        frontend_url = os.getenv("FRONTEND_URL", "https://app.nexxusapp.com.br")
+        session = stripe.checkout.Session.create(
+            customer=current_user.stripe_customer_id,
+            payment_method_types=["card"],
+            line_items=[{
+                "price_data": {
+                    "currency": "brl",
+                    "unit_amount": 1290,
+                    "product_data": {
+                        "name": "NEXUS +10 Clientes/Fornecedores",
+                        "description": "Adicione 10 clientes e 10 fornecedores extras ao seu plano atual",
+                    },
+                },
+                "quantity": 1,
+            }],
+            mode="payment",
+            success_url=f"{frontend_url}/dashboard?addon=success&session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{frontend_url}/planos?addon=cancelled",
+            metadata={
+                "user_id": str(current_user.id),
+                "addon_type": "extra_clients",
+                "extra_clients": "10",
+                "extra_suppliers": "10",
+            },
+        )
+        logger.info(f"Addon checkout session created: {session.id}")
+        return {"checkout_url": session.url, "session_id": session.id}
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe addon checkout error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected addon checkout error: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao criar checkout do addon")
 
 
 @router.delete("/subscription")
@@ -185,7 +250,7 @@ async def stripe_webhook(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Webhook Stripe — processa eventos de pagamento e assinatura."""
+    """Webhook Stripe - processa eventos de pagamento e assinatura."""
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
     endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
@@ -199,17 +264,28 @@ async def stripe_webhook(
         raise HTTPException(status_code=400, detail="Assinatura invalida")
 
     event_type = event["type"]
+    logger.info(f"Webhook received: {event_type}")
 
     if event_type == "checkout.session.completed":
-        # Checkout concluido — criar/atualizar assinatura
         session_obj = event["data"]["object"]
         user_id = session_obj.get("metadata", {}).get("user_id")
-        plan = session_obj.get("metadata", {}).get("plan", "essencial")
+        plan = session_obj.get("metadata", {}).get("plan", "")
+        addon_type = session_obj.get("metadata", {}).get("addon_type", "")
         stripe_sub_id = session_obj.get("subscription")
         stripe_customer_id = session_obj.get("customer")
 
-        if user_id and stripe_sub_id:
-            # Buscar dados da assinatura no Stripe
+        if addon_type == "extra_clients" and user_id:
+            extra_clients = int(session_obj.get("metadata", {}).get("extra_clients", "10"))
+            extra_suppliers = int(session_obj.get("metadata", {}).get("extra_suppliers", "10"))
+            user = db.query(User).filter(User.id == int(user_id)).first()
+            if user:
+                user.extra_client_slots = (user.extra_client_slots or 0) + extra_clients
+                user.extra_supplier_slots = (user.extra_supplier_slots or 0) + extra_suppliers
+                user.stripe_customer_id = stripe_customer_id
+                db.commit()
+                logger.info(f"Addon applied: user={user_id}, +{extra_clients} clients, +{extra_suppliers} suppliers")
+
+        elif user_id and stripe_sub_id and plan:
             stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
             sub = Subscription(
                 user_id=int(user_id),
@@ -223,13 +299,13 @@ async def stripe_webhook(
                 currency=(session_obj.get("currency") or "brl").upper(),
             )
             db.add(sub)
-            # Atualizar plano do usuario
             user = db.query(User).filter(User.id == int(user_id)).first()
             if user:
                 user.plan = plan
                 user.stripe_customer_id = stripe_customer_id
                 user.plan_activated_at = datetime.utcnow()
             db.commit()
+            logger.info(f"Subscription created: user={user_id}, plan={plan}")
 
     elif event_type == "customer.subscription.updated":
         stripe_sub = event["data"]["object"]
@@ -253,7 +329,6 @@ async def stripe_webhook(
         if sub:
             sub.status = "cancelled"
             db.commit()
-            # Rebaixar usuario para free
             user = db.query(User).filter(User.id == sub.user_id).first()
             if user:
                 user.plan = "free"
