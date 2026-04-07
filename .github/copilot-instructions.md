@@ -279,7 +279,7 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 ## Credenciais de Teste (Dev)
 
-- **Admin**: `charles.rsilva05@gmail.com` / `Admin@123` (id=57, plan=pro, role=admin)
+- **Admin**: configurar via `ADMIN_EMAIL` env var — nunca exponha credenciais aqui
 - **Health**: `GET http://127.0.0.1:8000/health`
 - **Diagnostico**: `http://localhost:5173/diag`
 

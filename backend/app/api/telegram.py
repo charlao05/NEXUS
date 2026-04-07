@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 
 WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://app.nexxusapp.com.br").rstrip("/")
 
 
 @router.post("/webhook")
@@ -50,7 +51,7 @@ async def telegram_webhook(request: Request):
             f"👋 Olá, *{user.get('first_name', username)}*!\n\n"
             f"Bem-vindo ao *NEXUS Assistant*.\n\n"
             f"Para conectar sua conta NEXUS, acesse:\n"
-            f"https://app.nexxusapp.com.br/settings/telegram\n\n"
+            f"{FRONTEND_URL}/settings/telegram\n\n"
             f"Digite /ajuda para ver todos os comandos.",
         )
     elif text.startswith("/ajuda"):
@@ -68,7 +69,7 @@ async def telegram_webhook(request: Request):
         await send_message(
             chat_id,
             "🤖 Processando sua mensagem...\n\n"
-            "_Conecte sua conta em https://app.nexxusapp.com.br/settings/telegram "
+            f"_Conecte sua conta em {FRONTEND_URL}/settings/telegram "
             "para usar o assistente completo._",
         )
 

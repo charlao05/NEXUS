@@ -15,7 +15,14 @@ logger = logging.getLogger(__name__)
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 FROM_EMAIL = os.getenv("EMAIL_FROM", "NEXUS <onboarding@resend.dev>")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://app.nexxusapp.com.br")
+
+# Aviso crítico no startup se produção sem chave de email
+if os.getenv("ENVIRONMENT", "development") == "production" and not RESEND_API_KEY:
+    logging.getLogger(__name__).error(
+        "CRITICAL: RESEND_API_KEY não configurada em produção. "
+        "Emails de boas-vindas, recuperação de senha e faturas NÃO serão enviados."
+    )
 
 
 def _get_resend():

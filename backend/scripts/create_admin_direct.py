@@ -17,7 +17,7 @@ print(f"Exists: {os.path.exists(DB_PATH)}")
 conn = sqlite3.connect(DB_PATH)
 c = conn.cursor()
 
-email = "charles.rsilva05@gmail.com"
+email = "appnexxus.app@gmail.com"
 password = "Teste1234"
 
 # Check if exists

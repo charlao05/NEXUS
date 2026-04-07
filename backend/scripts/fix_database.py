@@ -101,7 +101,7 @@ total = cursor.fetchone()[0]
 print(f"\nTotal usuarios: {total}")
 
 # 5. Verificar/criar conta admin
-email = "charles.rsilva05@gmail.com"
+email = "appnexxus.app@gmail.com"
 cursor.execute("SELECT id, full_name, role, plan, status FROM users WHERE email = ?", (email,))
 row = cursor.fetchone()
 

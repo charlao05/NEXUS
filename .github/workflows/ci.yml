@@ -120,3 +120,17 @@ jobs:
           name: e2e-results
           path: e2e/results/
           retention-days: 7
+
+  deploy:
+    name: Deploy to Render
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-lint, security-tests]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Trigger Render Deploy
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "Secret RENDER_DEPLOY_HOOK_URL is not set"; exit 1
+          fi
+          curl -fsS --retry 3 "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" -o /dev/null

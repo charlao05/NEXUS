@@ -65,7 +65,7 @@ echo.
 
 REM ── Verificar Login (teste automatico) ─────────────────────────────
 echo [..] Testando login automaticamente...
-powershell -NoProfile -Command "try { $body = '{\"email\":\"charles.rsilva05@gmail.com\",\"password\":\"Admin@123\"}'; $r = Invoke-RestMethod -Uri 'http://127.0.0.1:%BACKEND_PORT%/api/auth/login' -Method POST -Body $body -ContentType 'application/json' -TimeoutSec 5 -ErrorAction Stop; Write-Host '[OK] Login funcional: plan=' $r.plan 'uid=' $r.user_id } catch { Write-Host '[!!] Login falhou:' $_.Exception.Message }"
+powershell -NoProfile -Command "try { $body = '{\"email\":\"appnexxus.app@gmail.com\",\"password\":\"Admin@123\"}'; $r = Invoke-RestMethod -Uri 'http://127.0.0.1:%BACKEND_PORT%/api/auth/login' -Method POST -Body $body -ContentType 'application/json' -TimeoutSec 5 -ErrorAction Stop; Write-Host '[OK] Login funcional: plan=' $r.plan 'uid=' $r.user_id } catch { Write-Host '[!!] Login falhou:' $_.Exception.Message }"
 echo.
 
 REM Abrir navegador automaticamente

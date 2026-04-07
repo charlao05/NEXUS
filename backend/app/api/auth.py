@@ -1062,7 +1062,7 @@ async def create_checkout(
     try:
         price_in_cents = PLANS[plan_key]["price"]
         stripe_price_id = PLANS[plan_key].get("stripe_price_id", "")
-        frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
+        frontend_url = os.getenv("FRONTEND_URL", "https://app.nexxusapp.com.br").rstrip("/")
 
         _env = os.getenv("ENVIRONMENT", "development")
     
@@ -1158,8 +1158,20 @@ async def create_checkout(
             checkout_url=session.url or "",
             session_id=session.id,
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Erro Stripe checkout: {e}")
+        import stripe as _stripe_mod
+        if isinstance(e, _stripe_mod.error.AuthenticationError):
+            logger.error("Stripe AuthenticationError — STRIPE_SECRET_KEY inválida ou ausente")
+            raise HTTPException(status_code=503, detail="Stripe não configurado corretamente. Contate o suporte.")
+        if isinstance(e, _stripe_mod.error.InvalidRequestError):
+            logger.error(f"Stripe InvalidRequestError: {e}")
+            raise HTTPException(status_code=400, detail="Configuração de pagamento inválida. Contate o suporte.")
+        if isinstance(e, _stripe_mod.error.StripeError):
+            logger.error(f"Stripe erro ({type(e).__name__}): {e}")
+            raise HTTPException(status_code=500, detail="Erro ao criar checkout. Tente novamente ou contate o suporte.")
+        logger.error(f"Erro inesperado checkout ({type(e).__name__}): {e}")
         raise HTTPException(status_code=500, detail="Erro ao criar checkout. Tente novamente ou contate o suporte.")
 
 
@@ -1183,7 +1195,7 @@ async def create_portal_session(
                 status_code=400,
                 detail="Nenhuma assinatura Stripe encontrada. Faça checkout primeiro.",
             )
-        frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
+        frontend_url = os.getenv("FRONTEND_URL", "https://app.nexxusapp.com.br").rstrip("/")
         portal_session = stripe.billing_portal.Session.create(
             customer=user.stripe_customer_id,
             return_url=f"{frontend_url}/settings",
@@ -1236,7 +1248,7 @@ async def update_subscription_card(
                 detail="Nenhuma assinatura ativa encontrada.",
             )
         
-        frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
+        frontend_url = os.getenv("FRONTEND_URL", "https://app.nexxusapp.com.br").rstrip("/")
         
         # Criar sessão em modo "setup" para atualizar cartão
         session = stripe.checkout.Session.create(
@@ -1305,7 +1317,7 @@ async def checkout_addon_clients(
         raise HTTPException(status_code=503, detail="Stripe não configurado")
 
     try:
-        frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
+        frontend_url = os.getenv("FRONTEND_URL", "https://app.nexxusapp.com.br").rstrip("/")
         _env = os.getenv("ENVIRONMENT", "development")
         if _env != "production" and "localhost" in frontend_url:
             frontend_url = frontend_url.replace("https://", "http://")
@@ -1700,7 +1712,7 @@ async def google_callback(code: str | None = None, error: str | None = None, sta
         "GOOGLE_REDIRECT_URI",
         os.getenv("BACKEND_BASE_URL", "http://127.0.0.1:8000") + "/api/auth/google/callback",
     )
-    frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173")
+    frontend_url = os.getenv("FRONTEND_URL", "https://app.nexxusapp.com.br")
 
     if not client_id or not client_secret:
         raise HTTPException(status_code=503, detail="Configure GOOGLE_CLIENT_ID/SECRET")
@@ -1794,7 +1806,7 @@ async def facebook_callback(code: str | None = None, error: str | None = None, s
         "FACEBOOK_REDIRECT_URI",
         os.getenv("BACKEND_BASE_URL", "http://127.0.0.1:8000") + "/api/auth/facebook/callback",
     )
-    frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173")
+    frontend_url = os.getenv("FRONTEND_URL", "https://app.nexxusapp.com.br")
 
     if not client_id or not client_secret:
         raise HTTPException(status_code=503, detail="Configure FACEBOOK_CLIENT_ID/SECRET")

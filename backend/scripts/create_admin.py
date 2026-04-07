@@ -10,7 +10,7 @@ import bcrypt  # noqa: E402
 def create_admin():
     db = SessionLocal()
     
-    email = "charles.rsilva05@gmail.com"
+    email = "appnexxus.app@gmail.com"
     existing = db.query(User).filter(User.email == email).first()
     if existing:
         existing.role = "admin"

@@ -28,14 +28,14 @@ def migrate():
     
     # Promote owner
     db = SessionLocal()
-    user = db.query(User).filter(User.email == "charles.rsilva05@gmail.com").first()
+    user = db.query(User).filter(User.email == "appnexxus.app@gmail.com").first()
     if user:
         user.role = "admin"
         user.plan = "enterprise"
         db.commit()
         print(f"Promoted {user.email} to admin with enterprise plan")
     else:
-        print("User charles.rsilva05@gmail.com not found")
+        print("User appnexxus.app@gmail.com not found")
     db.close()
     print("Migration complete!")
 

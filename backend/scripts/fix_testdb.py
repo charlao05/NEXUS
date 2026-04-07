@@ -27,14 +27,14 @@ for col, default in [("role", "user"), ("communication_preference", "email")]:
 # 2. Verificar/criar conta admin
 row = c.execute(
     "SELECT id, email, plan, role, full_name FROM users WHERE email=?",
-    ("charles.rsilva05@gmail.com",)
+    ("appnexxus.app@gmail.com",)
 ).fetchone()
 
 if row:
     print(f"  Charles exists: id={row[0]}, plan={row[2]}, role={row[3]}, name={row[4]}")
     c.execute(
         "UPDATE users SET role='admin', plan='enterprise', full_name='Charles Silva' WHERE email=?",
-        ("charles.rsilva05@gmail.com",)
+        ("appnexxus.app@gmail.com",)
     )
     conn.commit()
     print("  >> Updated to admin/enterprise/Charles Silva")
@@ -51,7 +51,7 @@ else:
            (email, password_hash, full_name, plan, status, role, communication_preference,
             trial_ends_at, email_verified, lgpd_consent, created_at, updated_at, last_login)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        ("charles.rsilva05@gmail.com", pw, "Charles Silva", "enterprise", "active",
+        ("appnexxus.app@gmail.com", pw, "Charles Silva", "enterprise", "active",
          "admin", "email", trial, 1, 1, now, now, now)
     )
     conn.commit()
@@ -62,7 +62,7 @@ cols = [i[1] for i in c.execute("PRAGMA table_info(users)").fetchall()]
 total = c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 admin = c.execute(
     "SELECT id, email, plan, role, full_name FROM users WHERE email=?",
-    ("charles.rsilva05@gmail.com",)
+    ("appnexxus.app@gmail.com",)
 ).fetchone()
 print(f"\n  Total users: {total}")
 print(f"  Columns: {cols}")
