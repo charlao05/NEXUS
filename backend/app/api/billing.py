@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/billing", tags=["billing"])
+router = APIRouter(prefix="/api/auth", tags=["billing"])
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 
