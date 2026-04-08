@@ -243,10 +243,14 @@ function AgentConfig() {
   }, [token]);
 
   const _PAID_PLANS = ['essencial', 'profissional', 'completo', 'pro', 'enterprise'];
-  // Admin tem acesso total; agentes, clientes e agenda = gratuitos (financeiro inclui contabilidade)
+  // Admin tem acesso total; agentes básicos = gratuitos; assistente = apenas profissional+
   const isAdmin = userRole === 'admin' || userRole === 'superadmin';
   const _FREE_AGENTS = ['agenda', 'clientes', 'financeiro', 'contabilidade'];
-  const hasAccess = isAdmin || _FREE_AGENTS.includes(id || '') || _PAID_PLANS.includes(realPlan);
+  const _PROFISSIONAL_AGENTS = ['assistente'];
+  const hasAccess = isAdmin
+    || _FREE_AGENTS.includes(id || '')
+    || (_PAID_PLANS.includes(realPlan) && !_PROFISSIONAL_AGENTS.includes(id || ''))
+    || (_PROFISSIONAL_AGENTS.includes(id || '') && ['profissional', 'completo', 'enterprise'].includes(realPlan));
 
   useEffect(() => {
     if (checkedAccess && !hasAccess) {

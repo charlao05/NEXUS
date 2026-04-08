@@ -29,7 +29,7 @@ const plans: Plan[] = [
     id: 'free',
     name: 'Gratuito',
     price: 'R$ 0',
-    priceNote: 'para sempre',
+    priceNote: 'gratuito',
     description: 'Comece sem pagar nada',
     icon: <Gift className="w-7 h-7" />,
     free: true,
@@ -38,7 +38,7 @@ const plans: Plan[] = [
       '50 mensagens/dia com IA',
       '2 agentes: Fiscal e Clientes/Agenda',
       'Até 5 clientes e 5 fornecedores',
-      '3 notas fiscais/mês',
+      'Suporte a notas fiscais (em breve)',
       'Suporte por email',
       'Sem cartão de crédito',
       'Opção: +10 clientes/fornecedores por R$ 12,90 (compra única)',
@@ -56,8 +56,8 @@ const plans: Plan[] = [
       '300 mensagens/dia com IA',
       '4 agentes: Fiscal, Clientes/Agenda e Cobranças',
       'Até 100 clientes e 100 fornecedores',
-      'Notas fiscais ilimitadas',
-      'Lembretes automáticos',
+      'Suporte a notas fiscais (em breve)',
+      'Automação de lembretes',
       'Suporte prioritário',
     ],
   },
@@ -74,9 +74,8 @@ const plans: Plan[] = [
       '1.000 mensagens/dia com IA',
       'Todos os 5 agentes de IA',
       'Até 500 clientes e 500 fornecedores',
-      'Tudo ilimitado',
-      'Automação completa',
-      'Relatórios avançados',
+      'Automação de lembretes e cobranças',
+      'Relatório de clientes e finanças',
       'Suporte prioritário',
     ],
   },
@@ -90,13 +89,11 @@ const plans: Plan[] = [
     buttonText: 'Assinar Completo',
     features: [
       'Mensagens ilimitadas',
-      'Todos os agentes + futuros',
+      'Todos os agentes de IA disponíveis',
       'Clientes e fornecedores ilimitados',
-      'Integração com outros sistemas',
-      'Notificações automáticas personalizadas',
-      'Suporte 24/7 dedicado',
-      'Gerente de conta',
-      'Garantia de disponibilidade 99,9%',
+      'Automação avançada de lembretes e cobranças',
+      'Relatórios completos de clientes e finanças',
+      'Suporte prioritário',
     ],
   },
 ];
@@ -194,7 +191,7 @@ export default function Pricing() {
             Escolha Seu Plano
           </h2>
           <p className="text-lg text-indigo-200">
-            <span className="text-green-400 font-semibold">Plano Gratuito para Sempre</span> • Faça upgrade quando quiser
+            <span className="text-green-400 font-semibold">Plano Gratuito disponível</span> • Faça upgrade quando quiser
           </p>
         </div>
       </div>
@@ -386,8 +383,10 @@ export default function Pricing() {
 
             {/* Portal: Gerenciar Assinatura (apenas planos pagos) */}
       {normalizedPlan !== 'free' && (
-        <div className="max-w-4xl mx-auto mt-6 p-4 bg-indigo-900/30 border border-indigo-500/40 rounded-2xl text-center">
-          <p className="text-indigo-200 text-sm mb-3">Você está no plano <strong>{normalizedPlan}</strong>. Gerencie sua assinatura pelo portal Stripe.</p>
+        <div className="max-w-4xl mx-auto mt-6 p-4 bg-slate-800/30 border border-slate-600/30 rounded-2xl text-center">
+          <p className="text-slate-400 text-xs mb-2">
+            Já assinante do plano <strong className="text-slate-300">{normalizedPlan}</strong>? Cancele ou atualize seus dados de pagamento pelo portal seguro da Stripe.
+          </p>
           <button
             onClick={async () => {
               try {
@@ -399,9 +398,9 @@ export default function Pricing() {
                 setError('Não foi possível abrir o portal. Tente novamente.');
               }
             }}
-            className="px-6 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-sm transition-all"
+            className="px-4 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition-all"
           >
-            Gerenciar Assinatura
+            Gerenciar / Cancelar Assinatura
           </button>
         </div>
       )}

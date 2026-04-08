@@ -15,9 +15,14 @@ import logging
 import os
 
 from dotenv import load_dotenv
+from pathlib import Path
 
 # Carrega .env ANTES de qualquer import que leia os.getenv()
-load_dotenv()
+# Primeiro tenta backend/.env, depois root/.env (para pegar STRIPE, GOOGLE, etc.)
+_backend_env = Path(__file__).parent / ".env"
+_root_env = Path(__file__).parent.parent / ".env"
+load_dotenv(_backend_env)
+load_dotenv(_root_env)  # não sobrescreve vars já definidas (override=False)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

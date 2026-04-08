@@ -51,6 +51,7 @@ export default function Agents() {
   const navigate = useNavigate();
   const { isDark } = useTheme();
   const { isAgentAvailable, isFree, loading, limits } = usePlanLimits();
+  const isEssencial = limits?.plan === 'essencial';
 
   const handleAgentClick = (agent: Agent) => {
     if (loading || isAgentAvailable(agent.backendId)) {
@@ -155,6 +156,29 @@ export default function Agents() {
               <button
                 onClick={() => navigate('/pricing')}
                 className="px-6 py-3 rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-medium transition"
+              >
+                Ver Planos
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Upgrade Banner for Essencial users (assistente bloqueado) */}
+        {isEssencial && !loading && (
+          <div className={`mt-8 p-6 rounded-2xl bg-gradient-to-r border ${isDark ? 'from-blue-900/30 to-indigo-900/30 border-blue-700/30' : 'from-blue-50 to-indigo-50 border-blue-200'}`}>
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center">
+                <Sparkles className="w-6 h-6 text-white" />
+              </div>
+              <div className="flex-1">
+                <h3 className={`font-semibold text-lg ${isDark ? 'text-white' : 'text-slate-900'}`}>Desbloqueie o Assistente Pessoal</h3>
+                <p className={`text-base ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                  Com o plano Profissional (R$ 59,90/mês) você tem acesso a todos os agentes, incluindo o Assistente Pessoal de IA
+                </p>
+              </div>
+              <button
+                onClick={() => navigate('/pricing')}
+                className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-medium transition"
               >
                 Ver Planos
               </button>

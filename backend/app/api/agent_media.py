@@ -155,7 +155,7 @@ async def transcribe_audio(
         except Exception:
             pass
 
-        agent_response = await get_llm_response(agent, transcription_text, history=chat_history)
+        agent_response = get_llm_response(agent, transcription_text, conversation_history=chat_history)
 
         # Salvar no histórico
         if agent_response:
@@ -313,7 +313,7 @@ async def upload_and_process(
         except Exception:
             pass
 
-        agent_response = await get_llm_response(agent, full_context, history=chat_history)
+        agent_response = get_llm_response(agent, full_context, conversation_history=chat_history)
 
         # Salvar histórico
         if agent_response:

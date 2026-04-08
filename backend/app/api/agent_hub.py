@@ -716,7 +716,7 @@ async def execute_agent_action(
         # Chat livre: usuário digitou uma mensagem
         if user_message and action.action in ("smart_chat", "chat"):
             try:
-                llm_response = await get_llm_response(agent_id, user_message, history=chat_history, user_id=_user_id, confirmed_action=_confirmed_action)
+                llm_response = get_llm_response(agent_id, user_message, conversation_history=chat_history, user_id=_user_id, confirmed_actions=[_confirmed_action] if _confirmed_action else None)
             except SensitiveActionRequired as sar:
                 # Ação requer confirmação com senha — retornar ao frontend
                 _n_actions = len(sar.pending_actions)
@@ -757,7 +757,7 @@ async def execute_agent_action(
         if action.action in ACTION_PROMPTS:
             prompt = ACTION_PROMPTS[action.action]
             try:
-                llm_response = await get_llm_response(agent_id, prompt, history=chat_history, user_id=_user_id, confirmed_action=_confirmed_action)
+                llm_response = get_llm_response(agent_id, prompt, conversation_history=chat_history, user_id=_user_id, confirmed_actions=[_confirmed_action] if _confirmed_action else None)
             except SensitiveActionRequired as sar:
                 _n_actions = len(sar.pending_actions)
                 _plural = f"{_n_actions} ações" if _n_actions > 1 else "a ação"
