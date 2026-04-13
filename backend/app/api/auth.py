@@ -1323,10 +1323,7 @@ async def checkout_addon_clients(
             frontend_url = frontend_url.replace("https://", "http://")
 
         session = stripe.checkout.Session.create(
-            payment_method_types=["card", "pix"],
-            payment_method_options={
-                "pix": {"expires_after_seconds": 1800},
-            },
+            payment_method_types=["card"],
             line_items=[{
                 "price_data": {
                     "currency": "brl",
