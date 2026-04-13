@@ -331,6 +331,48 @@ Responda SEMPRE em português brasileiro simples e objetivo.""",
 }
 
 # ============================================================================
+# ACTION_PROMPTS — Mapeia ações de botões rápidos para prompts naturais
+# ============================================================================
+
+ACTION_PROMPTS: dict[str, str] = {
+    # Agenda
+    "list_today":        "Liste todos os meus compromissos de hoje.",
+    "list_week":         "Mostre minha agenda completa desta semana.",
+    "add_appointment":   "Quero marcar um novo compromisso. Me pergunte os detalhes.",
+    # Clientes
+    "list_clients":      "Liste meus clientes cadastrados.",
+    "add_client":        "Quero cadastrar um novo cliente. Me pergunte os dados.",
+    "list_followup":     "Quais clientes precisam de atenção ou acompanhamento?",
+    # Fornecedores / Estoque
+    "list_suppliers":    "Liste meus fornecedores cadastrados.",
+    "stock_summary":     "Mostre o resumo do meu estoque atual.",
+    # Financeiro
+    "pipeline_summary":  "Mostre o resumo do meu pipeline de vendas.",
+    "monthly_summary":   "Mostre o resumo financeiro do mês atual.",
+    "daily_summary_fin": "Mostre o resumo financeiro de hoje.",
+    "weekly_summary_fin": "Mostre o resumo financeiro desta semana.",
+    "payment_breakdown": "Mostre as vendas separadas por forma de pagamento.",
+    "das_status":        "Qual é o status do próximo boleto MEI (DAS)?",
+    "mei_status":        "Qual é o meu limite MEI e quanto já usei?",
+    # Cobranças
+    "list_overdue":      "Liste os clientes que estão devendo (faturas vencidas).",
+    "list_pending":      "Liste as contas a vencer nos próximos dias.",
+    "send_reminder":     "Quero enviar lembretes de cobrança para clientes com faturas em aberto.",
+    "total_open":        "Qual é o total em aberto de cobranças pendentes?",
+    # Contabilidade / NF
+    "emit_nf":           "Quero emitir uma nota fiscal. Me pergunte os detalhes.",
+    "list_nf":           "Liste as notas fiscais emitidas.",
+    "generate_report":   "Gere um relatório contábil do período.",
+    "generate_contract": "Quero gerar um contrato. Me pergunte os detalhes.",
+    "checklist_mensal":  "O que ainda falta fazer este mês (obrigações fiscais e financeiras)?",
+    # Assistente pessoal
+    "daily_summary":     "Faça um resumo do meu dia: compromissos, cobranças e tarefas pendentes.",
+    "suggest_tasks":     "O que devo fazer agora? Sugira as prioridades do dia.",
+    "get_alerts":        "Quais são os alertas importantes que preciso saber?",
+    "web_automation":    "Preciso executar uma tarefa automatizada no site. Me pergunte o que fazer.",
+}
+
+# ============================================================================
 # FERRAMENTAS CRM — Definições para function calling (OpenAI)
 # ============================================================================
 
