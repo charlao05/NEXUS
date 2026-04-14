@@ -80,7 +80,7 @@ function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/success" element={<PaymentSuccess />} />
             <Route path="/pricing" element={<Pricing />} />
-            <Route path="/agents" element={<Agents />} />
+            <Route path="/agents" element={<Navigate to="/dashboard" replace />} />
             <Route path="/agents/:id" element={<AgentConfig />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/admin" element={<AdminDashboard />} />

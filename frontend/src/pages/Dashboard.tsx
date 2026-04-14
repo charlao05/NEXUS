@@ -527,74 +527,97 @@ function Dashboard() {
           </div>
         )}
 
-        {/* Seus Agentes */}
-        <div className={`p-6 rounded-2xl border ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'}`}>
-          <h2 className={`text-xl font-semibold mb-4 flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-            <svg className="w-6 h-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-            </svg>
-            Seus Agentes
-          </h2>
-          <div className="grid md:grid-cols-3 gap-4">
-            {/* Clientes e Agenda — sempre visível */}
-            <button
-              onClick={() => navigate('/agents/clientes')}
-              className={`flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r border transition text-left ${isDark ? 'from-green-900/30 to-emerald-900/30 border-green-700/30 hover:border-green-500/50' : 'from-green-50 to-emerald-50 border-green-200 hover:border-green-400'}`}
-            >
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center">
-                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-              </div>
-              <div>
-                <h3 className={`font-semibold text-base ${isDark ? 'text-white' : 'text-slate-900'}`}>Clientes e Agenda</h3>
-                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Cadastro, compromissos e vendas</p>
-              </div>
-            </button>
+        {/* Seus Agentes — dinâmico por plano */}
+        {(() => {
+          const _plan = userPlan?.toLowerCase() || 'free';
+          const _paid = ['essencial', 'profissional', 'completo', 'pro', 'enterprise'].includes(_plan);
+          const _pro  = ['profissional', 'completo', 'enterprise'].includes(_plan);
+          const _isAdmin = userRole === 'admin' || userRole === 'superadmin';
 
-            {/* Financeiro */}
-            <button
-              onClick={() => navigate('/agents/financeiro')}
-              className={`flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r border transition text-left ${isDark ? 'from-emerald-900/30 to-teal-900/30 border-emerald-700/30 hover:border-emerald-500/50' : 'from-emerald-50 to-teal-50 border-emerald-200 hover:border-emerald-400'}`}
-            >
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
-                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div>
-                <h3 className={`font-semibold text-base ${isDark ? 'text-white' : 'text-slate-900'}`}>Financeiro</h3>
-                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Dinheiro, cobranças, NFs e MEI</p>
-              </div>
-            </button>
+          type AgentCard = { id: string; label: string; desc: string; gradient: string; icon: React.ReactNode; locked?: boolean };
+          const allAgents: AgentCard[] = [
+            {
+              id: 'clientes', label: 'Clientes e Agenda', desc: 'Cadastro, compromissos e acompanhamento',
+              gradient: 'from-green-500 to-emerald-500',
+              icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />,
+            },
+            {
+              id: 'financeiro', label: 'Financeiro', desc: 'Boleto MEI, limite de faturamento e resumos',
+              gradient: 'from-emerald-500 to-teal-500',
+              icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />,
+            },
+            {
+              id: 'cobranca', label: 'Cobranças', desc: 'Quem tá devendo, vencimentos e lembretes',
+              gradient: 'from-orange-500 to-amber-500',
+              icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />,
+              locked: !_isAdmin && !_paid,
+            },
+            {
+              id: 'assistente', label: 'Assistente Pessoal', desc: 'Resumo do dia, alertas e automações',
+              gradient: 'from-blue-500 to-indigo-500',
+              icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />,
+              locked: !_isAdmin && !_pro,
+            },
+          ];
 
-            {/* Assistente Pessoal */}
-            <button
-              onClick={() => navigate('/agents/assistente')}
-              className={`flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r border transition text-left ${isDark ? 'from-blue-900/30 to-indigo-900/30 border-blue-700/30 hover:border-blue-500/50' : 'from-blue-50 to-indigo-50 border-blue-200 hover:border-blue-400'}`}
-            >
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center">
-                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          const upgradeMsg: Record<string, string> = {
+            free: 'Desbloqueie Cobranças e o Assistente — a partir de R$ 29,90/mês',
+            essencial: 'Desbloqueie o Assistente Pessoal com o plano Profissional (R$ 59,90/mês)',
+          };
+
+          return (
+            <div className={`p-6 rounded-2xl border ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'}`}>
+              <h2 className={`text-xl font-semibold mb-4 flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                <svg className="w-6 h-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
                 </svg>
+                Seus Agentes
+              </h2>
+              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
+                {allAgents.map(ag => (
+                  <button
+                    key={ag.id}
+                    onClick={() => ag.locked ? navigate('/pricing') : navigate(`/agents/${ag.id}`)}
+                    className={`relative flex flex-col gap-3 p-4 rounded-xl border transition text-left group ${
+                      ag.locked
+                        ? isDark ? 'bg-slate-800/30 border-slate-700/30 opacity-60' : 'bg-slate-50 border-slate-200/50 opacity-60'
+                        : isDark ? 'bg-slate-700/30 border-slate-600/30 hover:border-green-500/50' : 'bg-white border-slate-200 hover:border-green-400 hover:shadow-md shadow-sm'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${ag.gradient} flex items-center justify-center`}>
+                        <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">{ag.icon}</svg>
+                      </div>
+                      {ag.locked
+                        ? <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>Upgrade</span>
+                        : <span className={`flex items-center gap-1 text-xs ${isDark ? 'text-green-400' : 'text-green-600'}`}><span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />Online</span>
+                      }
+                    </div>
+                    <div>
+                      <h3 className={`font-semibold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{ag.label}</h3>
+                      <p className={`text-xs mt-0.5 leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{ag.desc}</p>
+                    </div>
+                    {!ag.locked && (
+                      <span className={`text-xs font-medium ${isDark ? 'text-green-400 group-hover:text-green-300' : 'text-green-600 group-hover:text-green-700'}`}>
+                        Conversar →
+                      </span>
+                    )}
+                  </button>
+                ))}
               </div>
-              <div>
-                <h3 className={`font-semibold text-base ${isDark ? 'text-white' : 'text-slate-900'}`}>Assistente Pessoal</h3>
-                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Resumo, alertas e automações</p>
-              </div>
-            </button>
-          </div>
-          {userPlan === 'free' && (
-            <div className={`mt-4 p-3 rounded-lg border ${isDark ? 'bg-slate-700/30 border-slate-600/30' : 'bg-slate-50 border-slate-200'}`}>
-              <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                🔒 Faça upgrade para desbloquear mais agentes — a partir de R$ 29,90/mês
-              </p>
-              <button onClick={() => navigate('/pricing')} className="text-green-400 hover:text-green-300 text-sm mt-1">
-                Ver Planos →
-              </button>
+              {upgradeMsg[_plan] && !_isAdmin && (
+                <div className={`mt-4 flex items-center justify-between p-3 rounded-lg border ${isDark ? 'bg-slate-700/30 border-slate-600/30' : 'bg-slate-50 border-slate-200'}`}>
+                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    {upgradeMsg[_plan]}
+                  </p>
+                  <button onClick={() => navigate('/pricing')} className="ml-4 text-green-400 hover:text-green-300 text-sm font-medium whitespace-nowrap">
+                    Ver Planos →
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          );
+        })()}
       </div>
     </div>
   )
