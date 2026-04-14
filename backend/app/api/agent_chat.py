@@ -17,6 +17,18 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
+def get_openai_client():
+    """Retorna cliente OpenAI configurado. Usado por agent_automation.py."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    try:
+        from openai import OpenAI
+        return OpenAI(api_key=api_key)
+    except Exception:
+        return None
+
+
 class SensitiveActionRequired(Exception):
     """Raised when a tool call requires password confirmation before execution.
     Supports batch: pending_actions is a list of {tool_name, arguments, description}

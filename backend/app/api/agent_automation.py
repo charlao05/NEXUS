@@ -266,7 +266,9 @@ Responda "NAO" se o usuário está:
 
 Mensagem:"""
 
-        response = client.chat_completion(
+        _model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+        response = client.chat.completions.create(
+            model=_model,
             messages=[
                 {"role": "system", "content": classification_prompt},
                 {"role": "user", "content": message},
@@ -275,7 +277,7 @@ Mensagem:"""
             max_tokens=5,
         )
 
-        answer = response.strip().upper().replace(".", "")
+        answer = (response.choices[0].message.content or "").strip().upper().replace(".", "")
         return answer in ("SIM", "YES", "S")
 
     except Exception as e:
@@ -298,7 +300,7 @@ async def _generate_automation_plan(goal: str, site_hint: str) -> dict[str, Any]
         # Carregar template específico
         template_context = ""
         try:
-            from backend.orchestrator.templates import get_template, format_template_for_llm
+            from orchestrator.templates import get_template, format_template_for_llm
             template = get_template(site_hint)
             template_context = format_template_for_llm(template, goal)
         except Exception as e:
@@ -333,7 +335,9 @@ Formato:
 }}
 """
 
-        response = client.chat_completion(
+        _model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+        response = client.chat.completions.create(
+            model=_model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Objetivo: {goal}"},
@@ -345,7 +349,7 @@ Formato:
         # Parse JSON da resposta
         import json
         # Limpar possíveis marcas de código
-        clean = response.strip()
+        clean = (response.choices[0].message.content or "").strip()
         if clean.startswith("```"):
             clean = clean.split("\n", 1)[-1]
             if clean.endswith("```"):
@@ -355,7 +359,7 @@ Formato:
         # ── Pós-processamento: forçar URL do template no primeiro navigate ──
         # O LLM pode inventar URLs. A URL real vem do template e é canon.
         try:
-            from backend.orchestrator.templates import get_template as _gt
+            from orchestrator.templates import get_template as _gt
             tpl = _gt(site_hint)
             canonical_url = tpl.get("site_config", {}).get("url", "")
             if canonical_url:
@@ -384,7 +388,7 @@ def _fallback_plan(goal: str, site_hint: str) -> dict[str, Any]:
     Usa templates MEI para gerar planos estruturados sem LLM.
     """
     try:
-        from backend.orchestrator.templates import get_template
+        from orchestrator.templates import get_template
         template = get_template(site_hint)
 
         url = template["site_config"].get("url", "")
@@ -493,8 +497,8 @@ async def _execute_automation(task: dict[str, Any]) -> dict[str, Any]:
     """
     try:
         # Forçar import das browser tools para registro no act_node
-        import backend.orchestrator.tools.browser  # noqa: F401
-        from backend.orchestrator.graph import run_task
+        import orchestrator.tools.browser  # noqa: F401
+        from orchestrator.graph import run_task
 
         result = await run_task(
             agent_type="browser",
@@ -557,7 +561,7 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
         results: list[dict[str, Any]] = []
         needs_user_input = False
         try:
-            from backend.orchestrator.tools.browser import (
+            from orchestrator.tools.browser import (
                 browser_navigate, browser_click, browser_type,
                 browser_wait, browser_screenshot, browser_get_text,
                 browser_scroll, browser_hover, browser_select_option,
@@ -737,7 +741,7 @@ async def _start_automation_core(
     # Carregar site_config do template (se disponível)
     site_config = None
     try:
-        from backend.orchestrator.templates import get_template
+        from orchestrator.templates import get_template
         template = get_template(site_hint)
         site_config = template.get("site_config")
     except Exception:
@@ -884,8 +888,8 @@ async def _continue_automation(task: dict[str, Any]) -> dict[str, Any]:
     3. act_node: executar ações (extrair dados, baixar PDF, etc.)
     """
     try:
-        import backend.orchestrator.tools.browser  # noqa: F401
-        from backend.orchestrator.graph import run_task
+        import orchestrator.tools.browser  # noqa: F401
+        from orchestrator.graph import run_task
 
         # O goal é adaptado para indicar que o usuário já fez login
         continuation_goal = (
@@ -919,7 +923,7 @@ async def _continue_automation(task: dict[str, Any]) -> dict[str, Any]:
         else:
             # Automação concluída — fechar browser
             try:
-                from backend.orchestrator.tools.browser import shutdown_browser
+                from orchestrator.tools.browser import shutdown_browser
                 shutdown_browser()
             except Exception:
                 pass
@@ -944,7 +948,7 @@ async def _continue_direct(task: dict[str, Any]) -> dict[str, Any]:
     import asyncio
 
     def _sense_current_page() -> dict[str, Any]:
-        from backend.orchestrator.tools.browser import (
+        from orchestrator.tools.browser import (
             browser_get_page_state,
             browser_screenshot,
             browser_get_text,
@@ -1024,7 +1028,9 @@ async def _continue_direct(task: dict[str, Any]) -> dict[str, Any]:
 
         client = get_openai_client()
         if client:
-            resp = client.chat_completion(
+            _model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+            resp = client.chat.completions.create(
+                model=_model,
                 messages=[
                     {
                         "role": "system",
@@ -1049,7 +1055,7 @@ async def _continue_direct(task: dict[str, Any]) -> dict[str, Any]:
                 temperature=0.3,
                 max_tokens=400,
             )
-            message = resp
+            message = resp.choices[0].message.content or ""
         else:
             message = (
                 f"📄 Página capturada: **{page_title or 'Sem título'}**\n"

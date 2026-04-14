@@ -713,10 +713,18 @@ async def execute_agent_action(
         # Extrair confirmed_action (se o usuário já confirmou com senha)
         _confirmed_action: str | None = action.parameters.get("_confirmed_action")
 
+        # Construir contexto cross-agent para enriquecer o prompt do LLM
+        _crm_context = ""
+        try:
+            from app.services.chat_context import load_cross_agent_summary
+            _crm_context = load_cross_agent_summary(_user_id or 0, agent_id)
+        except Exception:
+            pass
+
         # Chat livre: usuário digitou uma mensagem
         if user_message and action.action in ("smart_chat", "chat"):
             try:
-                llm_response = get_llm_response(agent_id, user_message, conversation_history=chat_history, user_id=_user_id, confirmed_actions=[_confirmed_action] if _confirmed_action else None)
+                llm_response = get_llm_response(agent_id, user_message, crm_context=_crm_context, conversation_history=chat_history, user_id=_user_id, confirmed_actions=[_confirmed_action] if _confirmed_action else None)
             except SensitiveActionRequired as sar:
                 # Ação requer confirmação com senha — retornar ao frontend
                 _n_actions = len(sar.pending_actions)
@@ -757,7 +765,7 @@ async def execute_agent_action(
         if action.action in ACTION_PROMPTS:
             prompt = ACTION_PROMPTS[action.action]
             try:
-                llm_response = get_llm_response(agent_id, prompt, conversation_history=chat_history, user_id=_user_id, confirmed_actions=[_confirmed_action] if _confirmed_action else None)
+                llm_response = get_llm_response(agent_id, prompt, crm_context=_crm_context, conversation_history=chat_history, user_id=_user_id, confirmed_actions=[_confirmed_action] if _confirmed_action else None)
             except SensitiveActionRequired as sar:
                 _n_actions = len(sar.pending_actions)
                 _plural = f"{_n_actions} ações" if _n_actions > 1 else "a ação"
