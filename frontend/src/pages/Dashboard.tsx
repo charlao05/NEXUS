@@ -320,22 +320,22 @@ function Dashboard() {
             )}
           </div>
 
-          {/* Quick Action Card */}
+          {/* Quick Access Card */}
           <div className={`p-6 rounded-2xl border ${isDark ? 'bg-gradient-to-br from-green-900/30 to-emerald-900/30 border-green-700/30' : 'bg-gradient-to-br from-green-50 to-emerald-50 border-green-200'}`}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className={`text-sm font-medium ${isDark ? 'text-green-400' : 'text-green-700'}`}>Início Rápido</h3>
+              <h3 className={`text-sm font-medium ${isDark ? 'text-green-400' : 'text-green-700'}`}>Acesso Rápido</h3>
               <svg className={`w-5 h-5 ${isDark ? 'text-green-500' : 'text-green-600'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             </div>
             <p className={`text-sm mb-3 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-              Configure sua primeira automação
+              Fale com seu agente de clientes agora
             </p>
-            <button 
-              onClick={() => navigate('/agents')}
+            <button
+              onClick={() => navigate('/agents/clientes')}
               className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg text-sm font-medium transition"
             >
-              Começar Agora
+              Abrir Agente →
             </button>
           </div>
         </div>
