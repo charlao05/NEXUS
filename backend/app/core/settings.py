@@ -75,7 +75,7 @@ class _Settings:
 
     @property
     def OPENAI_MODEL(self) -> str:
-        return os.getenv("OPENAI_MODEL", "gpt-4.1")
+        return os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
     # ── Stripe ────────────────────────────────────────────
     @property

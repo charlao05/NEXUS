@@ -1223,7 +1223,7 @@ def get_llm_response(
     except ImportError:
         return "Biblioteca OpenAI não instalada. Execute: pip install openai"
 
-    model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
     # Obter prompt base do agente
     base_prompt = AGENT_SYSTEM_PROMPTS.get(

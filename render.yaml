@@ -47,7 +47,7 @@ services:
       - key: JWT_ALGORITHM
         value: "HS256"
       - key: OPENAI_MODEL
-        value: "gpt-4.1"
+        value: "gpt-4o-mini"
       - key: LOG_LEVEL
         value: "INFO"
       - key: PORT

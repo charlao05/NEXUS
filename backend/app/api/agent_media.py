@@ -234,7 +234,7 @@ async def upload_and_process(
                     vision_prompt = message or "Descreva o que você vê nesta imagem. Se for um documento, extraia o texto."
 
                     response = client.chat.completions.create(
-                        model=os.getenv("OPENAI_MODEL", "gpt-4.1"),
+                        model=os.getenv("OPENAI_VISION_MODEL", "gpt-4o"),
                         messages=[
                             {
                                 "role": "user",
