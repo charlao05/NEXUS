@@ -74,6 +74,10 @@ async def transcribe_audio(
 
     Retorna: { transcription, message, agent_id }
     """
+    # Validar acesso ao agente por plano
+    from app.services.limit_service import check_agent_access
+    check_agent_access(current_user, agent)
+
     # Validar tipo
     content_type = audio.content_type or ""
     if content_type not in ALLOWED_AUDIO and not content_type.startswith("audio/"):
@@ -198,9 +202,13 @@ async def upload_and_process(
     Recebe arquivos (imagens, PDFs, docs) do frontend.
     - Imagens: descreve via GPT-4.1 Vision
     - Documentos: extrai texto e envia ao agente
-    
+
     Retorna: { message, files_processed, agent_id }
     """
+    # Validar acesso ao agente por plano
+    from app.services.limit_service import check_agent_access
+    check_agent_access(current_user, agent)
+
     if not files:
         raise HTTPException(400, "Nenhum arquivo enviado.")
 

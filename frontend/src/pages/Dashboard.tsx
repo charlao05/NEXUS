@@ -81,6 +81,7 @@ function Dashboard() {
   const { isDark, toggleTheme } = useTheme()
   const { notifications, unreadCount, markRead, clearAll } = useNotifications(token)
   const [userPlan, setUserPlan] = useState<string>('free')
+  const [planReady, setPlanReady] = useState(false)
   const [userRole, setUserRole] = useState<string>(() => authRole || localStorage.getItem('user_role') || 'user')
   const [userName, setUserName] = useState<string>('')
   const [userEmail, setUserEmail] = useState<string>('')
@@ -116,6 +117,8 @@ function Dashboard() {
         console.error('Erro ao decodificar token:', e)
       }
     }
+    // Plano já conhecido via localStorage/token — pode renderizar agentes
+    setPlanReady(true)
 
     // Buscar perfil (requests usage) + CRM + Analytics em paralelo
     const fetchProfile = async () => {
@@ -573,7 +576,14 @@ function Dashboard() {
                 </svg>
                 Seus Agentes
               </h2>
-              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
+              {!planReady ? (
+                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {[...Array(4)].map((_, i) => (
+                    <div key={i} className={`h-32 rounded-xl animate-pulse ${isDark ? 'bg-slate-700/40' : 'bg-slate-200/60'}`} />
+                  ))}
+                </div>
+              ) : null}
+              <div className={`grid md:grid-cols-2 lg:grid-cols-4 gap-3 ${!planReady ? 'hidden' : ''}`}>
                 {allAgents.map(ag => (
                   <button
                     key={ag.id}
