@@ -5,7 +5,7 @@
  */
 
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Users, DollarSign, Bot, Lock, Sparkles } from 'lucide-react';
+import { ArrowLeft, Users, DollarSign, Bot, Lock, Sparkles, Bell } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePlanLimits } from '../hooks/usePlanLimits';
@@ -32,10 +32,18 @@ const agents: Agent[] = [
   {
     id: 'financeiro',
     name: 'Financeiro',
-    description: 'Controle Seu Dinheiro, Cobranças, Notas Fiscais, Boleto Mensal do MEI e Limite de Faturamento — Tudo num Lugar Só',
+    description: 'Controle Seu Dinheiro, Boleto MEI, Limite de Faturamento e Resumos Financeiros — Tudo num Lugar Só',
     icon: DollarSign,
     color: 'from-emerald-500 to-teal-500',
     backendId: 'contabilidade'
+  },
+  {
+    id: 'cobranca',
+    name: 'Cobranças',
+    description: 'Veja Quem Tá Devendo, Contas a Vencer, Envie Lembretes e Controle Seu Fluxo de Caixa',
+    icon: Bell,
+    color: 'from-orange-500 to-amber-500',
+    backendId: 'cobranca'
   },
   {
     id: 'assistente',

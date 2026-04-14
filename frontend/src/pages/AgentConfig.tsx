@@ -258,7 +258,7 @@ function AgentConfig() {
       return;
     }
     // Redirect legacy agent routes to their merged homes
-    if (id === 'contabilidade' || id === 'cobranca' || id === 'documentos') {
+    if (id === 'contabilidade' || id === 'documentos') {
       navigate('/agents/financeiro', { replace: true });
       return;
     }

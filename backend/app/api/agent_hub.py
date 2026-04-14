@@ -663,21 +663,7 @@ async def execute_agent_action(
                 }
         except Exception as e:
             logger.error(f"Automação detection falhou: {e}", exc_info=True)
-            # NÃO engolir silenciosamente — se a detecção falhou mas parece automação,
-            # avisar o usuário ao invés de deixar o LLM inventar
-            _auto_keywords_quick = ["site", "portal", "acessar", "abrir", "consultar", "emitir", "automação", "automatizar", "navegador"]
-            if any(kw in user_message.lower() for kw in _auto_keywords_quick):
-                _save_chat(user_message, "⚠️ Detecção de automação falhou. Tente novamente ou use o botão 'Automação Web'.", _user_id)
-                return {
-                    "status": "success",
-                    "agent_id": agent_id,
-                    "action": action.action,
-                    "message": (
-                        "⚠️ Detectei que você quer uma automação web, mas ocorreu um erro interno ao preparar.\n\n"
-                        "**Tente novamente** ou clique no botão **Automação Web** nas Ações Rápidas.\n\n"
-                        f"Detalhe técnico: {str(e)[:100]}"
-                    ),
-                }
+            # Falha na detecção → continuar para o LLM normalmente (não bloquear o chat)
 
     # ── Inteligência via OpenAI GPT-4.1 ──────────────────────────
     try:
