@@ -94,7 +94,7 @@ const agentMeta: Record<string, {
   },
   financeiro: {
     name: 'Financeiro',
-    description: 'Seu Dinheiro, Cobranças, Notas Fiscais, Boleto Mensal do MEI e Limite de Faturamento — Tudo num Lugar Só',
+    description: 'Seu Dinheiro, Cobranças, Boleto MEI e Limite de Faturamento — Controle Financeiro Completo',
     icon: DollarSign,
     gradient: 'from-emerald-500 to-teal-500',
     endpoint: apiUrl('/api/agents/contabilidade/execute'),
@@ -107,12 +107,12 @@ const agentMeta: Record<string, {
       { id: 'mei', label: 'Limite MEI', icon: AlertTriangle, action: 'mei_status' },
       { id: 'overdue', label: 'Quem Tá Devendo', icon: Bell, action: 'list_overdue' },
       { id: 'pending', label: 'Contas a Vencer', icon: Clock, action: 'list_pending' },
-      { id: 'nf', label: 'Emitir Nota Fiscal', icon: FileText, action: 'emit_nf' },
+      { id: 'nf', label: 'Emitir NFS-e (Portal)', icon: FileText, action: 'emit_nf' },
     ]
   },
   contabilidade: {
     name: 'Financeiro',
-    description: 'Seu Dinheiro, Cobranças, Notas Fiscais, Boleto Mensal do MEI e Limite de Faturamento — Tudo num Lugar Só',
+    description: 'Seu Dinheiro, Cobranças, Boleto MEI e Limite de Faturamento — Controle Financeiro Completo',
     icon: DollarSign,
     gradient: 'from-emerald-500 to-teal-500',
     endpoint: apiUrl('/api/agents/contabilidade/execute'),
@@ -124,8 +124,8 @@ const agentMeta: Record<string, {
     ]
   },
   cobranca: {
-    name: 'Financeiro',
-    description: 'Seu Dinheiro, Cobranças, Notas Fiscais, Boleto Mensal do MEI e Limite de Faturamento — Tudo num Lugar Só',
+    name: 'Cobranças',
+    description: 'Controle de Cobranças, Faturas e Contas a Receber — Saiba quem deve e quando vence',
     icon: Bell,
     gradient: 'from-emerald-500 to-teal-500',
     endpoint: apiUrl('/api/agents/cobranca/execute'),
@@ -137,16 +137,16 @@ const agentMeta: Record<string, {
     ]
   },
   documentos: {
-    name: 'Financeiro',
-    description: 'Seu Dinheiro, Cobranças, Notas Fiscais, Boleto Mensal do MEI e Limite de Faturamento — Tudo num Lugar Só',
+    name: 'Documentos',
+    description: 'Guia de NFS-e, Relatórios e Contratos — O sistema guia a emissão via portal da prefeitura',
     icon: FileText,
     gradient: 'from-emerald-500 to-teal-500',
     endpoint: apiUrl('/api/agents/contabilidade/execute'),
     quickActions: [
-      { id: 'nf', label: 'Emitir Nota Fiscal', icon: FileText, action: 'emit_nf' },
-      { id: 'list', label: 'Ver Notas Fiscais', icon: Search, action: 'list_nf' },
-      { id: 'report', label: 'Relatório', icon: TrendingUp, action: 'generate_report' },
-      { id: 'contract', label: 'Contrato', icon: FileText, action: 'generate_contract' },
+      { id: 'nf', label: 'Emitir NFS-e (Portal)', icon: FileText, action: 'emit_nf' },
+      { id: 'list', label: 'Ver Cobranças', icon: Search, action: 'list_nf' },
+      { id: 'report', label: 'Relatório Financeiro', icon: TrendingUp, action: 'generate_report' },
+      { id: 'contract', label: 'Gerar Contrato', icon: FileText, action: 'generate_contract' },
     ]
   },
   assistente: {

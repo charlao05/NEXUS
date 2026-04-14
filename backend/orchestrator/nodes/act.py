@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 from typing import Any
 
-from backend.orchestrator.state import (
+from orchestrator.state import (
     ActionResult,
     AgentState,
     TaskStatus,
@@ -44,7 +44,7 @@ def get_registered_tools() -> list[str]:
 
 @register_tool("crm_list_clients")
 def _crm_list_clients(params: dict, user_id: int) -> Any:
-    from backend.database.models import SessionLocal, Client
+    from database.models import SessionLocal, Client
     db = SessionLocal()
     try:
         query = db.query(Client).filter(Client.user_id == user_id)
@@ -62,7 +62,7 @@ def _crm_list_clients(params: dict, user_id: int) -> Any:
 
 @register_tool("crm_get_client")
 def _crm_get_client(params: dict, user_id: int) -> Any:
-    from backend.database.models import SessionLocal, Client
+    from database.models import SessionLocal, Client
     db = SessionLocal()
     try:
         client = db.query(Client).filter(
@@ -78,7 +78,7 @@ def _crm_get_client(params: dict, user_id: int) -> Any:
 
 @register_tool("crm_create_client")
 def _crm_create_client(params: dict, user_id: int) -> Any:
-    from backend.database.models import SessionLocal, Client
+    from database.models import SessionLocal, Client
     db = SessionLocal()
     try:
         client = Client(
@@ -99,7 +99,7 @@ def _crm_create_client(params: dict, user_id: int) -> Any:
 
 @register_tool("crm_update_client")
 def _crm_update_client(params: dict, user_id: int) -> Any:
-    from backend.database.models import SessionLocal, Client
+    from database.models import SessionLocal, Client
     db = SessionLocal()
     try:
         client = db.query(Client).filter(
@@ -120,7 +120,7 @@ def _crm_update_client(params: dict, user_id: int) -> Any:
 
 @register_tool("crm_delete_client")
 def _crm_delete_client(params: dict, user_id: int) -> Any:
-    from backend.database.models import SessionLocal, Client
+    from database.models import SessionLocal, Client
     db = SessionLocal()
     try:
         client = db.query(Client).filter(
@@ -139,7 +139,7 @@ def _crm_delete_client(params: dict, user_id: int) -> Any:
 
 @register_tool("crm_create_appointment")
 def _crm_create_appointment(params: dict, user_id: int) -> Any:
-    from backend.database.models import SessionLocal, Appointment
+    from database.models import SessionLocal, Appointment
     from datetime import datetime as dt
     db = SessionLocal()
     try:
@@ -166,7 +166,7 @@ def _crm_create_appointment(params: dict, user_id: int) -> Any:
 
 @register_tool("crm_create_transaction")
 def _crm_create_transaction(params: dict, user_id: int) -> Any:
-    from backend.database.models import SessionLocal, Transaction
+    from database.models import SessionLocal, Transaction
     from datetime import date, datetime as dt
     db = SessionLocal()
     try:

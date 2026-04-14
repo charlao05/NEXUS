@@ -15,8 +15,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from backend.orchestrator.nodes.act import register_browser_tool
-from backend.orchestrator.state import AgentState
+from orchestrator.nodes.act import register_browser_tool
+from orchestrator.state import AgentState
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ _browser_state: dict[str, Any] = {
 def _ensure_browser() -> Any:
     """Garante que o browser está inicializado. Retorna a page."""
     if _browser_state["page"] is None:
-        from backend.browser.playwright_client import iniciar_navegador
+        from browser.playwright_client import iniciar_navegador
         pw, browser, page = iniciar_navegador()
         _browser_state["playwright"] = pw
         _browser_state["browser"] = browser
@@ -46,7 +46,7 @@ def shutdown_browser() -> None:
     """Encerra o browser de forma segura. Chamado ao final da tarefa."""
     if _browser_state["browser"] is not None:
         try:
-            from backend.browser.playwright_client import fechar_navegador
+            from browser.playwright_client import fechar_navegador
             fechar_navegador(
                 _browser_state["playwright"],
                 _browser_state["browser"],
@@ -67,7 +67,7 @@ def shutdown_browser() -> None:
 @register_browser_tool("browser_navigate")
 def browser_navigate(params: dict, state: AgentState) -> dict[str, Any]:
     """Navega para uma URL."""
-    from backend.browser.actions import abrir_url
+    from browser.actions import abrir_url
     url = params.get("url", "")
     if not url:
         return {"success": False, "error": "URL não informada"}
@@ -86,7 +86,7 @@ def browser_navigate(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_click")
 def browser_click(params: dict, state: AgentState) -> dict[str, Any]:
     """Clica em um elemento da página."""
-    from backend.browser.actions import clicar
+    from browser.actions import clicar
     selector = params.get("selector", "")
     if not selector:
         return {"success": False, "error": "Selector não informado"}
@@ -103,7 +103,7 @@ def browser_click(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_type")
 def browser_type(params: dict, state: AgentState) -> dict[str, Any]:
     """Digita texto em um campo."""
-    from backend.browser.actions import digitar
+    from browser.actions import digitar
     selector = params.get("selector", "")
     text = params.get("text", params.get("texto", ""))
     secret = params.get("secret", False)
@@ -124,7 +124,7 @@ def browser_type(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_wait_selector")
 def browser_wait_selector(params: dict, state: AgentState) -> dict[str, Any]:
     """Aguarda um seletor aparecer na página."""
-    from backend.browser.actions import esperar_selector
+    from browser.actions import esperar_selector
     selector = params.get("selector", "")
     timeout_ms = params.get("timeout_ms", 10000)
     
@@ -143,7 +143,7 @@ def browser_wait_selector(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_press_key")
 def browser_press_key(params: dict, state: AgentState) -> dict[str, Any]:
     """Pressiona uma tecla."""
-    from backend.browser.actions import press_key
+    from browser.actions import press_key
     key = params.get("key", "")
     if not key:
         return {"success": False, "error": "Tecla não informada"}
@@ -160,7 +160,7 @@ def browser_press_key(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_wait")
 def browser_wait(params: dict, state: AgentState) -> dict[str, Any]:
     """Aguarda N segundos."""
-    from backend.browser.actions import wait_seconds
+    from browser.actions import wait_seconds
     seconds = params.get("seconds", 2)
     
     page = _ensure_browser()
@@ -234,7 +234,7 @@ def browser_close(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_scroll")
 def browser_scroll(params: dict, state: AgentState) -> dict[str, Any]:
     """Rola a página. params: {direction: up|down|left|right, amount?: pixels}"""
-    from backend.browser.actions import scroll
+    from browser.actions import scroll
     direction = params.get("direction", "down")
     amount = params.get("amount", 500)
 
@@ -249,7 +249,7 @@ def browser_scroll(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_hover")
 def browser_hover(params: dict, state: AgentState) -> dict[str, Any]:
     """Passa o mouse sobre um elemento."""
-    from backend.browser.actions import hover
+    from browser.actions import hover
     selector = params.get("selector", "")
     if not selector:
         return {"success": False, "error": "Selector não informado"}
@@ -266,7 +266,7 @@ def browser_hover(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_select_option")
 def browser_select_option(params: dict, state: AgentState) -> dict[str, Any]:
     """Seleciona opção em dropdown <select>. params: {selector, value}"""
-    from backend.browser.actions import select_option
+    from browser.actions import select_option
     selector = params.get("selector", "")
     value = params.get("value", "")
     if not selector or not value:
@@ -284,7 +284,7 @@ def browser_select_option(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_check_checkbox")
 def browser_check_checkbox(params: dict, state: AgentState) -> dict[str, Any]:
     """Marca ou desmarca checkbox. params: {selector, checked?: true}"""
-    from backend.browser.actions import check_checkbox
+    from browser.actions import check_checkbox
     selector = params.get("selector", "")
     checked = params.get("checked", True)
     if not selector:
@@ -303,7 +303,7 @@ def browser_check_checkbox(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_upload_file")
 def browser_upload_file(params: dict, state: AgentState) -> dict[str, Any]:
     """Upload de arquivo. params: {selector, file_path}"""
-    from backend.browser.actions import upload_file
+    from browser.actions import upload_file
     selector = params.get("selector", "")
     file_path = params.get("file_path", "")
     if not selector or not file_path:
@@ -320,7 +320,7 @@ def browser_upload_file(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_submit_form")
 def browser_submit_form(params: dict, state: AgentState) -> dict[str, Any]:
     """Submete formulário. params: {selector?: "form"}"""
-    from backend.browser.actions import submit_form
+    from browser.actions import submit_form
     selector = params.get("selector", "form")
 
     page = _ensure_browser()
@@ -334,7 +334,7 @@ def browser_submit_form(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_go_back")
 def browser_go_back(params: dict, state: AgentState) -> dict[str, Any]:
     """Volta à página anterior (browser back)."""
-    from backend.browser.actions import go_back
+    from browser.actions import go_back
 
     page = _ensure_browser()
     go_back(page)
@@ -348,7 +348,7 @@ def browser_go_back(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_go_forward")
 def browser_go_forward(params: dict, state: AgentState) -> dict[str, Any]:
     """Avança para a próxima página (browser forward)."""
-    from backend.browser.actions import go_forward
+    from browser.actions import go_forward
 
     page = _ensure_browser()
     go_forward(page)
@@ -362,7 +362,7 @@ def browser_go_forward(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_get_attribute")
 def browser_get_attribute(params: dict, state: AgentState) -> dict[str, Any]:
     """Lê atributo de um elemento. params: {selector, attribute}"""
-    from backend.browser.actions import get_attribute
+    from browser.actions import get_attribute
     selector = params.get("selector", "")
     attribute = params.get("attribute", "")
     if not selector or not attribute:
@@ -380,7 +380,7 @@ def browser_get_attribute(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_extract_table")
 def browser_extract_table(params: dict, state: AgentState) -> dict[str, Any]:
     """Extrai dados de uma tabela HTML. params: {selector?: "table"}"""
-    from backend.browser.actions import extract_table
+    from browser.actions import extract_table
     selector = params.get("selector", "table")
 
     page = _ensure_browser()
@@ -396,7 +396,7 @@ def browser_extract_table(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_find_by_text")
 def browser_find_by_text(params: dict, state: AgentState) -> dict[str, Any]:
     """Encontra elemento pelo texto visível. params: {text, tag?: "*"}"""
-    from backend.browser.actions import find_element_by_text
+    from browser.actions import find_element_by_text
     text = params.get("text", "")
     tag = params.get("tag", "*")
     if not text:
@@ -422,7 +422,7 @@ def browser_evaluate_js(params: dict, state: AgentState) -> dict[str, Any]:
     
     SEGURANÇA: Apenas expressões de leitura (consulta de dados).
     """
-    from backend.browser.actions import evaluate_js
+    from browser.actions import evaluate_js
     expression = params.get("expression", "")
     if not expression:
         return {"success": False, "error": "Expressão JS não informada"}
@@ -450,7 +450,7 @@ def browser_handle_dialog(params: dict, state: AgentState) -> dict[str, Any]:
     """Configura handler para diálogos (alert/confirm/prompt).
     params: {accept?: true, prompt_text?: ""}
     """
-    from backend.browser.actions import handle_dialog
+    from browser.actions import handle_dialog
     accept = params.get("accept", True)
     prompt_text = params.get("prompt_text", "")
 
@@ -466,7 +466,7 @@ def browser_handle_dialog(params: dict, state: AgentState) -> dict[str, Any]:
 @register_browser_tool("browser_drag_drop")
 def browser_drag_drop(params: dict, state: AgentState) -> dict[str, Any]:
     """Arrasta um elemento para outro. params: {source, target}"""
-    from backend.browser.actions import drag_and_drop
+    from browser.actions import drag_and_drop
     source = params.get("source", "")
     target = params.get("target", "")
     if not source or not target:
@@ -486,7 +486,7 @@ def browser_get_page_state(params: dict, state: AgentState) -> dict[str, Any]:
     
     Retorna elementos interativos, URL, título, tipo da página.
     """
-    from backend.browser.perception import get_page_state
+    from browser.perception import get_page_state
 
     page = _ensure_browser()
     page_state = get_page_state(page)

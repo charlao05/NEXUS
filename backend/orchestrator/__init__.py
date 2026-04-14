@@ -8,8 +8,8 @@ Orquestrador de agentes baseado em LangGraph com:
 - Human-in-the-loop para ações críticas
 - Tools tipadas para browser, CRM e integrações
 """
-from backend.orchestrator.graph import create_orchestrator_graph, run_task
-from backend.orchestrator.state import AgentState, TaskStatus
+from orchestrator.graph import create_orchestrator_graph, run_task
+from orchestrator.state import AgentState, TaskStatus
 
 __all__ = [
     "create_orchestrator_graph",

@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from backend.orchestrator.state import AgentState, TaskStatus
+from orchestrator.state import AgentState, TaskStatus
 
 logger = logging.getLogger(__name__)
 

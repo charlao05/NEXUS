@@ -17,7 +17,7 @@ from typing import Any
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 try:
-    from backend.utils.logging_utils import get_logger
+    from utils.logging_utils import get_logger
 except ImportError:
     from ..utils.logging_utils import get_logger
 

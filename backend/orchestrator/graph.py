@@ -22,12 +22,12 @@ from typing import Any
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
-from backend.orchestrator.nodes.act import act_node
-from backend.orchestrator.nodes.check import check_node, should_continue
-from backend.orchestrator.nodes.plan import plan_node
-from backend.orchestrator.nodes.policy import policy_node
-from backend.orchestrator.nodes.sense import sense_node
-from backend.orchestrator.state import (
+from orchestrator.nodes.act import act_node
+from orchestrator.nodes.check import check_node, should_continue
+from orchestrator.nodes.plan import plan_node
+from orchestrator.nodes.policy import policy_node
+from orchestrator.nodes.sense import sense_node
+from orchestrator.state import (
     AgentState,
     TaskStatus,
     create_initial_state,
@@ -194,7 +194,7 @@ async def run_task(
     # ── Auto-import browser tools para que fiquem registradas no act_node ──
     if agent_type == "browser":
         try:
-            import backend.orchestrator.tools.browser  # noqa: F401 — registra tools via decorators
+            import orchestrator.tools.browser  # noqa: F401 — registra tools via decorators
             logger.debug("Browser tools importadas para registro no act_node")
         except Exception as e:
             logger.warning(f"Falha ao importar browser tools: {e}")

@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 from typing import Any
 
-from backend.orchestrator.state import AgentState, TaskStatus
+from orchestrator.state import AgentState, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +230,7 @@ def sense_node(state: AgentState) -> dict[str, Any]:
 def _get_crm_context(user_id: int) -> str:
     """Busca contexto CRM do banco de dados."""
     try:
-        from backend.database.models import SessionLocal, Client, Appointment, Transaction
+        from database.models import SessionLocal, Client, Appointment, Transaction
         from sqlalchemy import func
         from datetime import date
         
@@ -280,7 +280,7 @@ def _get_crm_context(user_id: int) -> str:
 def _get_nf_context(user_id: int) -> str:
     """Contexto para emissão de NF."""
     try:
-        from backend.database.models import SessionLocal, Client, Transaction
+        from database.models import SessionLocal, Client, Transaction
         from sqlalchemy import func
         
         db = SessionLocal()
@@ -312,8 +312,8 @@ def _get_browser_perception() -> str:
     - Tipo de página (form, table, login, etc.)
     """
     try:
-        from backend.orchestrator.tools.browser import _browser_state
-        from backend.browser.perception import get_compact_observation
+        from orchestrator.tools.browser import _browser_state
+        from browser.perception import get_compact_observation
 
         page = _browser_state.get("page")
         if page is None:
@@ -330,7 +330,7 @@ def _get_browser_perception() -> str:
 def _get_current_browser_url() -> str:
     """Obtém a URL atual do browser ativo (para verificação de domínio sensível)."""
     try:
-        from backend.orchestrator.tools.browser import _browser_state
+        from orchestrator.tools.browser import _browser_state
         page = _browser_state.get("page")
         if page is not None:
             return page.url or ""
