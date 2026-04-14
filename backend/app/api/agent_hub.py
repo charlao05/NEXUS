@@ -778,6 +778,13 @@ async def execute_agent_action(
                     "action": action.action,
                     "message": llm_response
                 }
+            else:
+                return {
+                    "status": "success",
+                    "agent_id": agent_id,
+                    "action": action.action,
+                    "message": "⚠️ Não consegui processar esta ação agora. Tente novamente ou envie uma mensagem de texto.",
+                }
     except ImportError:
         logger.debug("agent_chat module não disponível, usando fallback local")
     except Exception as e:
