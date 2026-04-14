@@ -1308,16 +1308,30 @@ def get_llm_response(
                 return f"Erro ao executar a operação: {str(e)}"
 
     # Executar chamada ao modelo com tools
+    logger.info(f"[LLM] Chamando modelo={model} agent={agent_type} tools={len(tools)} user_id={user_id}")
     try:
-        return _call_with_tools(
+        result = _call_with_tools(
             client=client,
             model=model,
             messages=messages,
             tools=tools,
             user_id=user_id or 0,
         )
+        logger.info(f"[LLM] Resposta OK agent={agent_type} len={len(result)}")
+        return result
     except SensitiveActionRequired:
         raise
     except Exception as e:
-        logger.error(f"Erro na chamada ao modelo {model}: {e}", exc_info=True)
-        return f"Desculpe, ocorreu um erro ao processar sua solicitação. Tente novamente em instantes."
+        # Log detalhado: tipo da exception, mensagem, modelo, agente
+        err_type = type(e).__name__
+        err_msg = str(e)
+        logger.error(
+            f"[LLM-ERROR] type={err_type} model={model} agent={agent_type} "
+            f"tools_count={len(tools)} msg={err_msg}",
+            exc_info=True,
+        )
+        # Retornar mensagem de erro mais informativa pra debug
+        return (
+            f"⚠️ Erro temporário ao processar ({err_type}). "
+            f"Detalhes técnicos foram registrados. Tente novamente em instantes."
+        )
