@@ -266,7 +266,7 @@ Responda "NAO" se o usuário está:
 
 Mensagem:"""
 
-        _model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        _model = "gpt-4o-mini"
         response = client.chat.completions.create(
             model=_model,
             messages=[
@@ -335,7 +335,7 @@ Formato:
 }}
 """
 
-        _model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        _model = "gpt-4o-mini"
         response = client.chat.completions.create(
             model=_model,
             messages=[
@@ -1028,7 +1028,7 @@ async def _continue_direct(task: dict[str, Any]) -> dict[str, Any]:
 
         client = get_openai_client()
         if client:
-            _model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+            _model = "gpt-4o-mini"
             resp = client.chat.completions.create(
                 model=_model,
                 messages=[

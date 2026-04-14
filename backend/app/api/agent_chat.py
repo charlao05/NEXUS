@@ -1223,7 +1223,12 @@ def get_llm_response(
     except ImportError:
         return "Biblioteca OpenAI não instalada. Execute: pip install openai"
 
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    # HARDCODED: gpt-4o-mini é o único modelo confirmado acessível com a API key de produção.
+    # Ignoramos OPENAI_MODEL de env var pra evitar deploy quebrando com modelo inacessível.
+    model = "gpt-4o-mini"
+    _env_model = os.getenv("OPENAI_MODEL", "")
+    if _env_model and _env_model != model:
+        logger.warning(f"[LLM] Ignorando OPENAI_MODEL={_env_model!r} do env — usando {model!r} (hardcoded)")
 
     # Obter prompt base do agente
     base_prompt = AGENT_SYSTEM_PROMPTS.get(

@@ -340,7 +340,7 @@ def _call_llm_planner(
         ]
     
     client = OpenAI(api_key=api_key)
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    model = "gpt-4o-mini"
     
     messages = [
         {"role": "system", "content": system_prompt},

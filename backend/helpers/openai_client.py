@@ -112,12 +112,8 @@ class OpenAIClient:
                 "3. Cole no .env: OPENAI_API_KEY=sk-proj-ABC123..."
             )
         
-        # Configurar modelo padrão
-        self.default_model = (
-            model 
-            or os.getenv("OPENAI_MODEL") 
-            or "gpt-4o-mini"
-        )
+        # Configurar modelo padrão — HARDCODED gpt-4o-mini (ignora env var pra evitar deploy quebrado)
+        self.default_model = model or "gpt-4o-mini"
         
         # Criar cliente OpenAI
         self.client = OpenAI(
