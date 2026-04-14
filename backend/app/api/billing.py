@@ -276,14 +276,13 @@ async def stripe_webhook(
 
         if addon_type == "extra_clients" and user_id:
             extra_clients = int(session_obj.get("metadata", {}).get("extra_clients", "10"))
-            extra_suppliers = int(session_obj.get("metadata", {}).get("extra_suppliers", "10"))
             user = db.query(User).filter(User.id == int(user_id)).first()
             if user:
+                # extra_client_slots é usado para clientes E fornecedores (limit_service.py:46)
                 user.extra_client_slots = (user.extra_client_slots or 0) + extra_clients
-                user.extra_supplier_slots = (user.extra_supplier_slots or 0) + extra_suppliers
                 user.stripe_customer_id = stripe_customer_id
                 db.commit()
-                logger.info(f"Addon applied: user={user_id}, +{extra_clients} clients, +{extra_suppliers} suppliers")
+                logger.info(f"Addon applied: user={user_id}, +{extra_clients} slots (clientes e fornecedores)")
 
         elif user_id and stripe_sub_id and plan:
             stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)

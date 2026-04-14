@@ -13,6 +13,7 @@ import os
 import json
 import logging
 from datetime import datetime
+from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -841,6 +842,21 @@ def _execute_crm_tool(tool_name: str, arguments: dict, user_id: int) -> Any:
         return result
 
     elif tool_name == "create_client":
+        # Verificar limite de plano antes de criar via tool calling do agente
+        try:
+            from app.services.limit_service import check_crm_limit
+            from database.models import User as _User, SessionLocal as _SL
+            _sess = _SL()
+            try:
+                _u = _sess.query(_User).filter(_User.id == user_id).first()
+                if _u:
+                    _udict = {"user_id": user_id, "plan": _u.plan or "free", "role": _u.role or "user"}
+                    check_crm_limit(_udict, contact_type="client")
+            finally:
+                _sess.close()
+        except HTTPException as _he:
+            detail = _he.detail if isinstance(_he.detail, dict) else {"message": str(_he.detail)}
+            return {"status": "error", "message": detail.get("message", "Limite de clientes atingido para o seu plano.")}
         result = CRMService.create_client(
             name=arguments["name"],
             user_id=user_id,
@@ -1020,6 +1036,21 @@ def _execute_crm_tool(tool_name: str, arguments: dict, user_id: int) -> Any:
         return result
 
     elif tool_name == "create_supplier":
+        # Verificar limite de plano antes de criar via tool calling do agente
+        try:
+            from app.services.limit_service import check_crm_limit
+            from database.models import User as _User, SessionLocal as _SL
+            _sess = _SL()
+            try:
+                _u = _sess.query(_User).filter(_User.id == user_id).first()
+                if _u:
+                    _udict = {"user_id": user_id, "plan": _u.plan or "free", "role": _u.role or "user"}
+                    check_crm_limit(_udict, contact_type="supplier")
+            finally:
+                _sess.close()
+        except HTTPException as _he:
+            detail = _he.detail if isinstance(_he.detail, dict) else {"message": str(_he.detail)}
+            return {"status": "error", "message": detail.get("message", "Limite de fornecedores atingido para o seu plano.")}
         result = CRMService.create_client(
             name=arguments["name"],
             user_id=user_id,
