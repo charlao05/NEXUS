@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 try:
-    from backend.utils.logging_utils import get_logger
+    from utils.logging_utils import get_logger
 except ImportError:
     from ..utils.logging_utils import get_logger
-from backend.utils.llm_client import gerar_texto_simples
+from utils.llm_client import gerar_texto_simples
 
 logger = get_logger(__name__)
 

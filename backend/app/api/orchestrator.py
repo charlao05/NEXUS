@@ -39,7 +39,7 @@ def _get_graph() -> Any:
     """Obtém ou cria o grafo compilado (singleton)."""
     global _compiled_graph
     if _compiled_graph is None:
-        from backend.orchestrator.graph import create_orchestrator_graph
+        from orchestrator.graph import create_orchestrator_graph
         # Importar tools para registrá-las no registry
         import backend.orchestrator.tools  # noqa: F401
         _compiled_graph = create_orchestrator_graph(interrupt_on_approval=True)
@@ -98,7 +98,7 @@ async def run_orchestrator(
     e o chamador deve chamar POST /approve/{task_id} para prosseguir.
     """
     try:
-        from backend.orchestrator.graph import run_task
+        from orchestrator.graph import run_task
 
         result = await run_task(
             agent_type=request.agent_type,
@@ -228,7 +228,7 @@ async def approve_task(
 @router.get("/health")
 async def orchestrator_health() -> dict[str, Any]:
     """Health check do orquestrador."""
-    from backend.orchestrator.nodes.act import _TOOL_REGISTRY
+    from orchestrator.nodes.act import _TOOL_REGISTRY
 
     return {
         "status": "ok",

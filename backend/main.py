@@ -107,15 +107,23 @@ except Exception as exc:
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 def _include(module_path: str, attr: str = "router") -> None:
-    """Importa um módulo e registra seu router; loga aviso se falhar."""
+    """Importa um módulo e registra seu router; loga ERROR com stack se falhar.
+
+    CRÍTICO: falhas silenciosas aqui causam 404 nas rotas (ex: agent_hub.py em 2026-04-15).
+    Loga em nível ERROR com exc_info pra aparecer nos logs do Render.
+    """
     try:
         parts = module_path.split(".")
         mod = __import__(module_path, fromlist=[parts[-1]])
         router = getattr(mod, attr)
         app.include_router(router)
-        logger.info(f"Router registrado: {module_path}")
+        logger.info(f"[ROUTER-OK] {module_path}")
     except Exception as exc:
-        logger.warning(f"Router NÃO carregado ({module_path}): {exc}")
+        logger.error(
+            f"[ROUTER-FAIL] {module_path} → {type(exc).__name__}: {exc} "
+            f"(rotas deste módulo retornarão 404 até o import ser consertado)",
+            exc_info=True,
+        )
 
 
 # Core — auth e billing primeiro (dependências de outros routers)
