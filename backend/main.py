@@ -185,6 +185,49 @@ async def health_check():
     return info
 
 
+# ── Debug: OpenAI runtime state ──────────────────────────────────────────────
+# Protegido por token fixo pra evitar exposição pública. Remover após diagnóstico.
+@app.get("/debug/openai", tags=["debug"])
+async def debug_openai(token: str = ""):
+    """Dump não-mascarado do estado da OPENAI_API_KEY vista pelo processo + teste direto.
+
+    Uso: GET /debug/openai?token=nx_debug_2026_april
+    """
+    if token != "nx_debug_2026_april":
+        return {"error": "unauthorized"}
+
+    key = os.getenv("OPENAI_API_KEY", "")
+    result: dict = {
+        "env_OPENAI_API_KEY_length": len(key),
+        "env_OPENAI_API_KEY_prefix": key[:20] if key else None,
+        "env_OPENAI_API_KEY_suffix": key[-10:] if key else None,
+        "env_OPENAI_API_KEY_has_whitespace": any(c in key for c in [" ", "\n", "\t", "\r"]),
+        "env_OPENAI_API_KEY_has_quotes": key.startswith('"') or key.startswith("'") or key.endswith('"') or key.endswith("'"),
+        "env_OPENAI_MODEL": os.getenv("OPENAI_MODEL", "<not_set>"),
+        "env_OPENAI_ORG_ID": os.getenv("OPENAI_ORG_ID", "<not_set>"),
+        "env_OPENAI_ORGANIZATION": os.getenv("OPENAI_ORGANIZATION", "<not_set>"),
+    }
+
+    # Teste real da chave
+    try:
+        from openai import OpenAI
+        c = OpenAI(api_key=key)
+        r = c.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=5,
+        )
+        result["openai_test"] = "OK"
+        result["openai_response"] = r.choices[0].message.content
+        result["openai_model_used"] = r.model
+    except Exception as e:
+        result["openai_test"] = "FAIL"
+        result["openai_error_type"] = type(e).__name__
+        result["openai_error_message"] = str(e)[:500]
+
+    return result
+
+
 # ── Startup / Shutdown Events ─────────────────────────────────────────────────
 @app.on_event("startup")
 async def on_startup():
