@@ -494,12 +494,15 @@ function AgentConfig() {
         timestamp: new Date()
       };
       setMessages(prev => [...prev, agentResponse]);
-    } catch {
-      // Fallback: informar que recebeu e sugerir digitar
+    } catch (err: any) {
+      // Mostrar o erro REAL do backend em vez de mensagem falsa de "em breve"
+      const detail = err?.response?.data?.detail || err?.message || 'Erro desconhecido';
+      const status = err?.response?.status ? ` [${err.response.status}]` : '';
+      console.error('[audio/transcribe] erro:', err?.response?.data || err);
       const agentResponse: Message = {
         id: (Date.now() + 1).toString(),
         role: 'agent',
-        content: `Recebi seu áudio de ${duration} segundo${duration !== 1 ? 's' : ''}! 🎤\n\nA transcrição automática de áudio estará disponível em breve. Enquanto isso, você pode digitar o que falou que eu te respondo na hora! 😊`,
+        content: `⚠️ Falha ao processar áudio${status}: ${detail}\n\nEnquanto isso, você pode digitar sua mensagem.`,
         timestamp: new Date()
       };
       setMessages(prev => [...prev, agentResponse]);
