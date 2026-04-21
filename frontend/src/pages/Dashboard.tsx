@@ -535,8 +535,7 @@ function Dashboard() {
           const _plan = userPlan?.toLowerCase() || 'free';
           const _paid = ['essencial', 'profissional', 'completo', 'pro', 'enterprise'].includes(_plan);
           const _pro  = ['profissional', 'completo', 'enterprise'].includes(_plan);
-          const _isAdmin = userRole === 'admin' || userRole === 'superadmin';
-
+          
           type AgentCard = { id: string; label: string; desc: string; gradient: string; icon: React.ReactNode; locked?: boolean };
           const allAgents: AgentCard[] = [
             {
