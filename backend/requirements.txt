@@ -43,6 +43,7 @@ langgraph>=0.2.0
 # === Utils ===
 pyyaml==6.0.2
 rich>=13.0.0
+tenacity>=8.0.0
 
 # === Redis ===
 redis>=5.0.0

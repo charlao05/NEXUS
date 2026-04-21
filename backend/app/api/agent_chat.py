@@ -14,6 +14,8 @@ import json
 import logging
 from datetime import datetime
 from fastapi import HTTPException
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, after_log
+from openai import APIConnectionError, APITimeoutError, RateLimitError, InternalServerError as OpenAIInternalServerError
 
 logger = logging.getLogger(__name__)
 
@@ -1096,6 +1098,13 @@ def _execute_crm_tool(tool_name: str, arguments: dict, user_id: int) -> Any:
 # LOOP DE FUNCTION CALLING — OpenAI GPT-4.1
 # ============================================================================
 
+@retry(
+    retry=retry_if_exception_type((APIConnectionError, APITimeoutError, RateLimitError, OpenAIInternalServerError)),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    stop=stop_after_attempt(3),
+    after=after_log(logger, logging.WARNING),
+    reraise=True,
+)
 def _call_with_tools(
     client,
     model: str,
@@ -1335,6 +1344,8 @@ def get_llm_response(
             f"tools_count={len(tools)} msg={err_msg}",
             exc_info=True,
         )
+        from app.api.monitoring import capture_exception as _sentry_capture
+        _sentry_capture(e, agent=agent_type, model=model, user_id=user_id)
         # Retornar mensagem de erro mais informativa pra debug
         return (
             f"⚠️ Erro temporário ao processar ({err_type}). "
