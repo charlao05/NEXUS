@@ -222,7 +222,15 @@ function Dashboard() {
                 }
               }}
             />
-            
+
+            {/* CTA Planos permanente */}
+            <button
+              onClick={() => navigate('/pricing')}
+              className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${isDark ? 'text-slate-300 hover:text-green-400 border-slate-700 hover:border-green-500' : 'text-slate-600 hover:text-green-600 border-slate-300 hover:border-green-500'}`}
+            >
+              Planos & Addons
+            </button>
+
             {/* Theme Toggle */}
             <button
               onClick={toggleTheme}
