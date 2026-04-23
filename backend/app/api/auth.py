@@ -490,6 +490,15 @@ async def login(credentials: UserLogin):
         plan = _normalize_plan(user.plan)
         role = str(getattr(user, 'role', None) or 'user')
 
+        # Auto-promoção: se email está em ADMIN_EMAILS mas role ainda não é admin
+        if role not in ("admin", "superadmin"):
+            admin_emails = [e.strip() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()]
+            if credentials.email in admin_emails:
+                user.role = "admin"  # type: ignore[assignment]
+                db.commit()
+                role = "admin"
+                logger.info(f"Auto-promoção a admin: {credentials.email} (ADMIN_EMAILS match)")
+
         token = create_jwt_token(user_id, credentials.email, plan, role)
         refresh = create_refresh_token(user_id, credentials.email)
         logger.info(f"Login bem-sucedido: {credentials.email} (role={role}, plan={plan})")
