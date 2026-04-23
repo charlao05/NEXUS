@@ -89,6 +89,7 @@ function Dashboard() {
   const [requestsLimit, setRequestsLimit] = useState(100)
   const [crmData, setCrmData] = useState<CRMDashboard | null>(null)
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
+  const [previewMode, setPreviewMode] = useState(false)
 
   useEffect(() => {
     const savedName = localStorage.getItem('user_name')
@@ -105,6 +106,7 @@ function Dashboard() {
         const payload = JSON.parse(atob(token.split('.')[1]))
         setUserPlan(payload.plan || savedPlan || 'free')
         if (payload.role) setUserRole(payload.role)
+        setPreviewMode(payload.preview_mode === true)
         const emailFromToken = payload.email || ''
         setUserEmail(emailFromToken)
         if (!savedName && emailFromToken) {
@@ -196,6 +198,22 @@ function Dashboard() {
 
   return (
     <div className={`min-h-screen transition-colors duration-300 ${isDark ? 'bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-100' : 'bg-gradient-to-br from-slate-50 via-white to-slate-100 text-slate-900'}`}>
+      {/* Preview Mode Banner */}
+      {previewMode && (
+        <div className="bg-amber-500/90 text-black text-center py-2 text-sm font-medium sticky top-0 z-[60]">
+          Preview: vendo como <strong>{(PLAN_DETAILS[userPlan] || PLAN_DETAILS.free).displayName}</strong>
+          <button
+            onClick={() => {
+              setPreviewMode(false)
+              localStorage.removeItem('user_plan')
+              window.location.reload()
+            }}
+            className="ml-4 px-3 py-0.5 rounded bg-black/20 hover:bg-black/30 text-sm transition"
+          >
+            Sair do Preview
+          </button>
+        </div>
+      )}
       {/* Top Navigation */}
       <nav className={`border-b sticky top-0 z-50 backdrop-blur-sm ${isDark ? 'border-slate-700/50 bg-slate-900/50' : 'border-slate-200 bg-white/80'}`}>
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -541,8 +559,9 @@ function Dashboard() {
         {/* Seus Agentes — dinâmico por plano */}
         {(() => {
           const _plan = userPlan?.toLowerCase() || 'free';
-          const _paid = ['essencial', 'profissional', 'completo', 'pro', 'enterprise'].includes(_plan);
-          const _pro  = ['profissional', 'completo', 'enterprise'].includes(_plan);
+          const _isAdmin = userRole === 'admin' || userRole === 'superadmin';
+          const _paid = (_isAdmin && !previewMode) ? true : ['essencial', 'profissional', 'completo', 'pro', 'enterprise'].includes(_plan);
+          const _pro  = (_isAdmin && !previewMode) ? true : ['profissional', 'completo', 'enterprise'].includes(_plan);
           
           type AgentCard = { id: string; label: string; desc: string; gradient: string; icon: React.ReactNode; locked?: boolean };
           const allAgents: AgentCard[] = [

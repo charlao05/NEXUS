@@ -40,6 +40,7 @@ interface PlanSwitcherProps {
 export default function PlanSwitcher({ currentPlan, isAdmin, token, isDark, onPlanChanged }: PlanSwitcherProps) {
   const [open, setOpen] = useState(false)
   const [switching, setSwitching] = useState(false)
+  const [previewMode, setPreviewMode] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
 
@@ -66,7 +67,7 @@ export default function PlanSwitcher({ currentPlan, isAdmin, token, isDark, onPl
       // Admin: troca instantaneamente via API
       setSwitching(true)
       try {
-        const resp = await axios.post(apiUrl('/api/auth/admin/switch-plan'), { plan }, {
+        const resp = await axios.post(apiUrl('/api/auth/admin/switch-plan'), { plan, preview: previewMode }, {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 8000, // 8s — evita travar se backend não responder
         })
@@ -127,6 +128,19 @@ export default function PlanSwitcher({ currentPlan, isAdmin, token, isDark, onPl
             <p className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
               {isAdmin ? '🔧 Admin — Trocar plano para teste' : 'Seu plano atual'}
             </p>
+            {isAdmin && (
+              <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={previewMode}
+                  onChange={(e) => setPreviewMode(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded accent-amber-500"
+                />
+                <span className={`text-xs ${previewMode ? 'text-amber-400 font-medium' : isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Modo Preview (ver como usuário)
+                </span>
+              </label>
+            )}
           </div>
 
           {/* Plan options */}
@@ -171,7 +185,7 @@ export default function PlanSwitcher({ currentPlan, isAdmin, token, isDark, onPl
                   )}
                   {!isActive && isAdmin && (
                     <span className={`text-xs ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
-                      Testar
+                      {previewMode ? 'Preview' : 'Testar'}
                     </span>
                   )}
                 </button>

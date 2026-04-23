@@ -245,9 +245,17 @@ function AgentConfig() {
   const _PAID_PLANS = ['essencial', 'profissional', 'completo', 'pro', 'enterprise'];
   // Admin tem acesso total; agentes básicos = gratuitos; assistente = apenas profissional+
   const isAdmin = userRole === 'admin' || userRole === 'superadmin';
+  const _previewMode = (() => {
+    try {
+      const t = localStorage.getItem('access_token');
+      if (!t) return false;
+      const p = JSON.parse(atob(t.split('.')[1]));
+      return p.preview_mode === true;
+    } catch { return false; }
+  })();
   const _FREE_AGENTS = ['agenda', 'clientes', 'financeiro', 'contabilidade'];
   const _PROFISSIONAL_AGENTS = ['assistente'];
-  const hasAccess = isAdmin
+  const hasAccess = (isAdmin && !_previewMode)
     || _FREE_AGENTS.includes(id || '')
     || (_PAID_PLANS.includes(realPlan) && !_PROFISSIONAL_AGENTS.includes(id || ''))
     || (_PROFISSIONAL_AGENTS.includes(id || '') && ['profissional', 'completo', 'enterprise'].includes(realPlan));

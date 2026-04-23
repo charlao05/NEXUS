@@ -173,13 +173,14 @@ def _get_jwt_secret() -> str:
     return secret
 
 
-def create_jwt_token(user_id: int, email: str, plan: str, role: str = "user") -> str:
+def create_jwt_token(user_id: int, email: str, plan: str, role: str = "user", preview_mode: bool = False) -> str:
     """Cria JWT com expiração de 24h — inclui iss/aud para validação enterprise."""
     payload: dict[str, Any] = {
         "user_id": user_id,
         "email": email,
         "plan": plan,
         "role": role,
+        "preview_mode": preview_mode,
         "exp": datetime.now(timezone.utc) + timedelta(hours=24),
         "iat": datetime.now(timezone.utc),
         "nbf": datetime.now(timezone.utc),  # Not Before — token válido a partir de agora
@@ -1603,6 +1604,7 @@ async def list_plans() -> dict[str, dict[str, Any]]:
 
 class AdminSwitchPlanRequest(BaseModel):
     plan: str
+    preview: bool = False
 
 
 @router.post("/admin/switch-plan")
@@ -1610,7 +1612,9 @@ async def admin_switch_plan(
     body: AdminSwitchPlanRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    """Admin pode trocar de plano instantaneamente para testes."""
+    """Admin pode trocar de plano instantaneamente para testes.
+    Se preview=True, gera JWT com preview_mode=True e NÃO altera o plano no DB.
+    Se preview=False (padrão), altera o plano real no DB (comportamento original)."""
     role = str(current_user.get("role", "user"))
     if role not in ("admin", "superadmin"):
         raise HTTPException(status_code=403, detail="Apenas administradores podem trocar de plano")
@@ -1624,15 +1628,22 @@ async def admin_switch_plan(
         user = db.query(User).filter(User.id == current_user["user_id"]).first()
         if not user:
             raise HTTPException(status_code=404, detail="Usuário não encontrado")
-        user.plan = plan  # type: ignore[assignment]
-        db.commit()
+
+        if not body.preview:
+            user.plan = plan  # type: ignore[assignment]
+            db.commit()
 
         plan_config = PLANS.get(plan, PLANS["free"])
-        new_token = create_jwt_token(user.id, user.email, plan, str(getattr(user, 'role', None) or 'user'))  # type: ignore[arg-type]
+        new_token = create_jwt_token(
+            user.id, user.email, plan,  # type: ignore[arg-type]
+            str(getattr(user, 'role', None) or 'user'),
+            preview_mode=body.preview,
+        )
 
         return {
             "status": "ok",
             "plan": plan,
+            "preview": body.preview,
             "access_token": new_token,
             "requests_limit": plan_config["requests_per_day"],
             "features": plan_config["features"],

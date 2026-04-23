@@ -25,7 +25,7 @@ def check_crm_limit(user: dict, contact_type: str | None = None) -> None:
     contact_type: None=conta todos, 'client'=só clientes, 'supplier'=só fornecedores."""
     # Admins são isentos de limites
     role = user.get("role", "user")
-    if role in ("admin", "superadmin"):
+    if role in ("admin", "superadmin") and not user.get("preview_mode"):
         return
 
     from app.core.plan_limits import get_limit, is_unlimited
@@ -81,7 +81,7 @@ def check_invoice_limit(user: dict) -> None:
     """Verifica se o usuário pode criar mais invoices neste mês."""
     # Admins são isentos de limites
     role = user.get("role", "user")
-    if role in ("admin", "superadmin"):
+    if role in ("admin", "superadmin") and not user.get("preview_mode"):
         return
 
     from app.core.plan_limits import get_limit, is_unlimited
@@ -125,7 +125,7 @@ def check_agent_access(user: dict, agent_id: str) -> None:
 
     # Admins são isentos
     role = user.get("role", "user")
-    if role in ("admin", "superadmin"):
+    if role in ("admin", "superadmin") and not user.get("preview_mode"):
         return
 
     plan = user.get("plan", "free")
@@ -159,7 +159,7 @@ def check_agent_message_limit(user: dict) -> None:
 
     # Admins são isentos
     role = user.get("role", "user")
-    if role in ("admin", "superadmin"):
+    if role in ("admin", "superadmin") and not user.get("preview_mode"):
         return
 
     plan = user.get("plan", "free")
