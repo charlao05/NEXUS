@@ -145,6 +145,34 @@ def _sentry_breadcrumb(event: dict[str, Any]) -> None:
         pass
 
 
+def _sentry_capture_message(event: dict[str, Any]) -> None:
+    """Captura evento como message permanente no Sentry (retencao forense).
+
+    Diferente de breadcrumb (que so sobe se uma exception ocorrer), capture_message
+    garante que o evento fique queryavel no dashboard do Sentry — necessario para
+    audit trail de eventos high/critical (action_blocked, sensitive_screen, etc.)
+    quando o stdout do Render expira.
+    """
+    try:
+        import sentry_sdk
+        with sentry_sdk.new_scope() as scope:
+            for k, v in event.items():
+                if k in ("timestamp", "event_type"):
+                    continue
+                if v is not None:
+                    scope.set_extra(k, v)
+            scope.set_tag("event_type", event.get("event_type", "unknown"))
+            scope.set_tag("risk_level", event.get("risk_level", "unknown"))
+            if event.get("user_id") is not None:
+                scope.set_user({"id": str(event["user_id"])})
+            sentry_sdk.capture_message(
+                f"[automation] {event.get('event_type', 'event')}",
+                level=_risk_to_sentry_level(event.get("risk_level", "low")),
+            )
+    except Exception:
+        pass
+
+
 def _risk_to_sentry_level(risk: str) -> str:
     """Mapeia risk_level para nivel Sentry."""
     mapping = {
@@ -213,9 +241,12 @@ class AutomationLogger:
         else:
             logger.info(msg)
 
-        # 3. Sentry breadcrumb (best-effort)
+        # 3. Sentry breadcrumb (best-effort) — para correlacao com exceptions
         if risk in ("medium", "high", "critical"):
             _sentry_breadcrumb(event)
+        # 4. Sentry capture_message (high/critical) — retencao forense permanente
+        if risk in ("high", "critical"):
+            _sentry_capture_message(event)
 
         return event
 

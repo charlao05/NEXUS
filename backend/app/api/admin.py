@@ -343,3 +343,138 @@ async def admin_health(admin: dict[str, Any] = Depends(require_admin)):
         }
     finally:
         db.close()
+
+
+# ============================================================================
+# RELIABILITY — Browser Pool / Circuit Breaker / Sessoes
+# Visibilidade e controle operacional da infraestrutura de automacao web.
+# ============================================================================
+
+@router.get("/reliability/pool")
+async def admin_pool_stats(admin: dict[str, Any] = Depends(require_admin)):
+    """Estado do BrowserPool em tempo real — sessoes ativas, capacidade.
+
+    Util para diagnosticar saturacao ou sessoes orfas.
+    """
+    try:
+        from browser.pool import BrowserPool
+        pool = BrowserPool.get_instance()
+        return {
+            "ok": True,
+            "pool": pool.stats(),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"admin_pool_stats erro: {e}")
+        return {
+            "ok": False,
+            "error": str(e),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+@router.get("/reliability/circuit")
+async def admin_circuit_stats(
+    domain: str | None = None,
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Estado dos circuit breakers (todos ou um dominio especifico).
+
+    Args:
+        domain: Se fornecido, retorna apenas este dominio. Senao, todos
+                em memoria local da instancia.
+    """
+    try:
+        from browser.circuit_breaker import DomainCircuitBreaker
+        breaker = DomainCircuitBreaker.get_instance()
+        return {
+            "ok": True,
+            "circuits": breaker.stats(domain) if domain else breaker.stats(),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"admin_circuit_stats erro: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/reliability/circuit/reset")
+async def admin_circuit_reset(
+    domain: str,
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Forca fechamento de um circuit breaker (uso administrativo).
+
+    Util quando um circuito ficou travado em OPEN apos uma manutencao
+    do site externo (gov.br, prefeitura) que ja foi resolvida.
+    """
+    if not domain or len(domain) < 3:
+        raise HTTPException(status_code=400, detail="domain obrigatorio")
+
+    try:
+        from browser.circuit_breaker import DomainCircuitBreaker
+        from utils.automation_logger import AutomationLogger, set_context
+
+        breaker = DomainCircuitBreaker.get_instance()
+        breaker.force_close(domain)
+
+        # Audit: admin reset eh evento de seguranca relevante
+        set_context(
+            correlation_id=f"admin_reset_{int(datetime.now(timezone.utc).timestamp())}",
+            user_id=admin.get("user_id", 0),
+            agent_type="admin",
+        )
+        AutomationLogger.circuit_state_changed(
+            domain=domain,
+            from_state="open",
+            to_state="closed",
+            failures=0,
+            reason=f"admin_force_close by {admin.get('email', 'unknown')}",
+        )
+
+        return {
+            "ok": True,
+            "domain": domain,
+            "new_state": "closed",
+            "reset_by": admin.get("email"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"admin_circuit_reset erro: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/reliability/sessions/{user_id}")
+async def admin_clear_user_sessions(
+    user_id: int,
+    domain: str | None = None,
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Remove cookies salvos de um usuario (todos os dominios ou um especifico).
+
+    Util quando o usuario reclama de "ficou logado em algo errado" ou
+    quando precisamos invalidar sessoes apos suspeita de compromisso.
+    """
+    if user_id <= 0:
+        raise HTTPException(status_code=400, detail="user_id invalido")
+
+    try:
+        from browser.session_store import SessionStore
+        store = SessionStore.get_instance()
+        removed = store.clear(user_id=user_id, domain=domain)
+
+        logger.warning(
+            f"[ADMIN] Sessoes limpas | target_user={user_id} domain={domain or 'ALL'} "
+            f"removed={removed} by={admin.get('email')}"
+        )
+        return {
+            "ok": True,
+            "user_id": user_id,
+            "domain": domain,
+            "removed_keys": removed,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"admin_clear_user_sessions erro: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
