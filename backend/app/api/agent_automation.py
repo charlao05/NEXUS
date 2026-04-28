@@ -518,6 +518,31 @@ async def _execute_automation(task: dict[str, Any]) -> dict[str, Any]:
             logger.warning("Orchestrador completou sem ações de browser — tentando execução direta")
             return await _execute_direct(task)
 
+        # Detectar circuit breaker aberto: se qualquer ação foi bloqueada
+        # pelo circuit breaker, comunicar ao usuário com retry estimado.
+        circuit_step = next(
+            (
+                r for r in action_results
+                if isinstance(r, dict) and (
+                    r.get("circuit_open")
+                    or (isinstance(r.get("output"), dict) and r.get("output", {}).get("circuit_open"))
+                )
+            ),
+            None,
+        )
+        if circuit_step:
+            output = circuit_step.get("output") if isinstance(circuit_step.get("output"), dict) else circuit_step
+            retry_in = int(output.get("retry_in_seconds") or 0)
+            domain = output.get("domain") or "esse site"
+            retry_min = max(1, retry_in // 60)
+            result["status"] = "circuit_open"
+            result["final_response"] = (
+                f"⚡ **{domain} está com instabilidade no momento.**\n\n"
+                f"Para proteger sua conta, pausei tentativas por aproximadamente "
+                f"{retry_min} min. Tente novamente depois — a automação volta automaticamente."
+            )
+            return result
+
         # Detectar se precisa de input do usuário (login/credenciais)
         if _detect_waiting_for_user(result):
             result["status"] = "waiting_for_user"
@@ -547,10 +572,41 @@ async def _execute_automation(task: dict[str, Any]) -> dict[str, Any]:
 
 async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
     """Fallback: executa passos diretamente via Playwright (sem orchestrator).
-    
+
     Roda sync Playwright via asyncio.to_thread para não bloquear o event loop.
     """
     import asyncio
+    import time as _time
+
+    # Audit: lifecycle events para a fallback path (orchestrator path ja audita
+    # via run_task → TaskContext). Aqui garantimos correlation_id+events.
+    _task_id_for_audit = task.get("task_id") or f"auto_{uuid.uuid4().hex[:12]}"
+    _user_id_for_audit = task.get("user_id", 0)
+    _t_start = _time.time()
+    _audit_ctx = None
+    try:
+        from utils.automation_logger import AutomationLogger, TaskContext
+        _audit_ctx = TaskContext(
+            task_id=_task_id_for_audit,
+            user_id=_user_id_for_audit,
+            agent_type="browser",
+        )
+        _audit_ctx.__enter__()
+        AutomationLogger.task_started(
+            goal=task.get("goal", ""),
+            max_iterations=1,
+            thread_id=_task_id_for_audit,
+            mode="direct_fallback",
+        )
+    except Exception:
+        AutomationLogger = None  # type: ignore[assignment]
+
+    # Sentry user context
+    try:
+        from app.api.monitoring import set_user_context
+        set_user_context(user_id=_user_id_for_audit, extra={"task_id": _task_id_for_audit, "mode": "direct_fallback"})
+    except Exception:
+        pass
 
     def _run_steps_sync() -> tuple[list[dict[str, Any]], bool, bool]:
         """Execução síncrona dos passos Playwright.
@@ -613,6 +669,11 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
 
                     results.append({"step": step.get("step"), "action": action, **r})
 
+                    # Circuit breaker: domain bloqueado por falhas repetidas →
+                    # parar imediatamente com retry_in_seconds para o usuario.
+                    if isinstance(r, dict) and r.get("circuit_open"):
+                        break
+
                     if not r.get("success", False):
                         break
 
@@ -630,10 +691,12 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
             except Exception:
                 pass
 
-            # Só fechar browser se NÃO precisar de input do usuário
+            # Só fechar browser se NÃO precisar de input do usuário.
+            # Passar user_id para liberar somente a sessao desse usuario
+            # (sem user_id, shutdown_browser fecharia o pool inteiro).
             if not needs_user_input:
                 try:
-                    shutdown_browser()
+                    shutdown_browser(user_id=task.get("user_id", 0), close=True)
                 except Exception:
                     pass
 
@@ -656,7 +719,23 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
         all_ok = False
         needs_user_input = False
 
-    if needs_user_input:
+    # Circuit breaker — detectar e formatar mensagem amigavel
+    circuit_open_step = next(
+        (r for r in results if isinstance(r, dict) and r.get("circuit_open")),
+        None,
+    )
+
+    if circuit_open_step:
+        retry_in = int(circuit_open_step.get("retry_in_seconds") or 0)
+        domain = circuit_open_step.get("domain") or "esse site"
+        retry_min = max(1, retry_in // 60)
+        status = "circuit_open"
+        message = (
+            f"⚡ **{domain} está com instabilidade no momento.**\n\n"
+            f"Para proteger sua conta, pausei tentativas por aproximadamente "
+            f"{retry_min} min. Tente novamente depois — a automação volta automaticamente."
+        )
+    elif needs_user_input:
         status = "waiting_for_user"
         message = (
             _format_results_for_chat(results)
@@ -671,6 +750,25 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
     else:
         status = "completed" if all_ok else "partial"
         message = _format_results_for_chat(results)
+
+    # Audit: task_completed (com awaiting flag se for o caso)
+    duration_ms = int((_time.time() - _t_start) * 1000)
+    if AutomationLogger is not None:
+        try:
+            AutomationLogger.task_completed(
+                status=status,
+                actions_count=len(results),
+                duration_ms=duration_ms,
+                awaiting_user_input=needs_user_input,
+                circuit_open=bool(circuit_open_step),
+            )
+        except Exception:
+            pass
+    if _audit_ctx is not None:
+        try:
+            _audit_ctx.__exit__(None, None, None)
+        except Exception:
+            pass
 
     return {
         "task_id": task.get("task_id", "unknown"),
@@ -921,10 +1019,10 @@ async def _continue_automation(task: dict[str, Any]) -> dict[str, Any]:
                     "Clique em **Continuar Automação** quando estiver pronto."
                 )
         else:
-            # Automação concluída — fechar browser
+            # Automação concluída — fechar somente esta sessao
             try:
                 from orchestrator.tools.browser import shutdown_browser
-                shutdown_browser()
+                shutdown_browser(user_id=task.get("user_id", 0), close=True)
             except Exception:
                 pass
             
@@ -946,6 +1044,34 @@ async def _continue_automation(task: dict[str, Any]) -> dict[str, Any]:
 async def _continue_direct(task: dict[str, Any]) -> dict[str, Any]:
     """Fallback de continuação: captura estado atual + screenshot + responde."""
     import asyncio
+    import time as _time
+
+    _task_id_for_audit = task.get("task_id") or f"auto_{uuid.uuid4().hex[:12]}"
+    _user_id_for_audit = task.get("user_id", 0)
+    _t_start = _time.time()
+    _audit_ctx = None
+    try:
+        from utils.automation_logger import AutomationLogger, TaskContext
+        _audit_ctx = TaskContext(
+            task_id=_task_id_for_audit,
+            user_id=_user_id_for_audit,
+            agent_type="browser",
+        )
+        _audit_ctx.__enter__()
+        AutomationLogger.task_started(
+            goal=f"continue: {task.get('goal', '')}",
+            max_iterations=1,
+            thread_id=_task_id_for_audit,
+            mode="continue_direct",
+        )
+    except Exception:
+        AutomationLogger = None  # type: ignore[assignment]
+
+    try:
+        from app.api.monitoring import set_user_context
+        set_user_context(user_id=_user_id_for_audit, extra={"task_id": _task_id_for_audit, "mode": "continue_direct"})
+    except Exception:
+        pass
 
     def _sense_current_page() -> dict[str, Any]:
         from orchestrator.tools.browser import (
@@ -990,9 +1116,9 @@ async def _continue_direct(task: dict[str, Any]) -> dict[str, Any]:
         except Exception as ex:
             results.append({"step": 3, "action": "read_text", "success": False, "error": str(ex)})
 
-        # Fechar browser
+        # Fechar somente a sessao deste usuario (nao o pool inteiro)
         try:
-            shutdown_browser()
+            shutdown_browser(user_id=task.get("user_id", 0), close=True)
         except Exception:
             pass
 
@@ -1006,6 +1132,20 @@ async def _continue_direct(task: dict[str, Any]) -> dict[str, Any]:
         sense_data = await asyncio.to_thread(_sense_current_page)
     except Exception as e:
         logger.error(f"Erro ao sensar página para continuação: {e}")
+        if AutomationLogger is not None:
+            try:
+                AutomationLogger.task_failed(
+                    error=str(e),
+                    status="failed",
+                    duration_ms=int((_time.time() - _t_start) * 1000),
+                )
+            except Exception:
+                pass
+        if _audit_ctx is not None:
+            try:
+                _audit_ctx.__exit__(None, None, None)
+            except Exception:
+                pass
         return {
             "task_id": task.get("task_id", "unknown"),
             "status": "failed",
@@ -1069,9 +1209,27 @@ async def _continue_direct(task: dict[str, Any]) -> dict[str, Any]:
             f"Texto: {page_text[:500]}"
         )
 
+    results = sense_data.get("results", [])
+    if AutomationLogger is not None:
+        try:
+            AutomationLogger.task_completed(
+                status="completed",
+                actions_count=len(results),
+                duration_ms=int((_time.time() - _t_start) * 1000),
+                awaiting_user_input=False,
+                mode="continue_direct",
+            )
+        except Exception:
+            pass
+    if _audit_ctx is not None:
+        try:
+            _audit_ctx.__exit__(None, None, None)
+        except Exception:
+            pass
+
     return {
         "task_id": task.get("task_id", "unknown"),
         "status": "completed",
         "final_response": message,
-        "action_results": sense_data.get("results", []),
+        "action_results": results,
     }

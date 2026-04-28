@@ -11,10 +11,12 @@ Vocabulário completo do browser agent seguindo o Blueprint Comet:
 
 from __future__ import annotations
 
+import functools
 import random
-from typing import Any
+import time
+from typing import Any, Callable, TypeVar
 
-from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import Error as PlaywrightError, Page, TimeoutError as PlaywrightTimeoutError
 
 try:
     from utils.logging_utils import get_logger
@@ -22,6 +24,77 @@ except ImportError:
     from ..utils.logging_utils import get_logger
 
 logger = get_logger("browser.actions")
+
+
+# ---------------------------------------------------------------------------
+# Retry transparente para falhas transientes
+# ---------------------------------------------------------------------------
+
+T = TypeVar("T")
+
+# Erros transientes que valem retry. Erros de selector ausente (TimeoutError
+# por wait_for_selector) tambem entram pois geralmente sao resolvidos com
+# retry curto (animacoes, lazy-loading).
+_TRANSIENT_ERRORS: tuple[type[BaseException], ...] = (
+    PlaywrightTimeoutError,
+    PlaywrightError,
+    ConnectionError,
+    TimeoutError,
+)
+
+# Padroes de mensagem que indicam erro PERMANENTE (nao retry):
+# - selector invalido (sintaxe), pagina fechada, browser fechado
+_PERMANENT_PATTERNS: tuple[str, ...] = (
+    "browser has been closed",
+    "target closed",
+    "context closed",
+    "page closed",
+    "is not a valid",
+    "invalid selector",
+)
+
+
+def _is_permanent(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return any(p in msg for p in _PERMANENT_PATTERNS)
+
+
+def with_retry(
+    max_attempts: int = 3,
+    base_delay: float = 0.5,
+    max_delay: float = 4.0,
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    """Decorator: retry com backoff exponencial + jitter para acoes de browser.
+
+    - Retry em PlaywrightTimeoutError, PlaywrightError, ConnectionError.
+    - NAO retry em erros permanentes (selector invalido, pagina fechada).
+    - Backoff: 0.5s, 1s, 2s (com jitter de +/- 25%).
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> T:
+            last_exc: BaseException | None = None
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    return func(*args, **kwargs)
+                except _TRANSIENT_ERRORS as exc:
+                    last_exc = exc
+                    if _is_permanent(exc) or attempt == max_attempts:
+                        raise
+                    # Backoff com jitter
+                    delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+                    delay = delay * random.uniform(0.75, 1.25)
+                    logger.warning(
+                        f"Retry {attempt}/{max_attempts - 1} de {func.__name__} "
+                        f"apos erro transiente: {exc} (aguardando {delay:.1f}s)"
+                    )
+                    time.sleep(delay)
+            # Inalcancavel — defensivo
+            if last_exc:
+                raise last_exc
+            raise RuntimeError("Retry esgotado sem excecao registrada")
+        return wrapper
+    return decorator
 
 
 # ---------------------------------------------------------------------------

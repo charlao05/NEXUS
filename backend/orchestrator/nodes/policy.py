@@ -66,6 +66,18 @@ def policy_node(state: AgentState) -> dict[str, Any]:
             updates["blocked_actions_info"] = "; ".join(
                 f"{d.action.tool}: {d.reason}" for d in blocked
             )
+            # Audit log estruturado (1 evento por bloqueio)
+            try:
+                from utils.automation_logger import AutomationLogger
+                for d in blocked:
+                    AutomationLogger.action_blocked(
+                        tool=d.action.tool,
+                        reason=d.reason or "policy violation",
+                        risk=getattr(d.action, "risk", None) or "high",
+                        target=str(d.action.params.get("url") or d.action.params.get("selector") or ""),
+                    )
+            except Exception:
+                pass
         else:
             updates["blocked_actions_info"] = ""
         
@@ -87,6 +99,17 @@ def policy_node(state: AgentState) -> dict[str, Any]:
             updates["approval_message"] = get_approval_summary(decisions)
             updates["status"] = TaskStatus.WAITING_APPROVAL.value
             logger.info("⏸️ Plano requer aprovação humana")
+            try:
+                from utils.automation_logger import AutomationLogger
+                for d in decisions:
+                    if d.allowed and getattr(d, "requires_approval", False):
+                        AutomationLogger.approval_required(
+                            tool=d.action.tool,
+                            risk=getattr(d.action, "risk", None) or "high",
+                            message=updates["approval_message"][:200],
+                        )
+            except Exception:
+                pass
         else:
             updates["requires_approval"] = False
             

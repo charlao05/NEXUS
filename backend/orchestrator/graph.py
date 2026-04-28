@@ -176,7 +176,7 @@ async def run_task(
     thread_id: str | None = None,
 ) -> dict[str, Any]:
     """Executa uma tarefa completa no orquestrador.
-    
+
     Args:
         agent_type: Tipo do agente (clientes, financeiro, assistente, browser, nf).
         user_id: ID do usuário no banco.
@@ -187,10 +187,13 @@ async def run_task(
         site_config: Config do site (para browser agent).
         graph: Grafo pré-compilado (opcional).
         thread_id: ID da thread para checkpointing (opcional).
-    
+
     Returns:
         Dicionário com final_response, status, action_results e metadata.
     """
+    import time as _time
+    from utils.automation_logger import AutomationLogger, TaskContext
+
     # ── Auto-import browser tools para que fiquem registradas no act_node ──
     if agent_type == "browser":
         try:
@@ -201,7 +204,7 @@ async def run_task(
 
     task_id = f"task_{uuid.uuid4().hex[:12]}"
     _thread_id = thread_id or f"thread_{uuid.uuid4().hex[:12]}"
-    
+
     initial_state = create_initial_state(
         task_id=task_id,
         agent_type=agent_type,
@@ -212,54 +215,106 @@ async def run_task(
         max_steps=max_steps,
         site_config=site_config,
     )
-    
+
     if graph is None:
         graph = create_orchestrator_graph(interrupt_on_approval=False)
-    
+
     config = {"configurable": {"thread_id": _thread_id}}
-    
+
     logger.info(
         f"🚀 Iniciando tarefa {task_id} | "
         f"agente={agent_type} user={user_id} | "
         f"goal={goal[:80]}..."
     )
-    
-    # Executar o grafo
-    final_state = None
+
+    # Sentry user context — propaga para toda excecao capturada nesta task
     try:
-        async for event in graph.astream(initial_state, config=config):
-            # Cada event é {node_name: partial_state}
-            for node_name, node_output in event.items():
-                logger.debug(f"  ► {node_name}: {list(node_output.keys()) if isinstance(node_output, dict) else '...'}")
-                final_state = node_output
-    except Exception as e:
-        logger.error(f"Erro na execução do grafo: {e}", exc_info=True)
-        return {
-            "task_id": task_id,
-            "status": TaskStatus.FAILED.value,
-            "final_response": f"Erro interno: {str(e)}",
-            "action_results": [],
-            "error": str(e),
-        }
-    
-    # Obter estado final completo via checkpointer
-    try:
-        snapshot = graph.get_state(config)
-        full_state = snapshot.values if snapshot else {}
+        from app.api.monitoring import set_user_context
+        set_user_context(user_id=user_id, extra={"task_id": task_id, "agent_type": agent_type})
     except Exception:
-        full_state = final_state or {}
-    
-    status = full_state.get("status", TaskStatus.FAILED.value)
-    final_response = full_state.get("final_response", "")
-    action_results = full_state.get("action_results", [])
-    
-    logger.info(
-        f"🏁 Tarefa {task_id} finalizada | "
-        f"status={status} | "
-        f"ações={len(action_results)} | "
-        f"resposta={'sim' if final_response else 'não'}"
-    )
-    
+        pass
+
+    # ── Executar o grafo dentro do TaskContext (correlation_id propaga) ──
+    final_state = None
+    _t_start = _time.time()
+
+    with TaskContext(task_id=task_id, user_id=user_id, agent_type=agent_type):
+        AutomationLogger.task_started(
+            goal=goal,
+            max_iterations=max_iterations,
+            thread_id=_thread_id,
+        )
+
+        try:
+            async for event in graph.astream(initial_state, config=config):
+                for node_name, node_output in event.items():
+                    logger.debug(
+                        f"  ► {node_name}: "
+                        f"{list(node_output.keys()) if isinstance(node_output, dict) else '...'}"
+                    )
+                    final_state = node_output
+        except Exception as e:
+            duration_ms = int((_time.time() - _t_start) * 1000)
+            logger.error(f"Erro na execução do grafo: {e}", exc_info=True)
+            AutomationLogger.task_failed(
+                error=str(e),
+                status=TaskStatus.FAILED.value,
+                duration_ms=duration_ms,
+            )
+            # Capturar no Sentry com contexto rico
+            try:
+                from app.api.monitoring import capture_exception
+                capture_exception(
+                    e,
+                    task_id=task_id,
+                    agent_type=agent_type,
+                    user_id=user_id,
+                    goal=goal[:200],
+                )
+            except Exception:
+                pass
+            # Cleanup defensivo da sessao do browser
+            _cleanup_browser_session(user_id, agent_type)
+            return {
+                "task_id": task_id,
+                "status": TaskStatus.FAILED.value,
+                "final_response": f"Erro interno: {str(e)}",
+                "action_results": [],
+                "error": str(e),
+            }
+
+        # Obter estado final completo via checkpointer
+        try:
+            snapshot = graph.get_state(config)
+            full_state = snapshot.values if snapshot else {}
+        except Exception:
+            full_state = final_state or {}
+
+        status = full_state.get("status", TaskStatus.FAILED.value)
+        final_response = full_state.get("final_response", "")
+        action_results = full_state.get("action_results", [])
+        awaiting = full_state.get("awaiting_user_input", False)
+        duration_ms = int((_time.time() - _t_start) * 1000)
+
+        logger.info(
+            f"🏁 Tarefa {task_id} finalizada | "
+            f"status={status} | "
+            f"ações={len(action_results)} | "
+            f"resposta={'sim' if final_response else 'não'}"
+        )
+
+        AutomationLogger.task_completed(
+            status=status,
+            actions_count=len(action_results),
+            duration_ms=duration_ms,
+            awaiting_user_input=awaiting,
+        )
+
+        # Cleanup da sessao do browser, exceto quando aguardando input do user
+        # (se aguardando, manter sessao viva para o user interagir)
+        if not awaiting and agent_type == "browser":
+            _cleanup_browser_session(user_id, agent_type, save=True)
+
     return {
         "task_id": task_id,
         "thread_id": _thread_id,
@@ -273,7 +328,24 @@ async def run_task(
         "requires_approval": full_state.get("requires_approval", False),
         "approval_message": full_state.get("approval_message", ""),
         # Human-in-the-loop state
-        "awaiting_user_input": full_state.get("awaiting_user_input", False),
+        "awaiting_user_input": awaiting,
         "awaiting_user_reason": full_state.get("awaiting_user_reason", ""),
         "resume_hint": full_state.get("resume_hint", ""),
     }
+
+
+def _cleanup_browser_session(user_id: int, agent_type: str, save: bool = True) -> None:
+    """Libera sessao de browser do pool ao final da task.
+
+    Mantem sessao viva (close=False) por padrao para que o user possa
+    continuar (caso a task seja resumida). TTL do pool fechara depois.
+    """
+    if agent_type != "browser" or user_id <= 0:
+        return
+    try:
+        from browser.pool import BrowserPool
+        pool = BrowserPool.get_instance()
+        if pool.has_session(user_id):
+            pool.release(user_id, save_session=save, close=False)
+    except Exception as e:
+        logger.debug(f"_cleanup_browser_session ignorado: {e}")

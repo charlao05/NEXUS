@@ -149,6 +149,8 @@ def _detect_sensitive_screen(page_observation: str, page_url: str = "") -> dict[
             "reason": reason,
             "hint": hint,
             "snapshot": snapshot,
+            "fields_detected": list({f.strip() for f in sensitive_fields_found[:10]}),
+            "antibot_detected": antibot_detected,
         }
     
     return None
@@ -181,12 +183,12 @@ def sense_node(state: AgentState) -> dict[str, Any]:
             # Em iterações subsequentes, captura estado real da página.
             iteration = state.get("iteration", 0)
             if iteration > 0:
-                observation = _get_browser_perception()
+                observation = _get_browser_perception(user_id)
                 updates["page_observation"] = observation
-                
+
                 # --- Human-in-the-loop: detectar tela sensível ---
                 # Extrair URL atual do browser (se possível)
-                current_url = _get_current_browser_url()
+                current_url = _get_current_browser_url(user_id)
                 sensitive = _detect_sensitive_screen(observation, current_url)
                 if sensitive:
                     updates["awaiting_user_input"] = True
@@ -196,6 +198,20 @@ def sense_node(state: AgentState) -> dict[str, Any]:
                     logger.info(
                         f"🔒 SENSE: Handoff humano ativado — {sensitive['reason']}"
                     )
+                    # Audit log estruturado
+                    try:
+                        from utils.automation_logger import AutomationLogger
+                        AutomationLogger.sensitive_screen_detected(
+                            domain=(current_url.split("/")[2] if "://" in current_url else current_url),
+                            fields=sensitive.get("fields_detected", []),
+                            url=current_url,
+                        )
+                        AutomationLogger.awaiting_user_input(
+                            reason=sensitive["reason"],
+                            url=current_url,
+                        )
+                    except Exception:
+                        pass
                 else:
                     # Limpar flags de handoff se a tela não é mais sensível (retomada pós-login)
                     if state.get("awaiting_user_input"):
@@ -303,35 +319,41 @@ def _get_assistant_context(user_id: int) -> str:
     return f"Resumo geral:\n{crm}"
 
 
-def _get_browser_perception() -> str:
-    """Captura percepção DOM da página aberta (se houver browser ativo).
-    
+def _get_browser_perception(user_id: int) -> str:
+    """Captura percepção DOM da página aberta (se houver sessão ativa).
+
     Usa a camada de percepção estilo Steward para extrair:
     - URL e título atuais
     - Elementos interativos filtrados e numerados
     - Tipo de página (form, table, login, etc.)
     """
     try:
-        from orchestrator.tools.browser import _browser_state
+        from browser.pool import BrowserPool
         from browser.perception import get_compact_observation
 
-        page = _browser_state.get("page")
+        pool = BrowserPool.get_instance()
+        if not pool.has_session(user_id):
+            return "Browser não está aberto. Navegue para uma URL primeiro."
+
+        page = pool.get_page(user_id)
         if page is None:
             return "Browser não está aberto. Navegue para uma URL primeiro."
 
-        observation = get_compact_observation(page)
-        return observation
+        return get_compact_observation(page)
 
     except Exception as e:
         logger.warning(f"Erro na percepção do browser: {e}")
         return f"Erro ao capturar percepção do browser: {e}"
 
 
-def _get_current_browser_url() -> str:
+def _get_current_browser_url(user_id: int) -> str:
     """Obtém a URL atual do browser ativo (para verificação de domínio sensível)."""
     try:
-        from orchestrator.tools.browser import _browser_state
-        page = _browser_state.get("page")
+        from browser.pool import BrowserPool
+        pool = BrowserPool.get_instance()
+        if not pool.has_session(user_id):
+            return ""
+        page = pool.get_page(user_id)
         if page is not None:
             return page.url or ""
     except Exception:

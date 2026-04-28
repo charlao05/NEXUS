@@ -199,6 +199,145 @@ def iniciar_navegador(
     return p, browser, page
 
 
+# ---------------------------------------------------------------------------
+# API para BrowserPool — separa launch (browser) da criacao de contexto
+# ---------------------------------------------------------------------------
+
+def create_stealth_browser(
+    browser_name: Optional[str] = None,
+    headless: Optional[bool] = None,
+) -> Tuple[Any, Any]:
+    """Inicia Playwright e launcher do browser, SEM criar contexto/page.
+
+    Usado pelo BrowserPool: 1 browser process + N contextos isolados.
+
+    Returns:
+        (playwright, browser) — sem context nem page.
+    """
+    browser_name = browser_name or os.getenv("DEFAULT_BROWSER", "chromium")
+
+    if headless is None:
+        env_headless = os.getenv("BROWSER_HEADLESS", "")
+        if env_headless.lower() in ("1", "true", "yes"):
+            headless = True
+        elif env_headless.lower() in ("0", "false", "no"):
+            headless = False
+        else:
+            headless = os.getenv("ENVIRONMENT", "development") == "production"
+
+    logger.info(f"[Pool] Iniciando browser: {browser_name} (headless={headless})")
+
+    p = sync_playwright().start()
+
+    launch_opts: dict[str, Any] = {"headless": headless}
+    if browser_name.lower() not in ("firefox", "webkit"):
+        launch_opts["args"] = list(_STEALTH_CHROMIUM_ARGS)
+        launch_opts["ignore_default_args"] = ["--enable-automation"]
+
+    if browser_name.lower() == "firefox":
+        browser = p.firefox.launch(**launch_opts)
+    elif browser_name.lower() == "webkit":
+        browser = p.webkit.launch(**launch_opts)
+    else:
+        _use_chrome = os.getenv("USE_REAL_CHROME", "1").lower() in ("1", "true", "yes")
+        if _use_chrome:
+            try:
+                browser = p.chromium.launch(channel="chrome", **launch_opts)
+                logger.info("[Pool] Usando Chrome real instalado")
+            except Exception:
+                browser = p.chromium.launch(**launch_opts)
+                logger.info("[Pool] Chrome real nao encontrado — Chromium bundled")
+        else:
+            browser = p.chromium.launch(**launch_opts)
+
+    return p, browser
+
+
+def create_stealth_context(
+    browser: Any,
+    proxy: Optional[Any] = None,
+) -> Tuple[Any, Any]:
+    """Cria um BrowserContext isolado com stealth + perfil realista.
+
+    Args:
+        browser: Browser ja inicializado (de create_stealth_browser).
+        proxy: URL string ou dict Playwright {server, username, password}.
+               Se None, usa ProxyPool para round-robin (se PROXY_URLS setada).
+
+    Returns:
+        (context, page) — page ja criada e com stealth aplicado.
+    """
+    # --- Resolver proxy ---
+    proxy_config: Optional[dict[str, str]] = None
+    if proxy is not None:
+        if isinstance(proxy, str):
+            from browser.proxy import _to_playwright_proxy
+            proxy_config = _to_playwright_proxy(proxy)
+        elif isinstance(proxy, dict):
+            proxy_config = proxy
+    else:
+        # Tentar pegar do pool de proxies (se configurado)
+        try:
+            from browser.proxy import ProxyPool
+            proxy_config = ProxyPool.get_instance().next_playwright_config()
+        except Exception:
+            proxy_config = None
+
+    # --- Perfil realista ---
+    vp = random.choice(_REALISTIC_VIEWPORTS)
+    ua = random.choice(_REALISTIC_USER_AGENTS)
+
+    ctx_opts: dict[str, Any] = {
+        "viewport": vp,
+        "locale": "pt-BR",
+        "timezone_id": "America/Sao_Paulo",
+        "color_scheme": "light",
+        "ignore_https_errors": True,
+        "user_agent": ua,
+        "extra_http_headers": {
+            "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        },
+    }
+    if proxy_config:
+        ctx_opts["proxy"] = proxy_config
+
+    context = browser.new_context(**ctx_opts)
+
+    # --- Stealth patches ---
+    try:
+        from playwright_stealth import Stealth  # type: ignore[import-untyped]
+        stealth_kwargs: dict[str, Any] = {
+            "navigator_webdriver": True,
+            "navigator_user_agent": True,
+            "navigator_languages": True,
+            "navigator_platform": True,
+            "navigator_plugins": True,
+            "navigator_vendor": True,
+            "chrome_runtime": True,
+            "webgl_vendor": True,
+            "navigator_languages_override": ("pt-BR", "pt"),
+            "navigator_platform_override": "Win32",
+            "navigator_user_agent_override": ua,
+        }
+        stealth = Stealth(**stealth_kwargs)
+        page = context.new_page()
+        stealth.apply_stealth_sync(page)
+    except ImportError:
+        logger.warning("[Pool] playwright-stealth nao instalado — sem stealth patches")
+        page = context.new_page()
+    except Exception as exc:
+        logger.warning(f"[Pool] Erro stealth: {exc} — continuando sem")
+        page = context.new_page()
+
+    proxy_info = "sim" if proxy_config else "nao"
+    logger.info(
+        f"[Pool] Contexto criado | viewport={vp['width']}x{vp['height']} "
+        f"proxy={proxy_info}"
+    )
+
+    return context, page
+
+
 def fechar_navegador(
     p: Optional[Any],
     browser: Optional[Any],

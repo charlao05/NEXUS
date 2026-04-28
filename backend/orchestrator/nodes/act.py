@@ -248,27 +248,60 @@ def act_node(state: AgentState) -> dict[str, Any]:
     results: list[dict] = list(state.get("action_results", []))
     final_response = state.get("final_response", "")
     
+    # Importar audit logger uma vez
+    try:
+        from utils.automation_logger import AutomationLogger
+    except Exception:  # pragma: no cover
+        AutomationLogger = None  # type: ignore[assignment]
+
     for i, action_dict in enumerate(planned):
         tool_name = action_dict.get("tool", "")
         params = action_dict.get("params", {})
-        
+        risk = action_dict.get("risk", "low")
+
         logger.info(f"  [{i+1}/{len(planned)}] Executando: {tool_name}")
-        
+
+        # Audit: action_planned (apenas para tools nao-browser, pois as browser
+        # tools ja emitem action_executed no proprio _execute)
+        if AutomationLogger and tool_name not in _BROWSER_TOOLS:
+            try:
+                AutomationLogger.action_planned(
+                    tool=tool_name,
+                    risk=risk,
+                    rationale=action_dict.get("rationale", "")[:200],
+                    target=str(params.get("client_id") or params.get("name") or ""),
+                )
+            except Exception:
+                pass
+
         start = time.time()
-        
+
         try:
             if tool_name not in _TOOL_REGISTRY:
                 raise ValueError(f"Tool '{tool_name}' não registrada")
-            
+
             tool_func = _TOOL_REGISTRY[tool_name]
             # Browser tools recebem state; CRM tools recebem user_id
             if tool_name in _BROWSER_TOOLS:
                 output = tool_func(params, state)
             else:
                 output = tool_func(params, user_id)
-            
+
             duration = int((time.time() - start) * 1000)
-            
+
+            # Audit para CRM tools (browser ja audit-loga no _execute)
+            if AutomationLogger and tool_name not in _BROWSER_TOOLS:
+                try:
+                    success = not (isinstance(output, dict) and output.get("error"))
+                    AutomationLogger.action_executed(
+                        tool=tool_name,
+                        risk=risk,
+                        success=success,
+                        duration_ms=duration,
+                    )
+                except Exception:
+                    pass
+
             result = ActionResult(
                 tool=tool_name,
                 success=True,
