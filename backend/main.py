@@ -185,6 +185,12 @@ async def health_check():
     return info
 
 
+@app.get("/debug-sentry", include_in_schema=False, tags=["debug"])
+async def debug_sentry():
+    """TEMPORARY — Sentry SDK smoke test. Sera removida apos validacao."""
+    raise Exception("Sentry smoke test — safe to ignore")
+
+
 # ── Startup / Shutdown Events ─────────────────────────────────────────────────
 @app.on_event("startup")
 async def on_startup():
