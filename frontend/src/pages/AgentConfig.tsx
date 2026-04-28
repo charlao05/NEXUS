@@ -30,7 +30,8 @@ interface Message {
     plan_summary?: string;
     steps?: Record<string, unknown>[];
     risk_level?: string;
-    status?: string;  // awaiting_approval, approved, rejected, executing, completed
+    status?: string;  // awaiting_approval, approved, rejected, executing, completed, waiting_for_user
+    preview_screenshot?: string | null;  // PNG base64 (sem prefixo data:image)
   };
   confirmation?: {
     tool_name: string;
@@ -850,6 +851,7 @@ function AgentConfig() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
+      const previewShot = (response.data.preview_screenshot as string | null) || null;
       const agentResponse: Message = {
         id: (Date.now() + 1).toString(),
         role: 'agent',
@@ -859,6 +861,7 @@ function AgentConfig() {
           task_id: taskId,
           requires_approval: false,
           status: response.data.status || (approved ? 'completed' : 'rejected'),
+          preview_screenshot: previewShot,
         },
       };
       setMessages(prev => [...prev, agentResponse]);
@@ -867,7 +870,7 @@ function AgentConfig() {
       const finalStatus = response.data.status || (approved ? 'completed' : 'rejected');
       setMessages(prev => prev.map(msg => {
         if (msg.automation?.task_id === taskId && msg.automation.status === 'executing') {
-          return { ...msg, automation: { ...msg.automation, status: finalStatus } };
+          return { ...msg, automation: { ...msg.automation, status: finalStatus, preview_screenshot: previewShot } };
         }
         return msg;
       }));
@@ -918,6 +921,7 @@ function AgentConfig() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
+      const previewShot = (response.data.preview_screenshot as string | null) || null;
       const agentResponse: Message = {
         id: (Date.now() + 1).toString(),
         role: 'agent',
@@ -927,6 +931,7 @@ function AgentConfig() {
           task_id: taskId,
           requires_approval: false,
           status: response.data.status || 'completed',
+          preview_screenshot: previewShot,
         },
       };
       setMessages(prev => [...prev, agentResponse]);
@@ -935,7 +940,7 @@ function AgentConfig() {
       const newStatus = response.data.status || 'completed';
       setMessages(prev => prev.map(msg => {
         if (msg.automation?.task_id === taskId && msg.automation.status === 'executing') {
-          return { ...msg, automation: { ...msg.automation, status: newStatus } };
+          return { ...msg, automation: { ...msg.automation, status: newStatus, preview_screenshot: previewShot } };
         }
         return msg;
       }));
@@ -1222,6 +1227,20 @@ function AgentConfig() {
                     {/* Botão Continuar Automação (após inserir credenciais) */}
                     {msg.automation?.status === 'waiting_for_user' && (
                       <div className="mt-3 space-y-3">
+                        {/* Preview da tela atual do navegador (confirma qual tela preencher) */}
+                        {msg.automation?.preview_screenshot && (
+                          <figure className="bg-slate-900/60 border border-slate-700 rounded-lg overflow-hidden">
+                            <img
+                              src={`data:image/png;base64,${msg.automation.preview_screenshot}`}
+                              alt="Tela atual do navegador"
+                              className="w-full h-auto block"
+                              loading="lazy"
+                            />
+                            <figcaption className="px-3 py-1.5 text-xs text-slate-400 bg-slate-900/80 border-t border-slate-700">
+                              📷 Esta é a tela aberta no navegador agora
+                            </figcaption>
+                          </figure>
+                        )}
                         {/* Card informativo */}
                         <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
                           <div className="flex items-center gap-2 mb-2">

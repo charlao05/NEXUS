@@ -98,6 +98,7 @@ class AutomationResultResponse(BaseModel):
     status: str
     message: str
     action_results: list[dict[str, Any]] = []
+    preview_screenshot: str | None = None  # PNG base64 (apenas em waiting_for_user)
 
 
 class AutomationContinueRequest(BaseModel):
@@ -121,6 +122,32 @@ _WAITING_KEYWORDS = [
     "agora é com você",
     "anti-robô", "anti-robo", "captcha",
 ]
+
+
+def _capture_preview_screenshot(user_id: int) -> str | None:
+    """Captura screenshot da pagina ativa do usuario em base64 (PNG completo).
+
+    Usado para mostrar ao usuario qual tela ele precisa preencher quando a
+    automacao fica em waiting_for_user. Diferente de browser_screenshot
+    (que trunca pra 100 chars no result do tool), aqui retornamos o b64
+    inteiro pra renderizar como <img> no chat.
+
+    Returns:
+        String base64 (sem prefixo data:image), ou None se falhou.
+    """
+    try:
+        import base64
+        from browser.pool import BrowserPool
+
+        pool = BrowserPool.get_instance()
+        if not pool.has_session(user_id):
+            return None
+        page = pool.get_page(user_id)
+        png_bytes = page.screenshot(type="png", full_page=False)
+        return base64.b64encode(png_bytes).decode("utf-8")
+    except Exception as e:
+        logger.warning(f"Falha ao capturar preview screenshot para user {user_id}: {e}")
+        return None
 
 
 def _detect_waiting_for_user(result: dict[str, Any]) -> bool:
@@ -560,6 +587,15 @@ async def _execute_automation(task: dict[str, Any]) -> dict[str, Any]:
                     + "\n\n💡 *O robô não vê nem guarda seu CPF ou senha. Isso é só entre você e o site.*"
                     + "\n\n🔄 Clique em **Continuar Automação** quando estiver pronto."
                 )
+            # Preview screenshot pra mostrar ao usuario qual tela preencher
+            if not result.get("preview_screenshot"):
+                try:
+                    import asyncio as _asyncio
+                    result["preview_screenshot"] = await _asyncio.to_thread(
+                        _capture_preview_screenshot, task.get("user_id", 0)
+                    )
+                except Exception:
+                    result["preview_screenshot"] = None
 
         return result
 
@@ -770,11 +806,22 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             pass
 
+    # Preview screenshot apenas em waiting_for_user (browser ainda aberto)
+    preview_b64: str | None = None
+    if status == "waiting_for_user":
+        try:
+            preview_b64 = await asyncio.to_thread(
+                _capture_preview_screenshot, task.get("user_id", 0)
+            )
+        except Exception:
+            preview_b64 = None
+
     return {
         "task_id": task.get("task_id", "unknown"),
         "status": status,
         "final_response": message,
         "action_results": results,
+        "preview_screenshot": preview_b64,
     }
 
 
@@ -908,6 +955,7 @@ async def approve_automation(
         status=result.get("status", "completed"),
         message=result.get("final_response", "Automação concluída."),
         action_results=result.get("action_results", []),
+        preview_screenshot=result.get("preview_screenshot"),
     )
 
 
@@ -971,6 +1019,7 @@ async def continue_automation(
         status=result.get("status", "completed"),
         message=result.get("final_response", "Automação concluída."),
         action_results=result.get("action_results", []),
+        preview_screenshot=result.get("preview_screenshot"),
     )
 
 
@@ -1018,6 +1067,14 @@ async def _continue_automation(task: dict[str, Any]) -> dict[str, Any]:
                     + "\n\n🔄 Ainda é necessário completar ações no navegador. "
                     "Clique em **Continuar Automação** quando estiver pronto."
                 )
+            if not result.get("preview_screenshot"):
+                try:
+                    import asyncio as _asyncio
+                    result["preview_screenshot"] = await _asyncio.to_thread(
+                        _capture_preview_screenshot, task.get("user_id", 0)
+                    )
+                except Exception:
+                    result["preview_screenshot"] = None
         else:
             # Automação concluída — fechar somente esta sessao
             try:
