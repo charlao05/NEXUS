@@ -13,6 +13,7 @@ import {
   Eye, EyeOff, Trash2, ShieldAlert, ChevronDown,
 } from 'lucide-react';
 import axios from 'axios';
+import apiClient from '../services/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 import { apiUrl } from '../config/api';
 
@@ -197,7 +198,7 @@ export default function Profile() {
 
   useEffect(() => {
     if (!token) return;
-    axios.get(apiUrl('/api/auth/me'), { headers })
+    apiClient.get(apiUrl('/api/auth/me'), { headers })
       .then(res => {
         const p = res.data as ProfileData;
         setProfile(p);
@@ -244,7 +245,7 @@ export default function Profile() {
           payload[key] = value.trim();
         }
       }
-      await axios.put(apiUrl('/api/auth/me'), payload, { headers });
+      await apiClient.put(apiUrl('/api/auth/me'), payload, { headers });
       setSuccessMsg('Perfil salvo com sucesso!');
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err) {
@@ -274,7 +275,7 @@ export default function Profile() {
 
     setChangingPassword(true);
     try {
-      await axios.post(apiUrl('/api/auth/change-password'), {
+      await apiClient.post(apiUrl('/api/auth/change-password'), {
         current_password: passwordForm.current_password,
         new_password: passwordForm.new_password,
       }, { headers });
@@ -302,7 +303,7 @@ export default function Profile() {
     setDeletingAccount(true);
     setDeleteError('');
     try {
-      await axios.delete(apiUrl('/api/auth/delete-account'), {
+      await apiClient.delete(apiUrl('/api/auth/delete-account'), {
         headers,
         data: { password: deletePassword, confirm: true },
       });
@@ -322,7 +323,7 @@ export default function Profile() {
     setSendingFeedback(true);
     setFeedbackMsg('');
     try {
-      await axios.post(apiUrl('/api/auth/feedback'), {
+      await apiClient.post(apiUrl('/api/auth/feedback'), {
         rating: feedbackRating,
         category: feedbackCategory || null,
         message: feedbackMessage || null,

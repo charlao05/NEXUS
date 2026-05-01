@@ -13,6 +13,7 @@ import {
   Eye, EyeOff, Package, Truck, Filter, CreditCard, Banknote,
 } from 'lucide-react';
 import axios from 'axios';
+import apiClient from '../services/apiClient';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiUrl } from '../config/api';
@@ -236,7 +237,7 @@ function AgentConfig() {
       if (savedPlan) setRealPlan(savedPlan);
 
       // Só buscar se tem PIN de confirmação configurado (chamada leve)
-      axios.get(apiUrl('/api/auth/has-confirmation-pin'), { headers: { Authorization: `Bearer ${token}` } })
+      apiClient.get(apiUrl('/api/auth/has-confirmation-pin'), { headers: { Authorization: `Bearer ${token}` } })
         .then(res => setHasConfirmationPin(res.data.has_pin ?? false))
         .catch(() => setHasConfirmationPin(false));
     }
@@ -308,7 +309,7 @@ function AgentConfig() {
     // Carregar histórico persistido do backend (se existir)
     const agentId = id || 'assistente';
     if (token) {
-      axios.get(apiUrl(`/api/chat/history/${agentId}?limit=50`), {
+      apiClient.get(apiUrl(`/api/chat/history/${agentId}?limit=50`), {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then(res => {
@@ -478,7 +479,7 @@ function AgentConfig() {
       formData.append('audio', audioBlob, 'audio.webm');
       formData.append('agent', id || 'assistente');
       
-      const response = await axios.post(apiUrl('/api/agents/audio/transcribe'), formData, {
+      const response = await apiClient.post(apiUrl('/api/agents/audio/transcribe'), formData, {
         headers: { 
           Authorization: `Bearer ${token}`,
           'Content-Type': 'multipart/form-data'
@@ -524,7 +525,7 @@ function AgentConfig() {
     setIsLoading(true);
     
     try {
-      const response = await axios.post(agent.endpoint, {
+      const response = await apiClient.post(agent.endpoint, {
         action,
         parameters: params
       }, {
@@ -594,7 +595,7 @@ function AgentConfig() {
         filesToUpload.forEach(f => formData.append('files', f.file));
         
         try {
-          const response = await axios.post(apiUrl('/api/agents/upload'), formData, {
+          const response = await apiClient.post(apiUrl('/api/agents/upload'), formData, {
             headers: { 
               Authorization: `Bearer ${token}`,
               'Content-Type': 'multipart/form-data'
@@ -705,7 +706,7 @@ function AgentConfig() {
           arguments: a.arguments,
         }));
       }
-      const response = await axios.post(
+      const response = await apiClient.post(
         apiUrl(`/api/agents/${id || 'assistente'}/confirm-action`),
         payload,
         { headers: { Authorization: `Bearer ${token}` } }
@@ -773,7 +774,7 @@ function AgentConfig() {
     setPinSetupSuccess('');
 
     try {
-      await axios.post(
+      await apiClient.post(
         apiUrl('/api/auth/set-confirmation-pin'),
         { login_password: pinSetupData.loginPassword, new_pin: pinSetupData.newPin },
         { headers: { Authorization: `Bearer ${token}` } }
@@ -801,7 +802,7 @@ function AgentConfig() {
     setPinSetupSuccess('');
 
     try {
-      await axios.delete(
+      await apiClient.delete(
         apiUrl('/api/auth/confirmation-pin'),
         { headers: { Authorization: `Bearer ${token}` }, data: { login_password: pinSetupData.loginPassword } }
       );
@@ -843,7 +844,7 @@ function AgentConfig() {
     setMessages(prev => [...prev, userMsg]);
 
     try {
-      const response = await axios.post(apiUrl('/api/agents/automation/approve'), {
+      const response = await apiClient.post(apiUrl('/api/agents/automation/approve'), {
         task_id: taskId,
         approved,
         reason: approved ? '' : 'Cancelado pelo usuário',
@@ -915,7 +916,7 @@ function AgentConfig() {
     setMessages(prev => [...prev, userMsg]);
 
     try {
-      const response = await axios.post(apiUrl('/api/agents/automation/continue'), {
+      const response = await apiClient.post(apiUrl('/api/agents/automation/continue'), {
         task_id: taskId,
       }, {
         headers: { Authorization: `Bearer ${token}` },
@@ -1057,7 +1058,7 @@ function AgentConfig() {
               if (!token || !id) return;
               if (!confirm('Tem certeza que deseja limpar todo o histórico desta conversa?')) return;
               try {
-                await axios.delete(apiUrl(`/api/chat/history/${id}`), {
+                await apiClient.delete(apiUrl(`/api/chat/history/${id}`), {
                   headers: { Authorization: `Bearer ${token}` },
                 });
                 // Reset para welcome msg

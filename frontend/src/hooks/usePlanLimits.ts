@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { apiUrl } from '../config/api'
+import apiClient from '../services/apiClient'
 
 interface LimitInfo {
   max: number
@@ -42,11 +42,9 @@ export function usePlanLimits() {
   const refresh = useCallback(() => {
     if (!token) return
     if (!hasCacheRef.current) setLoading(true)
-    fetch(apiUrl('/api/auth/my-limits'), {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => r.json())
-      .then((data) => {
+    apiClient.get<PlanLimits>('/api/auth/my-limits')
+      .then((res) => {
+        const data = res.data
         setLimits(data)
         hasCacheRef.current = true
         try { localStorage.setItem('nexus_plan_limits', JSON.stringify(data)) } catch { /* ignore */ }

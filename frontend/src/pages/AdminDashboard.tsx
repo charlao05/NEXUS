@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import axios from 'axios'
+import apiClient from '../services/apiClient'
 import { apiUrl } from '../config/api'
 
 interface AdminOverview {
@@ -78,8 +79,8 @@ export default function AdminDashboard() {
     const headers = { Authorization: `Bearer ${token}` }
     try {
       const [overviewRes, mrrRes] = await Promise.all([
-        axios.get(apiUrl('/api/admin/overview'), { headers }),
-        axios.get(apiUrl('/api/admin/mrr-chart'), { headers }),
+        apiClient.get(apiUrl('/api/admin/overview'), { headers }),
+        apiClient.get(apiUrl('/api/admin/mrr-chart'), { headers }),
       ])
       setOverview(overviewRes.data)
       setMrrChart(mrrRes.data.chart || [])
@@ -103,7 +104,7 @@ export default function AdminDashboard() {
         ...(searchTerm && { search: searchTerm }),
         ...(filterPlan && { plan: filterPlan }),
       })
-      const res = await axios.get(apiUrl(`/api/admin/users?${params}`), { headers })
+      const res = await apiClient.get(apiUrl(`/api/admin/users?${params}`), { headers })
       setUsers(res.data.users || [])
       setTotalUsers(res.data.total || 0)
     } catch {
@@ -165,7 +166,7 @@ export default function AdminDashboard() {
                   setActiveTab(tab as 'overview' | 'users' | 'system' | 'feedbacks')
                   if (tab === 'feedbacks' && feedbacks.length === 0) {
                     setFeedbacksLoading(true)
-                    axios.get(apiUrl('/api/auth/feedbacks'), { headers: { Authorization: `Bearer ${token}` } })
+                    apiClient.get(apiUrl('/api/auth/feedbacks'), { headers: { Authorization: `Bearer ${token}` } })
                       .then(res => setFeedbacks(res.data.feedbacks || []))
                       .catch((err) => console.warn('Falha ao carregar feedbacks:', err?.message))
                       .finally(() => setFeedbacksLoading(false))
@@ -440,7 +441,7 @@ function SystemHealth({ token }: { token: string | null }) {
 
   useEffect(() => {
     if (token) {
-      axios.get(apiUrl('/api/admin/health'), { headers: { Authorization: `Bearer ${token}` } })
+      apiClient.get(apiUrl('/api/admin/health'), { headers: { Authorization: `Bearer ${token}` } })
         .then(r => setHealth(r.data))
         .catch((err) => console.warn('Falha ao carregar saúde do sistema:', err?.message))
     }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { apiUrl } from '../config/api'
+import apiClient from '../services/apiClient'
 
 export interface Notification {
   id: string
@@ -18,11 +18,9 @@ export function useNotifications(token: string | null) {
   useEffect(() => {
     if (token) {
       // Fetch inicial de não-lidas
-      fetch(apiUrl('/api/notifications/unread'), {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then(r => r.json())
-        .then(data => {
+      apiClient.get<{ notifications?: Notification[] }>('/api/notifications/unread')
+        .then(res => {
+          const data = res.data
           if (data.notifications) {
             setNotifications(data.notifications)
           }
@@ -31,11 +29,9 @@ export function useNotifications(token: string | null) {
 
       // Polling a cada 30s
       const interval = setInterval(() => {
-        fetch(apiUrl('/api/notifications/unread'), {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-          .then(r => r.json())
-          .then(data => {
+        apiClient.get<{ notifications?: Notification[] }>('/api/notifications/unread')
+          .then(res => {
+            const data = res.data
             if (data.notifications) {
               setNotifications(prev => {
                 const existing = new Set(prev.map(n => n.id))
@@ -60,10 +56,7 @@ export function useNotifications(token: string | null) {
     if (!token) return
     try {
       const params = notificationId ? `?notification_id=${notificationId}` : ''
-      await fetch(apiUrl(`/api/notifications/read${params}`), {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      })
+      await apiClient.post(`/api/notifications/read${params}`)
       setNotifications(prev =>
         prev.map(n =>
           notificationId ? (n.id === notificationId ? { ...n, read: true } : n) : { ...n, read: true }
@@ -77,10 +70,7 @@ export function useNotifications(token: string | null) {
   const clearAll = useCallback(async () => {
     if (!token) return
     try {
-      await fetch(apiUrl('/api/notifications/clear'), {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      })
+      await apiClient.delete('/api/notifications/clear')
       setNotifications([])
     } catch {
       // silently fail

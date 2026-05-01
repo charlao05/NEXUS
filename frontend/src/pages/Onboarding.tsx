@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import axios from 'axios'
+import apiClient from '../services/apiClient'
 import { apiUrl } from '../config/api'
 
 export default function Onboarding() {
@@ -43,7 +43,7 @@ export default function Onboarding() {
 
       // Registrar atividade
       if (token) {
-        await axios.post(apiUrl('/api/chat/save'), {
+        await apiClient.post(apiUrl('/api/chat/save'), {
           agent_id: 'system',
           role: 'assistant',
           content: `Onboarding completo: ${businessName} (${businessType}). Objetivos: ${goals.join(', ')}`,

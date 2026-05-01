@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import axios from 'axios'
+import apiClient from '../services/apiClient'
 import { apiUrl } from '../config/api'
 
 export function PaymentSuccess() {
@@ -17,7 +17,7 @@ export function PaymentSuccess() {
         if (sessionId) {
           const token = localStorage.getItem('access_token') || ''
           // Verificar pagamento com o backend (com auth header)
-          const response = await axios.post(apiUrl('/api/auth/verify-payment'), { 
+          const response = await apiClient.post(apiUrl('/api/auth/verify-payment'), { 
             session_id: sessionId 
           }, {
             headers: { Authorization: `Bearer ${token}` }

@@ -7,6 +7,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
+import apiClient from '../services/apiClient'
 import { apiUrl } from '../config/api'
 
 interface PlanInfo {
@@ -67,7 +68,7 @@ export default function PlanSwitcher({ currentPlan, isAdmin, token, isDark, onPl
       // Admin: troca instantaneamente via API
       setSwitching(true)
       try {
-        const resp = await axios.post(apiUrl('/api/auth/admin/switch-plan'), { plan, preview: previewMode }, {
+        const resp = await apiClient.post(apiUrl('/api/auth/admin/switch-plan'), { plan, preview: previewMode }, {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 8000, // 8s — evita travar se backend não responder
         })

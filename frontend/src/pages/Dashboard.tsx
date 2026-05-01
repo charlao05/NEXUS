@@ -5,7 +5,7 @@ import { useNotifications } from '../hooks/useNotifications'
 import { useTheme } from '../contexts/ThemeContext'
 import NotificationBell from '../components/NotificationBell'
 import PlanSwitcher from '../components/PlanSwitcher'
-import axios from 'axios'
+import apiClient from '../services/apiClient'
 import { apiUrl } from '../config/api'
 
 const PLAN_DETAILS: Record<string, { displayName: string; color: string; gradient: string }> = {
@@ -125,7 +125,7 @@ function Dashboard() {
     // Buscar perfil (requests usage) + CRM + Analytics em paralelo
     const fetchProfile = async () => {
       try {
-        const response = await axios.get(apiUrl('/api/auth/me'), {
+        const response = await apiClient.get(apiUrl('/api/auth/me'), {
           headers: { Authorization: `Bearer ${token}` }
         })
         if (response.data) {
@@ -156,7 +156,7 @@ function Dashboard() {
     // Buscar dados reais do CRM
     const fetchCRM = async () => {
       try {
-        const response = await axios.get(apiUrl('/api/crm/dashboard'), {
+        const response = await apiClient.get(apiUrl('/api/crm/dashboard'), {
           headers: { Authorization: `Bearer ${token}` }
         })
         if (response.data) {
@@ -170,7 +170,7 @@ function Dashboard() {
     // Buscar analytics avançado
     const fetchAnalytics = async () => {
       try {
-        const response = await axios.get(apiUrl('/api/analytics/dashboard'), {
+        const response = await apiClient.get(apiUrl('/api/analytics/dashboard'), {
           headers: { Authorization: `Bearer ${token}` }
         })
         if (response.data) {
