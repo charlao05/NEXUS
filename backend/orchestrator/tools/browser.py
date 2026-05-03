@@ -177,6 +177,24 @@ def _execute(
             duration_ms=duration_ms,
         )
 
+        # Usage tracking (Tier 1 — sink in-memory). Nunca propaga.
+        try:
+            from utils.usage_tracker import UsageTracker
+            from utils.automation_logger import (
+                _correlation_id as _ctx_corr,
+                _agent_type as _ctx_agent,
+            )
+            UsageTracker.record_automation(
+                user_id=user_id,
+                agent_type=(_ctx_agent.get() or "browser"),
+                tool=tool_name,
+                duration_ms=duration_ms,
+                success=bool(result.get("success", True)),
+                correlation_id=_ctx_corr.get(),
+            )
+        except Exception:
+            pass
+
         # Sucesso vale para circuit breaker (apenas em navigate ou apos navigate)
         if domain_for_breaker:
             breaker.record_success(domain_for_breaker)
@@ -203,6 +221,24 @@ def _execute(
             target=target,
             duration_ms=duration_ms,
         )
+
+        # Usage tracking (Tier 1) — registra falha. Nunca propaga.
+        try:
+            from utils.usage_tracker import UsageTracker
+            from utils.automation_logger import (
+                _correlation_id as _ctx_corr,
+                _agent_type as _ctx_agent,
+            )
+            UsageTracker.record_automation(
+                user_id=user_id,
+                agent_type=(_ctx_agent.get() or "browser"),
+                tool=tool_name,
+                duration_ms=duration_ms,
+                success=False,
+                correlation_id=_ctx_corr.get(),
+            )
+        except Exception:
+            pass
 
         if domain_for_breaker:
             breaker.record_failure(domain_for_breaker)
