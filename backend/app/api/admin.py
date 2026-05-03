@@ -478,3 +478,39 @@ async def admin_clear_user_sessions(
     except Exception as e:
         logger.error(f"admin_clear_user_sessions erro: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# USAGE — LLM e Automation (Tier 1, in-memory)
+# Janela movel de 48h maxima. Reinicio do processo zera dados.
+# Tier 2 introduzira persistencia em tabelas dedicadas.
+# ============================================================================
+@router.get("/usage/llm")
+async def admin_usage_llm(
+    since_minutes: int = 60 * 24,
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Snapshot agregado de uso LLM. Default: ultimas 24h. Cap: 48h."""
+    try:
+        from utils.usage_tracker import UsageTracker
+        # Cap defensivo: 48h é o teto de retenção
+        capped = min(max(60, since_minutes), 48 * 60)
+        return UsageTracker.snapshot_llm(since_minutes=capped)
+    except Exception as e:
+        logger.error(f"admin_usage_llm erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="usage_tracker indisponivel")
+
+
+@router.get("/usage/automation")
+async def admin_usage_automation(
+    since_minutes: int = 60 * 24,
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Snapshot agregado de uso de automacao Playwright. Default: ultimas 24h. Cap: 48h."""
+    try:
+        from utils.usage_tracker import UsageTracker
+        capped = min(max(60, since_minutes), 48 * 60)
+        return UsageTracker.snapshot_automation(since_minutes=capped)
+    except Exception as e:
+        logger.error(f"admin_usage_automation erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="usage_tracker indisponivel")
