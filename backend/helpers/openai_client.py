@@ -230,7 +230,30 @@ class OpenAIClient:
                 f"({getattr(usage, 'prompt_tokens', 0) if usage else 0} in, {getattr(usage, 'completion_tokens', 0) if usage else 0} out) | "  # type: ignore
                 f"Custo estimado: ${estimated_cost:.6f}"
             )
-            
+
+            # ── Usage tracking (Tier 1 — sink in-memory) ──
+            # Desvia os números que já calculamos acima pro UsageTracker, pra
+            # consulta agregada via /api/admin/usage/llm. NUNCA propaga exceção.
+            try:
+                from utils.usage_tracker import UsageTracker
+                from utils.automation_logger import (
+                    _correlation_id as _ctx_corr,
+                    _user_id as _ctx_user,
+                    _agent_type as _ctx_agent,
+                )
+                UsageTracker.record_llm(
+                    user_id=(_ctx_user.get() or 0),
+                    model=model or self.default_model,
+                    prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,  # type: ignore
+                    completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,  # type: ignore
+                    duration_ms=int(elapsed_time * 1000),
+                    cost_usd=float(estimated_cost),
+                    correlation_id=_ctx_corr.get(),
+                    agent_type=_ctx_agent.get(),
+                )
+            except Exception:
+                logger.debug("UsageTracker.record_llm suprimido", exc_info=True)
+
             return content  # type: ignore
             
         except OpenAIError as e:
