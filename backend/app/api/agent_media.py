@@ -233,8 +233,11 @@ async def upload_and_process(
                     b64 = base64.b64encode(content).decode("utf-8")
                     vision_prompt = message or "Descreva o que você vê nesta imagem. Se for um documento, extraia o texto."
 
+                    import time as _t
+                    _track_t0 = _t.time()
+                    _vision_model = os.getenv("OPENAI_VISION_MODEL", "gpt-4o")
                     response = client.chat.completions.create(
-                        model=os.getenv("OPENAI_VISION_MODEL", "gpt-4o"),
+                        model=_vision_model,
                         messages=[
                             {
                                 "role": "user",
@@ -246,6 +249,13 @@ async def upload_and_process(
                         ],
                         max_tokens=800,
                     )
+                    try:
+                        from helpers.openai_tracking import track_openai_response
+                        track_openai_response(response, _vision_model, _track_t0,
+                                              user_id_override=current_user.get("user_id"),
+                                              agent_type_override="media_vision")
+                    except Exception:
+                        pass
                     description = response.choices[0].message.content or "Imagem processada."
                     extracted_texts.append(f"[Imagem: {filename}]\n{description}")
                     processed_files.append({"name": filename, "status": "ok", "type": "image", "description": description[:200]})

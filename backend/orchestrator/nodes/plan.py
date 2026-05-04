@@ -346,7 +346,9 @@ def _call_llm_planner(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_goal},
     ]
-    
+
+    import time as _t
+    _track_t0 = _t.time()
     response = client.chat.completions.create(
         model=model,
         messages=messages,
@@ -354,7 +356,12 @@ def _call_llm_planner(
         max_tokens=1500,
         response_format={"type": "json_object"},
     )
-    
+    try:
+        from helpers.openai_tracking import track_openai_response
+        track_openai_response(response, model, _track_t0, agent_type_override="orchestrator_planner")
+    except Exception:
+        pass
+
     raw = response.choices[0].message.content or "{}"
     data = json.loads(raw)
     

@@ -1120,6 +1120,8 @@ def _call_with_tools(
     current_messages = messages.copy()
 
     for round_num in range(max_rounds):
+        import time as _t
+        _track_t0 = _t.time()
         response = client.chat.completions.create(
             model=model,
             messages=current_messages,
@@ -1128,6 +1130,11 @@ def _call_with_tools(
             temperature=0.3,
             max_tokens=1500,
         )
+        try:
+            from helpers.openai_tracking import track_openai_response
+            track_openai_response(response, model, _track_t0, user_id_override=user_id)
+        except Exception:
+            pass
 
         choice = response.choices[0]
 

@@ -121,14 +121,22 @@ REGRAS OBRIGATÓRIAS:
 
     logger.info("Chamando modelo OpenAI para gerar plano de ação.")
 
+    import time as _t
+    _track_t0 = _t.time()
+    _model = "gpt-4o-mini"
     resposta = client.chat.completions.create(
-        model="gpt-4o-mini",  # pode trocar para outro modelo compatível se quiser
+        model=_model,  # pode trocar para outro modelo compatível se quiser
         messages=[
             {"role": "system", "content": system_msg},
             {"role": "user", "content": user_msg},
         ],
         temperature=0,
     )
+    try:
+        from helpers.openai_tracking import track_openai_response
+        track_openai_response(resposta, _model, _track_t0, agent_type_override="llm_client_plan")
+    except Exception:
+        pass
 
     conteudo = resposta.choices[0].message.content or ""
     logger.debug("Resposta bruta do modelo:\n%s", conteudo)
@@ -161,8 +169,11 @@ def gerar_texto_simples(
     Retorna o texto bruto retornado pelo modelo.
     """
     logger.info("Chamando modelo OpenAI para gerar texto simples.")
+    import time as _t
+    _track_t0 = _t.time()
+    _model = "gpt-4o-mini"
     resposta = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=_model,
         messages=[
             {
                 "role": "system",
@@ -173,6 +184,11 @@ def gerar_texto_simples(
         max_tokens=max_tokens,
         temperature=temperature,
     )
+    try:
+        from helpers.openai_tracking import track_openai_response
+        track_openai_response(resposta, _model, _track_t0, agent_type_override="llm_client_simple")
+    except Exception:
+        pass
 
     conteudo = resposta.choices[0].message.content or ""
     logger.debug("Resposta bruta do modelo (texto simples): %s", conteudo)

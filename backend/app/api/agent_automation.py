@@ -294,6 +294,8 @@ Responda "NAO" se o usuário está:
 Mensagem:"""
 
         _model = "gpt-4o-mini"
+        import time as _t
+        _track_t0 = _t.time()
         response = client.chat.completions.create(
             model=_model,
             messages=[
@@ -303,6 +305,11 @@ Mensagem:"""
             temperature=0.0,
             max_tokens=5,
         )
+        try:
+            from helpers.openai_tracking import track_openai_response
+            track_openai_response(response, _model, _track_t0, agent_type_override="automation_classifier")
+        except Exception:
+            pass
 
         answer = (response.choices[0].message.content or "").strip().upper().replace(".", "")
         return answer in ("SIM", "YES", "S")
@@ -363,6 +370,8 @@ Formato:
 """
 
         _model = "gpt-4o-mini"
+        import time as _t
+        _track_t0 = _t.time()
         response = client.chat.completions.create(
             model=_model,
             messages=[
@@ -372,6 +381,11 @@ Formato:
             temperature=0.2,
             max_tokens=600,
         )
+        try:
+            from helpers.openai_tracking import track_openai_response
+            track_openai_response(response, _model, _track_t0, agent_type_override="automation_planner")
+        except Exception:
+            pass
 
         # Parse JSON da resposta
         import json
@@ -1226,6 +1240,8 @@ async def _continue_direct(task: dict[str, Any]) -> dict[str, Any]:
         client = get_openai_client()
         if client:
             _model = "gpt-4o-mini"
+            import time as _t
+            _track_t0 = _t.time()
             resp = client.chat.completions.create(
                 model=_model,
                 messages=[
@@ -1252,6 +1268,13 @@ async def _continue_direct(task: dict[str, Any]) -> dict[str, Any]:
                 temperature=0.3,
                 max_tokens=400,
             )
+            try:
+                from helpers.openai_tracking import track_openai_response
+                track_openai_response(resp, _model, _track_t0,
+                                      user_id_override=task.get("user_id", 0),
+                                      agent_type_override="automation_continue")
+            except Exception:
+                pass
             message = resp.choices[0].message.content or ""
         else:
             message = (
