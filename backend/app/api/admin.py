@@ -680,3 +680,270 @@ async def admin_usage_automation_historical(
     except Exception as e:
         logger.error(f"admin_usage_automation_historical erro: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# MARGIN — receita Stripe vs custo LLM, por tenant (Tier 2.3)
+# ATENCAO: aproximacao gerencial. NAO usar para contabilidade fiscal.
+# Rate USD->BRL via env USD_BRL_RATE (default 5.20). Custo Playwright/proxy
+# = 0 nesta versao (TODO 2.3.2: prorate compute fixo + variaveis premium).
+# ============================================================================
+
+def _period_bounds_current_month():
+    """Retorna (start, end_now) para o mes corrente em UTC."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return start, now
+
+
+def _resolve_margin_status(margin_pct: float | None) -> str:
+    """healthy >= 70%, warning 0-70%, loss < 0%, n/a se margin_pct=null."""
+    if margin_pct is None:
+        return "n/a"
+    if margin_pct < 0:
+        return "loss"
+    if margin_pct < 70.0:
+        return "warning"
+    return "healthy"
+
+
+def _safe_margin_pct(mrr: float, cost: float) -> float | None:
+    """Convencao:
+      mrr > 0 -> (mrr - cost) / mrr * 100
+      mrr == 0 AND cost > 0 -> -100.0
+      mrr == 0 AND cost == 0 -> None (nao enviesa agregacoes)
+    """
+    if mrr > 0:
+        return round(((mrr - cost) / mrr) * 100.0, 2)
+    if cost > 0:
+        return -100.0
+    return None
+
+
+def _resolve_user_revenue(db, user_id: int) -> tuple[float, str]:
+    """Retorna (mrr_brl, subscription_status). Usa subscription mais recente.
+
+    subscription_status semantica:
+      "active" / "trialing" / "past_due" / "cancelled" — direto do Stripe
+      "free" — sem registro de subscription (nunca pagou)
+    """
+    from database.models import Subscription
+    sub = (
+        db.query(Subscription)
+        .filter(Subscription.user_id == user_id)
+        .order_by(Subscription.updated_at.desc(), Subscription.id.desc())
+        .first()
+    )
+    if sub is None:
+        return 0.0, "free"
+    # Se cancelada ha mais de 30 dias, considera free pra fins de margem
+    sub_status = sub.status or "unknown"
+    if sub_status == "cancelled":
+        return 0.0, "cancelled"
+    return float(sub.amount or 0.0), sub_status
+
+
+@router.get("/margin")
+async def admin_margin(
+    user_id: int,
+    period: str = "current_month",
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Margem bruta do mes corrente para um user_id.
+
+    period: 'current_month' (unico suportado nesta versao).
+    Retorna receita Stripe (MRR teorico) - custo LLM (USD convertido p/ BRL).
+    """
+    if period != "current_month":
+        raise HTTPException(status_code=400, detail="period suportado: current_month")
+
+    try:
+        from sqlalchemy import func
+        from database.models import SessionLocal, User, LLMUsageRecord
+
+        usd_brl = float(os.getenv("USD_BRL_RATE", "5.20") or "5.20")
+        start, end = _period_bounds_current_month()
+
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user is None:
+                raise HTTPException(status_code=404, detail=f"user_id {user_id} nao encontrado")
+
+            mrr_brl, sub_status = _resolve_user_revenue(db, user_id)
+
+            agg = db.query(
+                func.count(LLMUsageRecord.id),
+                func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0.0),
+                func.coalesce(func.sum(LLMUsageRecord.total_tokens), 0),
+                func.coalesce(func.avg(LLMUsageRecord.duration_ms), 0),
+            ).filter(
+                LLMUsageRecord.user_id == user_id,
+                LLMUsageRecord.ts >= start,
+                LLMUsageRecord.ts <= end,
+            ).one()
+            (calls, llm_usd, total_tokens, avg_dur) = agg
+
+            llm_brl = float(llm_usd) * usd_brl
+            automation_cost_brl = 0.0  # TODO 2.3.2
+
+            costs_total = llm_brl + automation_cost_brl
+            margin_brl = mrr_brl - costs_total
+            margin_pct = _safe_margin_pct(mrr_brl, costs_total)
+            status = _resolve_margin_status(margin_pct)
+
+            return {
+                "disclaimer": "Aproximacao gerencial. Nao usar para contabilidade fiscal.",
+                "user_id": user_id,
+                "email": user.email,
+                "plan": user.plan,
+                "subscription_status": sub_status,
+                "period": {
+                    "type": period,
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                },
+                "usd_brl_rate": usd_brl,
+                "revenue": {
+                    "mrr_brl": round(mrr_brl, 2),
+                    "stripe_invoice_paid_brl": None,  # TODO 2.3.1
+                },
+                "costs": {
+                    "llm_usd": round(float(llm_usd), 6),
+                    "llm_brl": round(llm_brl, 4),
+                    "llm_calls": int(calls),
+                    "llm_total_tokens": int(total_tokens),
+                    "llm_avg_duration_ms": int(avg_dur or 0),
+                    "automation_cost_brl": automation_cost_brl,
+                    "total_brl": round(costs_total, 4),
+                },
+                "margin": {
+                    "gross_brl": round(margin_brl, 2),
+                    "margin_pct": margin_pct,
+                    "status": status,
+                },
+            }
+        finally:
+            db.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"admin_margin erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/margin/all")
+async def admin_margin_all(
+    period: str = "current_month",
+    sort: str = "margin_asc",
+    limit: int = 100,
+    status_filter: str | None = None,
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Lista ranked de margem por tenant. Default: piores margens primeiro.
+
+    Args:
+        period: 'current_month' (unico suportado).
+        sort: 'margin_asc' | 'margin_desc' | 'cost_desc' | 'revenue_desc'.
+        limit: 1..500 (cap defensivo).
+        status_filter: 'healthy' | 'warning' | 'loss' | 'n/a' (None = todos).
+
+    Inclui APENAS users que tiveram LLM usage no periodo (nao varre toda User).
+    """
+    if period != "current_month":
+        raise HTTPException(status_code=400, detail="period suportado: current_month")
+
+    try:
+        from sqlalchemy import func
+        from database.models import SessionLocal, User, LLMUsageRecord
+
+        usd_brl = float(os.getenv("USD_BRL_RATE", "5.20") or "5.20")
+        start, end = _period_bounds_current_month()
+        capped_limit = min(max(1, limit), 500)
+
+        db = SessionLocal()
+        try:
+            # 1. Usuarios com tracafego LLM no periodo
+            traffic_rows = db.query(
+                LLMUsageRecord.user_id,
+                func.count(LLMUsageRecord.id),
+                func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0.0),
+                func.coalesce(func.sum(LLMUsageRecord.total_tokens), 0),
+            ).filter(
+                LLMUsageRecord.ts >= start,
+                LLMUsageRecord.ts <= end,
+            ).group_by(LLMUsageRecord.user_id).all()
+
+            items: list[dict[str, Any]] = []
+            user_ids = [int(r[0]) for r in traffic_rows if r[0] is not None]
+            users_by_id: dict[int, User] = {
+                u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()
+            } if user_ids else {}
+
+            for (uid, calls, llm_usd, total_tokens) in traffic_rows:
+                uid = int(uid or 0)
+                user = users_by_id.get(uid)
+                mrr_brl, sub_status = _resolve_user_revenue(db, uid) if uid > 0 else (0.0, "anonymous")
+                llm_brl = float(llm_usd) * usd_brl
+                costs_total = llm_brl  # automation cost = 0 nesta versao
+                margin_brl = mrr_brl - costs_total
+                margin_pct = _safe_margin_pct(mrr_brl, costs_total)
+                status = _resolve_margin_status(margin_pct)
+
+                if status_filter and status != status_filter:
+                    continue
+
+                items.append({
+                    "user_id": uid,
+                    "email": user.email if user else None,
+                    "plan": user.plan if user else "unknown",
+                    "subscription_status": sub_status,
+                    "mrr_brl": round(mrr_brl, 2),
+                    "llm_brl": round(llm_brl, 4),
+                    "llm_calls": int(calls),
+                    "llm_total_tokens": int(total_tokens),
+                    "automation_cost_brl": 0.0,
+                    "margin_brl": round(margin_brl, 2),
+                    "margin_pct": margin_pct,
+                    "status": status,
+                })
+
+            # Sorting
+            if sort == "margin_asc":
+                items.sort(key=lambda x: (
+                    x["margin_pct"] if x["margin_pct"] is not None else 999.0
+                ))
+            elif sort == "margin_desc":
+                items.sort(key=lambda x: (
+                    -(x["margin_pct"]) if x["margin_pct"] is not None else 999.0
+                ))
+            elif sort == "cost_desc":
+                items.sort(key=lambda x: -x["llm_brl"])
+            elif sort == "revenue_desc":
+                items.sort(key=lambda x: -x["mrr_brl"])
+            else:
+                raise HTTPException(status_code=400, detail=f"sort invalido: {sort}")
+
+            total_users_with_traffic = len(items)
+            return {
+                "disclaimer": "Aproximacao gerencial. Nao usar para contabilidade fiscal.",
+                "period": {
+                    "type": period,
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                },
+                "usd_brl_rate": usd_brl,
+                "sort": sort,
+                "status_filter": status_filter,
+                "total_users_with_traffic": total_users_with_traffic,
+                "shown": min(capped_limit, total_users_with_traffic),
+                "items": items[:capped_limit],
+            }
+        finally:
+            db.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"admin_margin_all erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
