@@ -490,12 +490,20 @@ async def admin_usage_llm(
     since_minutes: int = 60 * 24,
     admin: dict[str, Any] = Depends(require_admin),
 ):
-    """Snapshot agregado de uso LLM. Default: ultimas 24h. Cap: 48h."""
+    """Snapshot agregado de uso LLM (in-memory, POR WORKER).
+
+    ATENCAO: com Gunicorn em multi-worker, cada worker tem seu proprio deque.
+    Round-robin entre workers faz este endpoint retornar dados diferentes a
+    cada request. Para dashboards consistentes, USE /api/admin/usage/llm/historical
+    (DB-backed, agrega events de todos os workers).
+    """
     try:
         from utils.usage_tracker import UsageTracker
-        # Cap defensivo: 48h é o teto de retenção
-        capped = min(max(60, since_minutes), 48 * 60)
-        return UsageTracker.snapshot_llm(since_minutes=capped)
+        # Floor 1 min, cap 48h (retencao do deque)
+        capped = min(max(1, since_minutes), 48 * 60)
+        snap = UsageTracker.snapshot_llm(since_minutes=capped)
+        snap["_warning"] = "in-memory por worker; use /historical para dashboards"
+        return snap
     except Exception as e:
         logger.error(f"admin_usage_llm erro: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="usage_tracker indisponivel")
@@ -506,11 +514,16 @@ async def admin_usage_automation(
     since_minutes: int = 60 * 24,
     admin: dict[str, Any] = Depends(require_admin),
 ):
-    """Snapshot agregado de uso de automacao Playwright. Default: ultimas 24h. Cap: 48h."""
+    """Snapshot agregado de uso de automacao Playwright (in-memory, POR WORKER).
+
+    Mesma limitacao do /usage/llm. Use /usage/automation/historical para dashboards.
+    """
     try:
         from utils.usage_tracker import UsageTracker
-        capped = min(max(60, since_minutes), 48 * 60)
-        return UsageTracker.snapshot_automation(since_minutes=capped)
+        capped = min(max(1, since_minutes), 48 * 60)
+        snap = UsageTracker.snapshot_automation(since_minutes=capped)
+        snap["_warning"] = "in-memory por worker; use /historical para dashboards"
+        return snap
     except Exception as e:
         logger.error(f"admin_usage_automation erro: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="usage_tracker indisponivel")
@@ -523,6 +536,7 @@ async def admin_usage_automation(
 @router.get("/usage/llm/historical")
 async def admin_usage_llm_historical(
     since_hours: int = 24,
+    since_minutes: int | None = None,
     user_id: int | None = None,
     admin: dict[str, Any] = Depends(require_admin),
 ):
@@ -530,6 +544,9 @@ async def admin_usage_llm_historical(
 
     Args:
         since_hours: janela em horas (default 24h, max 90 dias = 2160h).
+                     Ignorado se since_minutes for passado.
+        since_minutes: janela em minutos (alternativa para granularidade fina).
+                       Cap: 90 dias = 129600 min. Tem precedencia sobre since_hours.
         user_id: se passado, filtra apenas este user.
     """
     try:
@@ -537,8 +554,14 @@ async def admin_usage_llm_historical(
         from sqlalchemy import func
         from database.models import SessionLocal, LLMUsageRecord
 
-        capped_hours = min(max(1, since_hours), 24 * 90)
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=capped_hours)
+        # since_minutes tem precedencia se passado, senao usa since_hours
+        if since_minutes is not None:
+            capped_minutes = min(max(1, since_minutes), 24 * 60 * 90)
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=capped_minutes)
+            capped_hours = capped_minutes / 60.0
+        else:
+            capped_hours = min(max(1, since_hours), 24 * 90)
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=capped_hours)
 
         db = SessionLocal()
         try:
@@ -620,17 +643,26 @@ async def admin_usage_llm_historical(
 @router.get("/usage/automation/historical")
 async def admin_usage_automation_historical(
     since_hours: int = 24,
+    since_minutes: int | None = None,
     user_id: int | None = None,
     admin: dict[str, Any] = Depends(require_admin),
 ):
-    """Snapshot agregado historico de uso de automacao (DB-backed)."""
+    """Snapshot agregado historico de uso de automacao (DB-backed).
+
+    since_minutes tem precedencia sobre since_hours quando passado.
+    """
     try:
         from datetime import datetime, timedelta, timezone
         from sqlalchemy import func, case
         from database.models import SessionLocal, AutomationUsageRecord
 
-        capped_hours = min(max(1, since_hours), 24 * 90)
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=capped_hours)
+        if since_minutes is not None:
+            capped_minutes = min(max(1, since_minutes), 24 * 60 * 90)
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=capped_minutes)
+            capped_hours = capped_minutes / 60.0
+        else:
+            capped_hours = min(max(1, since_hours), 24 * 90)
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=capped_hours)
 
         db = SessionLocal()
         try:
@@ -769,9 +801,17 @@ async def admin_margin(
         try:
             user = db.query(User).filter(User.id == user_id).first()
             if user is None:
-                raise HTTPException(status_code=404, detail=f"user_id {user_id} nao encontrado")
+                # user_id=0 = bucket sintetico (chamadas sem contexto, ex: cron/webhook).
+                # Retorna placeholder coerente com /margin/all em vez de 404.
+                if user_id == 0:
+                    user = None  # tratado abaixo como anonymous
+                else:
+                    raise HTTPException(status_code=404, detail=f"user_id {user_id} nao encontrado")
 
-            mrr_brl, sub_status = _resolve_user_revenue(db, user_id)
+            if user is not None:
+                mrr_brl, sub_status = _resolve_user_revenue(db, user_id)
+            else:
+                mrr_brl, sub_status = 0.0, "anonymous"
 
             agg = db.query(
                 func.count(LLMUsageRecord.id),
@@ -796,8 +836,8 @@ async def admin_margin(
             return {
                 "disclaimer": "Aproximacao gerencial. Nao usar para contabilidade fiscal.",
                 "user_id": user_id,
-                "email": user.email,
-                "plan": user.plan,
+                "email": user.email if user else None,
+                "plan": user.plan if user else "unknown",
                 "subscription_status": sub_status,
                 "period": {
                     "type": period,
@@ -853,6 +893,20 @@ async def admin_margin_all(
     """
     if period != "current_month":
         raise HTTPException(status_code=400, detail="period suportado: current_month")
+
+    valid_status = {"healthy", "warning", "loss", "n/a"}
+    if status_filter is not None and status_filter not in valid_status:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status_filter invalido: '{status_filter}'. Valido: {sorted(valid_status)}",
+        )
+
+    valid_sort = {"margin_asc", "margin_desc", "cost_desc", "revenue_desc"}
+    if sort not in valid_sort:
+        raise HTTPException(
+            status_code=400,
+            detail=f"sort invalido: '{sort}'. Valido: {sorted(valid_sort)}",
+        )
 
     try:
         from sqlalchemy import func
@@ -922,8 +976,7 @@ async def admin_margin_all(
                 items.sort(key=lambda x: -x["llm_brl"])
             elif sort == "revenue_desc":
                 items.sort(key=lambda x: -x["mrr_brl"])
-            else:
-                raise HTTPException(status_code=400, detail=f"sort invalido: {sort}")
+            # else: sort ja validado no topo da funcao
 
             total_users_with_traffic = len(items)
             return {

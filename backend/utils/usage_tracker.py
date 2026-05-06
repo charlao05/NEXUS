@@ -179,7 +179,8 @@ class UsageTracker:
             "by_model": {model_name: {...mesmo schema...}},
         }
         """
-        cutoff = time.time() - max(60, since_minutes) * 60
+        # Floor 1 min (era 60: causava UX confusa quando user pedia 10 e via window=60)
+        cutoff = time.time() - max(1, since_minutes) * 60
         with cls._lock:
             cls._purge_old()
             events = [e for e in cls._llm_events if e.ts >= cutoff]
@@ -225,7 +226,7 @@ class UsageTracker:
     def snapshot_automation(cls, *, since_minutes: int = 60 * 24) -> dict:
         """Mesmo padrao de snapshot_llm, mas pra automation events.
         Agrega por user_id, agent_type e tool. Inclui taxa de sucesso."""
-        cutoff = time.time() - max(60, since_minutes) * 60
+        cutoff = time.time() - max(1, since_minutes) * 60
         with cls._lock:
             cls._purge_old()
             events = [e for e in cls._automation_events if e.ts >= cutoff]
