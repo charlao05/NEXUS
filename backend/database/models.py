@@ -607,7 +607,13 @@ class Invoice(Base):
 # ============================================================================
 
 class ChatMessage(Base):
-    """Histórico de mensagens do chat — persistência por usuário/agente"""
+    """Histórico de mensagens do chat — persistência por usuário/agente.
+
+    LGPD: content tem PII mascarado automaticamente via SQLAlchemy event
+    listener `before_insert` (ver _chat_message_mask_pii abaixo). Coluna
+    pii_masked=True identifica registros novos (com mask aplicado);
+    historico antigo tem pii_masked=False ate eventual backfill (Tier 2.4.2).
+    """
     __tablename__ = "chat_messages"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -615,6 +621,7 @@ class ChatMessage(Base):
     agent_id = Column(String(30), nullable=False, index=True)  # agenda, clientes, financeiro...
     role = Column(String(10), nullable=False)  # user, assistant
     content = Column(Text, nullable=False)
+    pii_masked = Column(Boolean, default=True, nullable=False)  # Tier 2.4: LGPD
     created_at = Column(DateTime, default=_utcnow)
 
     __table_args__ = (
@@ -628,6 +635,7 @@ class ChatMessage(Base):
             "agent_id": self.agent_id,
             "role": self.role,
             "content": self.content,
+            "pii_masked": bool(self.pii_masked),
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -818,12 +826,12 @@ class Feedback(Base):
 def _auto_migrate_columns():
     """
     Migração automática: adiciona colunas que existem no model
-    mas faltam no banco SQLite existente.
-    Evita erros de 'no such column' ao evoluir o schema.
-    """
-    if "sqlite" not in str(engine.url):
-        return  # Produção (PostgreSQL) deve usar Alembic
+    mas faltam no banco existente. Evita 'no such column' ao evoluir schema.
 
+    Funciona em SQLite e PostgreSQL. ADD COLUMN com DEFAULT eh atomico e
+    idempotente em ambos. Cada falha eh isolada (try/except por coluna)
+    pra nao bloquear startup se uma migracao especifica der ruim.
+    """
     from sqlalchemy import inspect as sa_inspect, text
     inspector = sa_inspect(engine)
 
@@ -839,7 +847,14 @@ def _auto_migrate_columns():
                 nullable = "NULL" if col.nullable else "NOT NULL"
                 default = ""
                 if col.default is not None and col.default.is_scalar:
-                    default = f" DEFAULT {col.default.arg!r}"
+                    arg = col.default.arg
+                    # Booleanos: render literal aceito por ambos os DBs
+                    if isinstance(arg, bool):
+                        default = f" DEFAULT {'TRUE' if arg else 'FALSE'}"
+                    elif isinstance(arg, (int, float)):
+                        default = f" DEFAULT {arg}"
+                    else:
+                        default = f" DEFAULT {arg!r}"
                 sql = f'ALTER TABLE "{table_name}" ADD COLUMN "{col.name}" {col_type} {nullable}{default}'
                 try:
                     with engine.begin() as conn:
@@ -903,6 +918,34 @@ class AutomationUsageRecord(Base):
     duration_ms = Column(Integer, default=0)
     success = Column(Boolean, default=False)
     correlation_id = Column(String(80), nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# LGPD — Mascaramento PII em ChatMessage.content (Tier 2.4)
+# Event listener SQLAlchemy: aplica mask automaticamente antes de INSERT.
+# Garante que NENHUM caminho de write escapa do mask (centralizado, robusto).
+# ---------------------------------------------------------------------------
+from sqlalchemy import event as _sa_event
+
+
+@_sa_event.listens_for(ChatMessage, "before_insert")
+def _chat_message_mask_pii(mapper, connection, target):  # pragma: no cover
+    """Aplica mask em ChatMessage.content antes do INSERT.
+
+    Idempotente: se conteudo ja vier mascarado, regexes nao casam novamente.
+    NUNCA propaga excecao (mask falhar nao pode bloquear save).
+    """
+    try:
+        if target.content:
+            from utils.pii_masker import mask_pii
+            target.content = mask_pii(target.content)
+        target.pii_masked = True
+    except Exception:
+        # Falha do masker nao deve bloquear escrita; loga warning silencioso.
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "PII mask falhou em ChatMessage.before_insert", exc_info=True
+        )
 
 
 def init_db():
