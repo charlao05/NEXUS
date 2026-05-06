@@ -19,6 +19,8 @@ Uso:
 """
 from __future__ import annotations
 
+import logging
+import queue
 import threading
 import time
 from collections import deque
@@ -28,6 +30,13 @@ from typing import Optional
 
 _MAX_EVENTS = 50_000          # cap de memória; eventos antigos são derrubados
 _RETENTION_SECONDS = 48 * 3600  # 48h
+
+# Persistencia DB (Tier 2)
+_DB_QUEUE_MAXSIZE = 10_000     # cap defensivo (drop se enche, NUNCA bloqueia hot path)
+_DB_DRAIN_INTERVAL_S = 30      # batch insert a cada 30s
+_DB_BATCH_LIMIT = 500          # max eventos por bulk insert
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -60,6 +69,11 @@ class UsageTracker:
     _llm_events: "deque[LLMUsageEvent]" = deque(maxlen=_MAX_EVENTS)
     _automation_events: "deque[AutomationUsageEvent]" = deque(maxlen=_MAX_EVENTS)
 
+    # Persistencia DB (Tier 2)
+    _db_queue: "queue.Queue[tuple[str, object]]" = queue.Queue(maxsize=_DB_QUEUE_MAXSIZE)
+    _drainer_started: bool = False
+    _drainer_lock = threading.Lock()
+
     @classmethod
     def record_llm(
         cls,
@@ -91,10 +105,17 @@ class UsageTracker:
             )
             with cls._lock:
                 cls._llm_events.append(ev)
+            # Enqueue para persistir no DB (fire-and-forget; drop em overflow)
+            try:
+                cls._db_queue.put_nowait(("llm", ev))
+                cls._ensure_drainer()
+            except queue.Full:
+                pass  # cap atingido — descarta o mais novo, prioriza nao bloquear
+            except Exception:
+                pass
         except Exception:
             # silenciar — instrumentacao nao pode quebrar caminho feliz
-            import logging
-            logging.getLogger(__name__).warning("UsageTracker.record_llm falhou", exc_info=True)
+            _log.warning("UsageTracker.record_llm falhou", exc_info=True)
 
     @classmethod
     def record_automation(
@@ -119,9 +140,15 @@ class UsageTracker:
             )
             with cls._lock:
                 cls._automation_events.append(ev)
+            try:
+                cls._db_queue.put_nowait(("automation", ev))
+                cls._ensure_drainer()
+            except queue.Full:
+                pass
+            except Exception:
+                pass
         except Exception:
-            import logging
-            logging.getLogger(__name__).warning("UsageTracker.record_automation falhou", exc_info=True)
+            _log.warning("UsageTracker.record_automation falhou", exc_info=True)
 
     @classmethod
     def _purge_old(cls) -> None:
@@ -245,3 +272,103 @@ class UsageTracker:
         with cls._lock:
             cls._llm_events.clear()
             cls._automation_events.clear()
+
+    # ------------------------------------------------------------------
+    # Persistencia DB (Tier 2): drainer thread + bulk insert
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _ensure_drainer(cls) -> None:
+        """Inicia (idempotente) a daemon thread que drena _db_queue para o DB."""
+        if cls._drainer_started:
+            return
+        with cls._drainer_lock:
+            if cls._drainer_started:
+                return
+            t = threading.Thread(
+                target=cls._drainer_loop,
+                name="UsageTrackerDrainer",
+                daemon=True,
+            )
+            t.start()
+            cls._drainer_started = True
+            _log.info("UsageTracker drainer thread iniciado")
+
+    @classmethod
+    def _drainer_loop(cls) -> None:
+        """Loop infinito: dorme N segundos, drena batch, persiste. Robusto a falhas."""
+        while True:
+            try:
+                time.sleep(_DB_DRAIN_INTERVAL_S)
+                batch: list[tuple[str, object]] = []
+                while not cls._db_queue.empty() and len(batch) < _DB_BATCH_LIMIT:
+                    try:
+                        batch.append(cls._db_queue.get_nowait())
+                    except queue.Empty:
+                        break
+                if batch:
+                    cls._persist_batch(batch)
+            except Exception:
+                _log.warning("Drainer loop tick falhou", exc_info=True)
+
+    @classmethod
+    def _persist_batch(cls, batch: list[tuple[str, object]]) -> None:
+        """Bulk insert de um batch de eventos no DB. Suprime falhas."""
+        try:
+            from datetime import datetime, timezone
+            from database.models import (
+                SessionLocal,
+                LLMUsageRecord,
+                AutomationUsageRecord,
+            )
+
+            llm_rows: list[LLMUsageRecord] = []
+            auto_rows: list[AutomationUsageRecord] = []
+
+            for kind, ev in batch:
+                ts_dt = datetime.fromtimestamp(ev.ts, tz=timezone.utc)
+                if kind == "llm":
+                    llm_rows.append(LLMUsageRecord(
+                        ts=ts_dt,
+                        user_id=ev.user_id,
+                        model=ev.model,
+                        prompt_tokens=ev.prompt_tokens,
+                        completion_tokens=ev.completion_tokens,
+                        total_tokens=ev.total_tokens,
+                        duration_ms=ev.duration_ms,
+                        cost_usd=ev.cost_usd,
+                        correlation_id=ev.correlation_id,
+                        agent_type=ev.agent_type,
+                    ))
+                elif kind == "automation":
+                    auto_rows.append(AutomationUsageRecord(
+                        ts=ts_dt,
+                        user_id=ev.user_id,
+                        agent_type=ev.agent_type,
+                        tool=ev.tool,
+                        duration_ms=ev.duration_ms,
+                        success=ev.success,
+                        correlation_id=ev.correlation_id,
+                    ))
+
+            if not llm_rows and not auto_rows:
+                return
+
+            db = SessionLocal()
+            try:
+                if llm_rows:
+                    db.bulk_save_objects(llm_rows)
+                if auto_rows:
+                    db.bulk_save_objects(auto_rows)
+                db.commit()
+                _log.debug(
+                    "Drainer persistiu %d LLM + %d automation events",
+                    len(llm_rows), len(auto_rows),
+                )
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+        except Exception:
+            _log.warning("Falha ao persistir batch de usage", exc_info=True)

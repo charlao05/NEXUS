@@ -514,3 +514,169 @@ async def admin_usage_automation(
     except Exception as e:
         logger.error(f"admin_usage_automation erro: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="usage_tracker indisponivel")
+
+
+# ============================================================================
+# USAGE HISTORICAL — Tier 2 (DB-backed, sobrevive a restart e cold-start)
+# Cap: ate 90 dias. Query agregada direto na tabela llm_usage_records.
+# ============================================================================
+@router.get("/usage/llm/historical")
+async def admin_usage_llm_historical(
+    since_hours: int = 24,
+    user_id: int | None = None,
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Snapshot agregado historico de uso LLM (le do DB, sobrevive a restart).
+
+    Args:
+        since_hours: janela em horas (default 24h, max 90 dias = 2160h).
+        user_id: se passado, filtra apenas este user.
+    """
+    try:
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import func
+        from database.models import SessionLocal, LLMUsageRecord
+
+        capped_hours = min(max(1, since_hours), 24 * 90)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=capped_hours)
+
+        db = SessionLocal()
+        try:
+            q = db.query(LLMUsageRecord).filter(LLMUsageRecord.ts >= cutoff)
+            if user_id is not None:
+                q = q.filter(LLMUsageRecord.user_id == user_id)
+
+            # Totais globais
+            agg = db.query(
+                func.count(LLMUsageRecord.id),
+                func.coalesce(func.sum(LLMUsageRecord.prompt_tokens), 0),
+                func.coalesce(func.sum(LLMUsageRecord.completion_tokens), 0),
+                func.coalesce(func.sum(LLMUsageRecord.total_tokens), 0),
+                func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0.0),
+                func.coalesce(func.avg(LLMUsageRecord.duration_ms), 0),
+            ).filter(LLMUsageRecord.ts >= cutoff)
+            if user_id is not None:
+                agg = agg.filter(LLMUsageRecord.user_id == user_id)
+            (calls, p_tok, c_tok, t_tok, cost, avg_dur) = agg.one()
+
+            # By user
+            by_user_rows = db.query(
+                LLMUsageRecord.user_id,
+                func.count(LLMUsageRecord.id),
+                func.coalesce(func.sum(LLMUsageRecord.total_tokens), 0),
+                func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0.0),
+            ).filter(LLMUsageRecord.ts >= cutoff)
+            if user_id is not None:
+                by_user_rows = by_user_rows.filter(LLMUsageRecord.user_id == user_id)
+            by_user_rows = by_user_rows.group_by(LLMUsageRecord.user_id).all()
+
+            # By model
+            by_model_rows = db.query(
+                LLMUsageRecord.model,
+                func.count(LLMUsageRecord.id),
+                func.coalesce(func.sum(LLMUsageRecord.total_tokens), 0),
+                func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0.0),
+            ).filter(LLMUsageRecord.ts >= cutoff)
+            if user_id is not None:
+                by_model_rows = by_model_rows.filter(LLMUsageRecord.user_id == user_id)
+            by_model_rows = by_model_rows.group_by(LLMUsageRecord.model).all()
+
+            return {
+                "window_hours": capped_hours,
+                "filter_user_id": user_id,
+                "events_count": int(calls),
+                "totals": {
+                    "calls": int(calls),
+                    "prompt_tokens": int(p_tok),
+                    "completion_tokens": int(c_tok),
+                    "total_tokens": int(t_tok),
+                    "cost_usd": round(float(cost), 6),
+                    "avg_duration_ms": int(avg_dur or 0),
+                },
+                "by_user": {
+                    int(uid): {
+                        "calls": int(c),
+                        "total_tokens": int(tk),
+                        "cost_usd": round(float(co), 6),
+                    }
+                    for (uid, c, tk, co) in by_user_rows
+                },
+                "by_model": {
+                    str(m or "unknown"): {
+                        "calls": int(c),
+                        "total_tokens": int(tk),
+                        "cost_usd": round(float(co), 6),
+                    }
+                    for (m, c, tk, co) in by_model_rows
+                },
+            }
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"admin_usage_llm_historical erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/usage/automation/historical")
+async def admin_usage_automation_historical(
+    since_hours: int = 24,
+    user_id: int | None = None,
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Snapshot agregado historico de uso de automacao (DB-backed)."""
+    try:
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import func, case
+        from database.models import SessionLocal, AutomationUsageRecord
+
+        capped_hours = min(max(1, since_hours), 24 * 90)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=capped_hours)
+
+        db = SessionLocal()
+        try:
+            agg = db.query(
+                func.count(AutomationUsageRecord.id),
+                func.coalesce(func.sum(case((AutomationUsageRecord.success.is_(True), 1), else_=0)), 0),
+                func.coalesce(func.sum(case((AutomationUsageRecord.success.is_(False), 1), else_=0)), 0),
+                func.coalesce(func.avg(AutomationUsageRecord.duration_ms), 0),
+            ).filter(AutomationUsageRecord.ts >= cutoff)
+            if user_id is not None:
+                agg = agg.filter(AutomationUsageRecord.user_id == user_id)
+            (calls, succ, fail, avg_dur) = agg.one()
+
+            calls_safe = int(calls) or 1
+
+            by_tool_rows = db.query(
+                AutomationUsageRecord.tool,
+                func.count(AutomationUsageRecord.id),
+                func.coalesce(func.sum(case((AutomationUsageRecord.success.is_(True), 1), else_=0)), 0),
+            ).filter(AutomationUsageRecord.ts >= cutoff)
+            if user_id is not None:
+                by_tool_rows = by_tool_rows.filter(AutomationUsageRecord.user_id == user_id)
+            by_tool_rows = by_tool_rows.group_by(AutomationUsageRecord.tool).all()
+
+            return {
+                "window_hours": capped_hours,
+                "filter_user_id": user_id,
+                "events_count": int(calls),
+                "totals": {
+                    "calls": int(calls),
+                    "success": int(succ),
+                    "failure": int(fail),
+                    "success_rate": round(int(succ) / calls_safe, 3),
+                    "avg_duration_ms": int(avg_dur or 0),
+                },
+                "by_tool": {
+                    str(t or "unknown"): {
+                        "calls": int(c),
+                        "success": int(s),
+                        "success_rate": round(int(s) / (int(c) or 1), 3),
+                    }
+                    for (t, c, s) in by_tool_rows
+                },
+            }
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"admin_usage_automation_historical erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

@@ -868,6 +868,43 @@ class StripeEvent(Base):
         }
 
 
+# ---------------------------------------------------------------------------
+# Usage tracking (Tier 2 — persistencia)
+# ---------------------------------------------------------------------------
+
+class LLMUsageRecord(Base):
+    """Registro persistente de chamada LLM (sobrevive a restart/cold-start).
+
+    Drenado em batch pelo UsageTracker.drainer thread a cada ~30s.
+    Granularidade: 1 linha por chamada client.chat.completions.create().
+    """
+    __tablename__ = "llm_usage_records"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ts = Column(DateTime, default=_utcnow, index=True)  # quando ocorreu
+    user_id = Column(Integer, default=0, index=True)
+    model = Column(String(80), default="unknown", index=True)
+    prompt_tokens = Column(Integer, default=0)
+    completion_tokens = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    duration_ms = Column(Integer, default=0)
+    cost_usd = Column(Float, default=0.0)
+    correlation_id = Column(String(80), nullable=True)
+    agent_type = Column(String(80), nullable=True, index=True)
+
+
+class AutomationUsageRecord(Base):
+    """Registro persistente de acao Playwright (sobrevive a restart/cold-start)."""
+    __tablename__ = "automation_usage_records"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ts = Column(DateTime, default=_utcnow, index=True)
+    user_id = Column(Integer, default=0, index=True)
+    agent_type = Column(String(80), default="unknown", index=True)
+    tool = Column(String(80), default="unknown", index=True)
+    duration_ms = Column(Integer, default=0)
+    success = Column(Boolean, default=False)
+    correlation_id = Column(String(80), nullable=True)
+
+
 def init_db():
     """Cria todas as tabelas se não existirem + migra colunas faltantes"""
     Base.metadata.create_all(bind=engine)
