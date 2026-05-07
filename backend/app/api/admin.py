@@ -1012,53 +1012,70 @@ async def admin_margin_all(
 # Nao reversivel (consistente com Tier 2.4: minimizacao > recuperabilidade).
 # ============================================================================
 
+def _resolve_pii_target(table_name: str):
+    """Resolve table_name -> (ModelClass, [pii_cols]) via PII_PROTECTED registry.
+
+    Raises HTTPException 400 se table_name desconhecido.
+    """
+    from database.models import PII_PROTECTED
+    for tname, model, cols in PII_PROTECTED:
+        if tname == table_name:
+            return model, cols
+    valid = sorted(t for t, _, _ in PII_PROTECTED)
+    raise HTTPException(
+        status_code=400,
+        detail=f"table desconhecida: '{table_name}'. Valid: {valid}",
+    )
+
+
 @router.post("/pii/backfill")
 async def admin_pii_backfill(
+    table: str = Query(..., description="Nome da tabela (obrigatorio). Sem suporte a 'all' (blast radius)."),
     dry_run: bool = Query(default=True, description="Default true. Apenas conta sem alterar."),
     confirm: bool = Query(default=False, description="Quando dry_run=false, confirm=true e obrigatorio."),
     batch_size: int = Query(default=500, ge=1, le=2000, description="Linhas por batch (commit incremental)."),
     admin: dict[str, Any] = Depends(require_admin),
 ):
-    """Aplica PII mask retroativamente em chat_messages.content (modo regex v2).
+    """Aplica PII mask retroativamente em uma tabela protegida (Tier 2.4.3 v2 — regex).
 
     Estrategia: scan COMPLETO via cursor (id > last_id). Para cada row:
       - Conta PII via count_pii_matches_detailed (DV-validado em CPF/CNPJ).
-      - Se total_matches > 0: aplica mask + marca pii_masked=true (rows_modified++).
-      - Se total_matches == 0: marca pii_masked=true (idempotencia).
-    Flag pii_masked deixa de ser INPUT do filtro e passa a ser OUTPUT do
-    trabalho — semantica invertida resolve o bug histórico onde ALTER TABLE
-    DEFAULT TRUE marcou rows legadas como mascaradas sem processar.
+      - Se total_matches > 0: aplica mask + rows_modified++.
+      - Sempre marca pii_masked=true (output do trabalho, nao input do filtro).
 
-    Idempotente naturalmente: rows ja sem PII detectavel = no-op.
-
-    Escopo: APENAS chat_messages. Outras tabelas (Client.notes etc) requerem
-    listener preventivo (Tier 2.4.1) antes de seu proprio backfill.
+    Tier 2.4.1 estende escopo p/ todas as tabelas no registry PII_PROTECTED.
+    Backfill processa UMA tabela por chamada — sem suporte a ?table=all
+    (blast radius e auditoria granular). Operador faz N chamadas pra cobrir N
+    tabelas, sempre dry_run primeiro.
     """
     import json as _json
     from datetime import datetime, timezone
-    from database.models import (
-        SessionLocal,
-        ChatMessage,
-        PIIBackfillAudit,
-    )
+    from database.models import SessionLocal, PIIBackfillAudit
     from utils.pii_masker import mask_pii, count_pii_matches_detailed
 
-    # Gate de seguranca: real run exige duas flags explicitas
-    if not dry_run and not confirm:
+    if table == "all":
         raise HTTPException(
             status_code=400,
             detail=(
-                "Real run requer dry_run=false E confirm=true. "
-                "Default eh dry_run=true por seguranca. "
-                "Rode primeiro com dry_run=true pra ver os numeros."
+                "Backfill nao aceita ?table=all (blast radius). "
+                "Faca uma chamada por tabela. Use /pii/audit-leaks?table=all "
+                "primeiro pra ver onde ha leak."
             ),
+        )
+
+    model, pii_cols = _resolve_pii_target(table)
+
+    if not dry_run and not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Real run requer dry_run=false E confirm=true.",
         )
 
     db = SessionLocal()
     audit: PIIBackfillAudit | None = None
     try:
         audit = PIIBackfillAudit(
-            target_table="chat_messages",
+            target_table=table,
             triggered_by_email=(admin.get("email") or "")[:254],
             dry_run=dry_run,
             detection_mode="regex",
@@ -1068,53 +1085,59 @@ async def admin_pii_backfill(
         db.refresh(audit)
 
         rows_scanned = 0
-        rows_with_pii = 0       # rows onde regex detectou pelo menos 1 match
-        rows_modified = 0       # rows onde mask alterou content (so em real run)
+        rows_with_pii = 0
+        rows_modified = 0
         type_counts = {"cpf": 0, "cnpj": 0, "email": 0, "phone": 0, "cep": 0, "card": 0}
         oldest_ts: datetime | None = None
 
-        # Cursor-based pagination (robusto contra concurrent insert/delete)
         last_id = 0
         while True:
             batch = (
-                db.query(ChatMessage)
-                .filter(ChatMessage.id > last_id)
-                .order_by(ChatMessage.id)
+                db.query(model)
+                .filter(model.id > last_id)
+                .order_by(model.id)
                 .limit(batch_size)
                 .all()
             )
             if not batch:
                 break
 
-            for msg in batch:
+            for row in batch:
                 rows_scanned += 1
-                last_id = msg.id  # avanca cursor mesmo em dry_run
-                if oldest_ts is None or (msg.created_at and msg.created_at < oldest_ts):
-                    oldest_ts = msg.created_at
+                last_id = row.id
+                ts = getattr(row, "created_at", None)
+                if ts is not None and (oldest_ts is None or ts < oldest_ts):
+                    oldest_ts = ts
 
-                if not msg.content:
-                    if not dry_run:
-                        msg.pii_masked = True
-                    continue
+                # Soma matches em TODAS as colunas PII desta tabela
+                row_total = 0
+                for col in pii_cols:
+                    val = getattr(row, col, None)
+                    if val:
+                        d = count_pii_matches_detailed(val)
+                        for k, v in d.items():
+                            type_counts[k] = type_counts.get(k, 0) + v
+                        row_total += sum(d.values())
 
-                detailed = count_pii_matches_detailed(msg.content)
-                total_matches = sum(detailed.values())
-                if total_matches > 0:
+                if row_total > 0:
                     rows_with_pii += 1
-                    for k, v in detailed.items():
-                        type_counts[k] = type_counts.get(k, 0) + v
 
                 if not dry_run:
-                    if total_matches > 0:
-                        masked = mask_pii(msg.content)
-                        if masked != msg.content:
-                            msg.content = masked
-                            rows_modified += 1
-                    # Sempre marca processada — flag e OUTPUT do trabalho
-                    msg.pii_masked = True
+                    row_changed = False
+                    for col in pii_cols:
+                        val = getattr(row, col, None)
+                        if val:
+                            masked = mask_pii(val)
+                            if masked != val:
+                                setattr(row, col, masked)
+                                row_changed = True
+                    if row_changed:
+                        rows_modified += 1
+                    # Sempre marca processada — flag e OUTPUT
+                    row.pii_masked = True
 
             if not dry_run:
-                db.commit()  # commit incremental por batch
+                db.commit()
 
         audit.rows_scanned = rows_scanned
         audit.rows_modified = rows_modified
@@ -1126,7 +1149,8 @@ async def admin_pii_backfill(
             "dry_run_resolved": dry_run,
             "audit_id": audit.id,
             "detection_mode": "regex",
-            "target_table": "chat_messages",
+            "target_table": table,
+            "pii_columns_scanned": pii_cols,
             "triggered_by": admin.get("email"),
             "rows_scanned": rows_scanned,
             "rows_with_pii_detected": rows_with_pii,
@@ -1136,16 +1160,17 @@ async def admin_pii_backfill(
             "oldest_record_ts": oldest_ts.isoformat() if oldest_ts else None,
             "batch_size": batch_size,
             "message": (
-                f"DRY RUN: {rows_scanned} rows escaneadas, {rows_with_pii} com PII detectavel. "
-                f"Para aplicar, rode com dry_run=false&confirm=true."
+                f"DRY RUN ({table}): {rows_scanned} scanned, {rows_with_pii} com PII. "
+                f"Para aplicar: dry_run=false&confirm=true."
             ) if dry_run else (
-                f"REAL RUN concluido: {rows_scanned} scanned, {rows_modified} modificadas."
+                f"REAL RUN ({table}) concluido: {rows_scanned} scanned, "
+                f"{rows_modified} modificadas em {pii_cols}."
             ),
         }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"admin_pii_backfill erro: {e}", exc_info=True)
+        logger.error(f"admin_pii_backfill erro (table={table}): {e}", exc_info=True)
         if audit is not None:
             try:
                 audit.error = str(e)[:1000]
@@ -1159,88 +1184,161 @@ async def admin_pii_backfill(
         db.close()
 
 
-@router.get("/pii/audit-leaks")
-async def admin_pii_audit_leaks(
-    since_id: int = Query(default=0, ge=0, description="Cursor: scan a partir de id > since_id."),
-    limit: int = Query(default=100, ge=1, le=1000, description="Cap de leaks reportados (default 100, max 1000)."),
-    admin: dict[str, Any] = Depends(require_admin),
-):
-    """Sentinela LGPD (Tier 2.4.4): detecta rows com PII bruto residual.
+def _scan_table_for_leaks(db, model, pii_cols, table_name, limit_per_table, since_id, hard_cap):
+    """Scan UMA tabela buscando PII bruto residual. Retorna (scanned, leaks_list, truncated, last_id).
 
-    Read-only. Faz scan em chat_messages e reporta rows onde regex detecta
-    PII (independente do valor de pii_masked). Util pra detectar regressao
-    de bug do tipo: 'flag mente, content tem PII'.
-
-    Cursor-based: passe since_id pra continuar de onde parou.
-    Cap interno: scan ate ALL rows mas reporta no maximo `limit` leaks.
-
-    Response: has_leaks (bool top-level pra alertas), leaks (com preview
-    JA MASCARADO pra debug seguro), truncated (true se atingiu cap interno).
+    Falha isolada: se algo der ruim aqui, propaga pra caller que isola por tabela.
     """
-    from database.models import SessionLocal, ChatMessage
     from utils.pii_masker import mask_pii, count_pii_matches_detailed
 
-    HARD_SCAN_CAP = 50_000  # protecao contra DB enorme; nunca scaneia mais que isso
     PREVIEW_CHARS = 80
     BATCH = 500
+    scanned = 0
+    leaks: list[dict[str, Any]] = []
+    truncated = False
+    last_id_seen = max(0, since_id)
+
+    while scanned < hard_cap and len(leaks) < limit_per_table:
+        batch = (
+            db.query(model)
+            .filter(model.id > last_id_seen)
+            .order_by(model.id)
+            .limit(BATCH)
+            .all()
+        )
+        if not batch:
+            break
+        for row in batch:
+            scanned += 1
+            last_id_seen = row.id
+            row_detailed = {"cpf": 0, "cnpj": 0, "email": 0, "phone": 0, "cep": 0, "card": 0}
+            row_total = 0
+            preview_seed = None
+            for col in pii_cols:
+                val = getattr(row, col, None)
+                if val:
+                    d = count_pii_matches_detailed(val)
+                    s = sum(d.values())
+                    if s > 0:
+                        for k, v in d.items():
+                            row_detailed[k] += v
+                        row_total += s
+                        if preview_seed is None:
+                            preview_seed = (col, val)
+            if row_total > 0:
+                # Preview com mask aplicada — endpoint nao vaza PII por design
+                preview_col, preview_text = preview_seed
+                preview = mask_pii(preview_text)[:PREVIEW_CHARS]
+                leaks.append({
+                    "table": table_name,
+                    "id": row.id,
+                    "pii_masked": bool(getattr(row, "pii_masked", None))
+                                  if getattr(row, "pii_masked", None) is not None else None,
+                    "preview_column": preview_col,
+                    "by_type": {k: v for k, v in row_detailed.items() if v > 0},
+                    "total_matches": row_total,
+                    "preview_masked": preview,
+                    "created_at": (row.created_at.isoformat()
+                                   if getattr(row, "created_at", None) else None),
+                })
+                if len(leaks) >= limit_per_table:
+                    truncated = True
+                    break
+        if scanned >= hard_cap:
+            truncated = True
+            break
+
+    return scanned, leaks, truncated, last_id_seen
+
+
+@router.get("/pii/audit-leaks")
+async def admin_pii_audit_leaks(
+    table: str = Query(default="all", description="'all' (default, scan registry inteiro) ou nome especifico."),
+    since_id: int = Query(default=0, ge=0, description="Cursor (so usado quando table != 'all')."),
+    limit: int = Query(default=100, ge=1, le=1000, description="Cap de leaks por tabela."),
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Sentinela LGPD (Tier 2.4.4 + 2.4.1): detecta rows com PII bruto residual.
+
+    Read-only. Scan em uma tabela ou em todas (default). Reporta rows onde
+    regex detecta PII independente do valor de pii_masked — protege contra
+    bug do tipo "flag mente, content tem PII".
+
+    Modos:
+      ?table=all (default): scan em todas as 9 tabelas do PII_PROTECTED registry.
+        Falha isolada: se uma tabela explodir, as outras continuam.
+        Response: by_table com stats de cada tabela + has_leaks top-level.
+
+      ?table=<name>: scan apenas nesta tabela. since_id permite continuar
+        cursor. Response: shape backward-compat com versao single-table.
+
+    Preview do leak ja vem mascarado por mask_pii — nao vaza PII por design.
+    """
+    from database.models import SessionLocal, PII_PROTECTED
+
+    HARD_SCAN_CAP = 50_000
 
     db = SessionLocal()
     try:
-        scanned = 0
-        leaks: list[dict[str, Any]] = []
-        truncated = False
-        last_id = max(0, since_id)
-        last_id_seen = last_id
-
-        while scanned < HARD_SCAN_CAP and len(leaks) < limit:
-            batch = (
-                db.query(ChatMessage)
-                .filter(ChatMessage.id > last_id_seen)
-                .order_by(ChatMessage.id)
-                .limit(BATCH)
-                .all()
+        if table == "all":
+            by_table: dict[str, dict[str, Any]] = {}
+            total_leaks = 0
+            for tname, model, cols in PII_PROTECTED:
+                try:
+                    scanned, leaks, truncated, last_id = _scan_table_for_leaks(
+                        db, model, cols, tname, limit, 0, HARD_SCAN_CAP,
+                    )
+                    by_table[tname] = {
+                        "pii_columns": cols,
+                        "scanned": scanned,
+                        "leaks_count": len(leaks),
+                        "truncated": truncated,
+                        "next_since_id": last_id if truncated else None,
+                        "leaks": leaks,
+                    }
+                    total_leaks += len(leaks)
+                except Exception as inner:
+                    # Falha isolada: registra erro mas continua scaneando outras
+                    logger.error(f"audit-leaks falhou em {tname}: {inner}", exc_info=True)
+                    by_table[tname] = {
+                        "pii_columns": cols,
+                        "error": str(inner)[:500],
+                    }
+            return {
+                "has_leaks": total_leaks > 0,
+                "total_leaks": total_leaks,
+                "tables_scanned": len(PII_PROTECTED),
+                "hard_scan_cap": HARD_SCAN_CAP,
+                "by_table": by_table,
+            }
+        else:
+            # Single-table mode (backward-compat com pre-Tier 2.4.1)
+            model_cols = next(
+                ((m, c) for tn, m, c in PII_PROTECTED if tn == table), None
             )
-            if not batch:
-                break
-
-            for msg in batch:
-                scanned += 1
-                last_id_seen = msg.id
-                if not msg.content:
-                    continue
-                detailed = count_pii_matches_detailed(msg.content)
-                total = sum(detailed.values())
-                if total > 0:
-                    # Preview com mask aplicada — endpoint nao vaza PII por design
-                    preview = mask_pii(msg.content)[:PREVIEW_CHARS]
-                    leaks.append({
-                        "id": msg.id,
-                        "user_id": msg.user_id,
-                        "agent_id": msg.agent_id,
-                        "role": msg.role,
-                        "pii_masked": bool(msg.pii_masked) if msg.pii_masked is not None else None,
-                        "by_type": {k: v for k, v in detailed.items() if v > 0},
-                        "total_matches": total,
-                        "preview_masked": preview,
-                        "created_at": msg.created_at.isoformat() if msg.created_at else None,
-                    })
-                    if len(leaks) >= limit:
-                        truncated = True
-                        break
-
-            if scanned >= HARD_SCAN_CAP:
-                truncated = True
-                break
-
-        return {
-            "has_leaks": len(leaks) > 0,
-            "scanned": scanned,
-            "leaks_count": len(leaks),
-            "truncated": truncated,
-            "next_since_id": last_id_seen if truncated else None,
-            "hard_scan_cap": HARD_SCAN_CAP,
-            "leaks": leaks,
-        }
+            if model_cols is None:
+                valid = sorted(t for t, _, _ in PII_PROTECTED)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"table desconhecida: '{table}'. Valid: {['all', *valid]}",
+                )
+            model, cols = model_cols
+            scanned, leaks, truncated, last_id = _scan_table_for_leaks(
+                db, model, cols, table, limit, since_id, HARD_SCAN_CAP,
+            )
+            return {
+                "has_leaks": len(leaks) > 0,
+                "table": table,
+                "pii_columns": cols,
+                "scanned": scanned,
+                "leaks_count": len(leaks),
+                "truncated": truncated,
+                "next_since_id": last_id if truncated else None,
+                "hard_scan_cap": HARD_SCAN_CAP,
+                "leaks": leaks,
+            }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"admin_pii_audit_leaks erro: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

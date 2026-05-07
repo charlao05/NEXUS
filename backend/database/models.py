@@ -368,6 +368,7 @@ class Client(Base):
     address = Column(String(300))
     city = Column(String(100))
     state = Column(String(2))
+    pii_masked = Column(Boolean, default=True, nullable=False)  # Tier 2.4.1 LGPD
     
     # Segmentação
     segment = Column(String(20), default="standard")
@@ -452,6 +453,7 @@ class Interaction(Base):
     summary = Column(Text, nullable=False)
     details = Column(Text, default="")
     sentiment = Column(String(10), default="neutral")  # positive, neutral, negative
+    pii_masked = Column(Boolean, default=True, nullable=False)  # Tier 2.4.1 LGPD
     created_at = Column(DateTime, default=_utcnow)
     created_by = Column(String(100), default="system")
     
@@ -482,6 +484,7 @@ class Opportunity(Base):
     probability = Column(Float, default=30.0)  # % de fechar
     expected_close = Column(Date, nullable=True)
     notes = Column(Text, default="")
+    pii_masked = Column(Boolean, default=True, nullable=False)  # Tier 2.4.1 LGPD
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
     closed_at = Column(DateTime, nullable=True)
@@ -518,8 +521,9 @@ class Appointment(Base):
     type = Column(String(30), default="reuniao")  # reuniao, consulta, ligacao, fiscal
     status = Column(String(20), default="scheduled")  # scheduled, confirmed, done, cancelled, no_show
     reminder_sent = Column(Boolean, default=False)
+    pii_masked = Column(Boolean, default=True, nullable=False)  # Tier 2.4.1 LGPD
     created_at = Column(DateTime, default=_utcnow)
-    
+
     client = relationship("Client", back_populates="appointments")
     
     def to_dict(self) -> dict:
@@ -557,8 +561,9 @@ class Transaction(Base):
     opportunity_id = Column(Integer, ForeignKey("opportunities.id"), nullable=True)
     is_recurring = Column(Boolean, default=False)
     notes = Column(Text, default="")
+    pii_masked = Column(Boolean, default=True, nullable=False)  # Tier 2.4.1 LGPD
     created_at = Column(DateTime, default=_utcnow)
-    
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
@@ -649,6 +654,7 @@ class ActivityLog(Base):
     action = Column(String(50), nullable=False)  # login, signup, chat, create_client, create_appointment...
     agent_id = Column(String(30), nullable=True)
     details = Column(Text, default="")
+    pii_masked = Column(Boolean, default=True, nullable=False)  # Tier 2.4.1 LGPD
     ip_address = Column(String(45), nullable=True)
     created_at = Column(DateTime, default=_utcnow, index=True)
 
@@ -762,6 +768,7 @@ class StockMovement(Base):
     total_value = Column(Float, default=0.0)    # quantity * unit_price
     reason = Column(String(200), nullable=True) # venda, compra, ajuste, uso, perda
     notes = Column(Text, nullable=True)
+    pii_masked = Column(Boolean, default=True, nullable=False)  # Tier 2.4.1 LGPD
     reference_id = Column(String(100), nullable=True)  # id de invoice ou pedido
     created_at = Column(DateTime, default=_utcnow)
 
@@ -803,6 +810,7 @@ class Feedback(Base):
     rating = Column(Integer, nullable=False)             # 1-5 estrelas
     category = Column(String(50), nullable=True)         # bug, sugestao, elogio, reclamacao
     message = Column(Text, nullable=True)                # Comentário livre
+    pii_masked = Column(Boolean, default=True, nullable=False)  # Tier 2.4.1 LGPD
     page = Column(String(100), nullable=True)            # Página de onde veio
     created_at = Column(DateTime, default=_utcnow)
 
@@ -948,31 +956,53 @@ class PIIBackfillAudit(Base):
 
 
 # ---------------------------------------------------------------------------
-# LGPD — Mascaramento PII em ChatMessage.content (Tier 2.4)
-# Event listener SQLAlchemy: aplica mask automaticamente antes de INSERT.
-# Garante que NENHUM caminho de write escapa do mask (centralizado, robusto).
+# LGPD — Registry centralizado de colunas com PII (Tier 2.4 + 2.4.1)
+# Event listeners SQLAlchemy registrados via loop. Adicionar nova tabela
+# protegida = 1 linha aqui + 1 coluna pii_masked Bool no model.
 # ---------------------------------------------------------------------------
 from sqlalchemy import event as _sa_event
 
+# Registry: (table_name, ModelClass, [pii_columns]).
+# Cada model precisa ter coluna `pii_masked` Bool DEFAULT TRUE.
+# Listener registrado abaixo aplica mask_pii() em todas as columns listadas
+# antes de INSERT, e marca pii_masked=True.
+PII_PROTECTED = [
+    ("chat_messages",   ChatMessage,    ["content"]),
+    ("clients",         Client,         ["notes"]),
+    ("interactions",    Interaction,    ["summary", "details"]),
+    ("opportunities",   Opportunity,    ["notes"]),
+    ("appointments",    Appointment,    ["description"]),
+    ("transactions",    Transaction,    ["notes"]),
+    ("stock_movements", StockMovement,  ["notes"]),
+    ("feedbacks",       Feedback,       ["message"]),
+    ("activity_logs",   ActivityLog,    ["details"]),
+]
 
-@_sa_event.listens_for(ChatMessage, "before_insert")
-def _chat_message_mask_pii(mapper, connection, target):  # pragma: no cover
-    """Aplica mask em ChatMessage.content antes do INSERT.
 
-    Idempotente: se conteudo ja vier mascarado, regexes nao casam novamente.
-    NUNCA propaga excecao (mask falhar nao pode bloquear save).
-    """
-    try:
-        if target.content:
+def _make_pii_listener(model_cls, pii_columns):
+    """Factory: cria listener before_insert pra um model com suas colunas PII."""
+    cls_name = model_cls.__name__
+
+    def _listener(mapper, connection, target):  # pragma: no cover
+        try:
             from utils.pii_masker import mask_pii
-            target.content = mask_pii(target.content)
-        target.pii_masked = True
-    except Exception:
-        # Falha do masker nao deve bloquear escrita; loga warning silencioso.
-        import logging as _logging
-        _logging.getLogger(__name__).warning(
-            "PII mask falhou em ChatMessage.before_insert", exc_info=True
-        )
+            for col in pii_columns:
+                val = getattr(target, col, None)
+                if val:
+                    setattr(target, col, mask_pii(val))
+            target.pii_masked = True
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                f"PII mask falhou em {cls_name}.before_insert", exc_info=True
+            )
+
+    return _listener
+
+
+# Registrar listener pra cada entry no registry
+for _tbl_name, _model, _cols in PII_PROTECTED:
+    _sa_event.listens_for(_model, "before_insert")(_make_pii_listener(_model, _cols))
 
 
 def init_db():
