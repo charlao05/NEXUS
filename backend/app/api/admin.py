@@ -1184,6 +1184,46 @@ async def admin_pii_backfill(
         db.close()
 
 
+def _run_audit_scan_all(db, limit_per_table, hard_scan_cap):
+    """Helper compartilhado entre /audit-leaks?table=all e /sentinel-check.
+
+    Itera PII_PROTECTED registry com falha isolada por tabela. Retorna o
+    payload completo do audit-leaks all-mode (has_leaks, total_leaks,
+    tables_scanned, by_table com pii_columns/scanned/leaks/etc).
+    """
+    from database.models import PII_PROTECTED
+    by_table: dict[str, dict[str, Any]] = {}
+    total_leaks = 0
+    for tname, model, cols in PII_PROTECTED:
+        try:
+            scanned, leaks, truncated, last_id = _scan_table_for_leaks(
+                db, model, cols, tname, limit_per_table, 0, hard_scan_cap,
+            )
+            by_table[tname] = {
+                "pii_columns": cols,
+                "scanned": scanned,
+                "leaks_count": len(leaks),
+                "truncated": truncated,
+                "next_since_id": last_id if truncated else None,
+                "leaks": leaks,
+            }
+            total_leaks += len(leaks)
+        except Exception as inner:
+            # Falha isolada: registra erro mas continua scaneando outras
+            logger.error(f"audit-leaks falhou em {tname}: {inner}", exc_info=True)
+            by_table[tname] = {
+                "pii_columns": cols,
+                "error": str(inner)[:500],
+            }
+    return {
+        "has_leaks": total_leaks > 0,
+        "total_leaks": total_leaks,
+        "tables_scanned": len(PII_PROTECTED),
+        "hard_scan_cap": hard_scan_cap,
+        "by_table": by_table,
+    }
+
+
 def _scan_table_for_leaks(db, model, pii_cols, table_name, limit_per_table, since_id, hard_cap):
     """Scan UMA tabela buscando PII bruto residual. Retorna (scanned, leaks_list, truncated, last_id).
 
@@ -1281,36 +1321,8 @@ async def admin_pii_audit_leaks(
     db = SessionLocal()
     try:
         if table == "all":
-            by_table: dict[str, dict[str, Any]] = {}
-            total_leaks = 0
-            for tname, model, cols in PII_PROTECTED:
-                try:
-                    scanned, leaks, truncated, last_id = _scan_table_for_leaks(
-                        db, model, cols, tname, limit, 0, HARD_SCAN_CAP,
-                    )
-                    by_table[tname] = {
-                        "pii_columns": cols,
-                        "scanned": scanned,
-                        "leaks_count": len(leaks),
-                        "truncated": truncated,
-                        "next_since_id": last_id if truncated else None,
-                        "leaks": leaks,
-                    }
-                    total_leaks += len(leaks)
-                except Exception as inner:
-                    # Falha isolada: registra erro mas continua scaneando outras
-                    logger.error(f"audit-leaks falhou em {tname}: {inner}", exc_info=True)
-                    by_table[tname] = {
-                        "pii_columns": cols,
-                        "error": str(inner)[:500],
-                    }
-            return {
-                "has_leaks": total_leaks > 0,
-                "total_leaks": total_leaks,
-                "tables_scanned": len(PII_PROTECTED),
-                "hard_scan_cap": HARD_SCAN_CAP,
-                "by_table": by_table,
-            }
+            result = _run_audit_scan_all(db, limit, HARD_SCAN_CAP)
+            return result
         else:
             # Single-table mode (backward-compat com pre-Tier 2.4.1)
             model_cols = next(
@@ -1399,3 +1411,200 @@ async def admin_pii_backfill_history(
     except Exception as e:
         logger.error(f"admin_pii_backfill_history erro: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# PII SENTINEL — Tier 2.4.5 (deteccao continua via cron externo)
+# Cron externo (cron-job.org, GitHub Actions, etc) chama POST /sentinel-check
+# a cada N minutos. Se has_leaks=true, dispara Sentry capture_message com
+# fingerprint distinto por combinacao de tabelas leak. Bonus keep-alive:
+# evita hibernacao do Render free tier.
+# ============================================================================
+
+@router.post("/pii/sentinel-check")
+async def admin_pii_sentinel_check(
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Executa scan PII em todas as tabelas + alerta Sentry se has_leaks.
+
+    Idempotente do ponto de vista de dados: NUNCA modifica content nem flags.
+    Insere 1 row em pii_sentinel_state com resultado da execucao.
+
+    Sentry alert (so se has_leaks=true):
+      - level=error
+      - fingerprint=['pii-leak-sentinel', '<sorted_tables_joined>']
+      - tags={pii_leak: 'true', leak_count: '<N>'}
+      - extras={tables_with_leaks, total_leaks, scanned_at}
+
+    Designed for external cron (cron-job.org / GitHub Actions schedule).
+    Frequencia recomendada: 30 min.
+    """
+    import json as _json
+    import time as _time
+    from datetime import datetime, timezone
+    from database.models import SessionLocal, PIISentinelState
+
+    HARD_SCAN_CAP = 50_000
+    LIMIT_PER_TABLE = 100  # cap defensivo no scan da sentinela
+
+    db = SessionLocal()
+    started = _time.time()
+    try:
+        # 1. Scan
+        result = _run_audit_scan_all(db, LIMIT_PER_TABLE, HARD_SCAN_CAP)
+        has_leaks = result["has_leaks"]
+        total_leaks = result["total_leaks"]
+        tables_with_leaks = sorted([
+            t for t, info in result["by_table"].items()
+            if info.get("leaks_count", 0) > 0
+        ])
+
+        # 2. Alerta Sentry (so se has_leaks)
+        alert_fired = False
+        if has_leaks:
+            try:
+                import sentry_sdk
+                with sentry_sdk.new_scope() as scope:
+                    # Fingerprint especifico por combinacao de tabelas:
+                    # mesmo grupo = mesma combinacao; agrupa eventos do mesmo incidente.
+                    scope.fingerprint = [
+                        "pii-leak-sentinel",
+                        ",".join(tables_with_leaks) or "(none)",
+                    ]
+                    scope.set_tag("pii_leak", "true")
+                    scope.set_tag("leak_count", str(total_leaks))
+                    scope.set_extra("tables_with_leaks", tables_with_leaks)
+                    scope.set_extra("total_leaks", total_leaks)
+                    scope.set_extra("scanned_at", datetime.now(timezone.utc).isoformat())
+                    scope.set_extra("by_table_summary", {
+                        t: info.get("leaks_count", 0)
+                        for t, info in result["by_table"].items()
+                    })
+                    sentry_sdk.capture_message(
+                        f"PII leak detected: {total_leaks} leak(s) em {len(tables_with_leaks)} tabela(s) "
+                        f"({','.join(tables_with_leaks)})",
+                        level="error",
+                    )
+                alert_fired = True
+            except Exception as sentry_err:
+                logger.warning(f"sentinel-check: falha ao enviar Sentry alert: {sentry_err}")
+
+        duration_ms = int((_time.time() - started) * 1000)
+
+        # 3. Persistir histórico INSERT-only
+        try:
+            sentinel_row = PIISentinelState(
+                has_leaks=has_leaks,
+                total_leaks=total_leaks,
+                tables_with_leaks=_json.dumps(tables_with_leaks) if tables_with_leaks else None,
+                alert_fired=alert_fired,
+                duration_ms=duration_ms,
+            )
+            db.add(sentinel_row)
+            db.commit()
+        except Exception as persist_err:
+            logger.warning(f"sentinel-check: falha ao persistir state: {persist_err}")
+            db.rollback()
+
+        return {
+            "has_leaks": has_leaks,
+            "total_leaks": total_leaks,
+            "tables_with_leaks": tables_with_leaks,
+            "alert_fired": alert_fired,
+            "scanned_at": datetime.now(timezone.utc).isoformat(),
+            "duration_ms": duration_ms,
+            "by_table": result["by_table"],
+        }
+    except Exception as e:
+        logger.error(f"admin_pii_sentinel_check erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+@router.get("/pii/sentinel-status")
+async def admin_pii_sentinel_status(
+    stale_threshold_minutes: int = Query(default=60, ge=1, le=1440, description="Janela apos a qual sentinela e considerada 'stale' (cron parado)."),
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Status meta-monitoramento da sentinela. Detecta cron parado.
+
+    Read-only: nao roda scan; le ultimo registro de pii_sentinel_state.
+
+    Returns:
+      last_scan_at: timestamp da ultima execucao (None se nunca rodou)
+      minutes_since_last_scan: idade em minutos (None se nunca rodou)
+      is_stale: True se idade > stale_threshold_minutes (cron suspeito)
+      stale_threshold_minutes: limite usado
+      last_result: resumo do ultimo run (has_leaks, total_leaks)
+      history_last_24h: contagem de scans + alertas nas ultimas 24h
+    """
+    import json as _json
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func
+    from database.models import SessionLocal, PIISentinelState
+
+    db = SessionLocal()
+    try:
+        last = (
+            db.query(PIISentinelState)
+            .order_by(PIISentinelState.scanned_at.desc())
+            .first()
+        )
+
+        now = datetime.now(timezone.utc)
+        last_scan_at = None
+        minutes_since = None
+        is_stale = True  # default: stale se nunca rodou
+        last_result = None
+
+        if last is not None:
+            last_ts = last.scanned_at
+            # Normaliza naive -> UTC se necessario (Postgres pode retornar tz-aware ja)
+            if last_ts.tzinfo is None:
+                last_ts = last_ts.replace(tzinfo=timezone.utc)
+            last_scan_at = last_ts.isoformat()
+            delta = now - last_ts
+            minutes_since = int(delta.total_seconds() / 60)
+            is_stale = minutes_since > stale_threshold_minutes
+            try:
+                tables_list = (
+                    _json.loads(last.tables_with_leaks)
+                    if last.tables_with_leaks else []
+                )
+            except Exception:
+                tables_list = []
+            last_result = {
+                "has_leaks": bool(last.has_leaks),
+                "total_leaks": int(last.total_leaks or 0),
+                "tables_with_leaks": tables_list,
+                "alert_fired": bool(last.alert_fired),
+                "duration_ms": last.duration_ms,
+            }
+
+        # Aggregate ultimas 24h
+        cutoff_24h = now - timedelta(hours=24)
+        scans_24h = db.query(func.count(PIISentinelState.id)).filter(
+            PIISentinelState.scanned_at >= cutoff_24h
+        ).scalar() or 0
+        alerts_24h = db.query(func.count(PIISentinelState.id)).filter(
+            PIISentinelState.scanned_at >= cutoff_24h,
+            PIISentinelState.alert_fired.is_(True),
+        ).scalar() or 0
+
+        return {
+            "last_scan_at": last_scan_at,
+            "minutes_since_last_scan": minutes_since,
+            "is_stale": is_stale,
+            "stale_threshold_minutes": stale_threshold_minutes,
+            "last_result": last_result,
+            "history_last_24h": {
+                "scans": int(scans_24h),
+                "alerts_fired": int(alerts_24h),
+            },
+        }
+    except Exception as e:
+        logger.error(f"admin_pii_sentinel_status erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()

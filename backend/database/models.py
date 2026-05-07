@@ -932,6 +932,27 @@ class AutomationUsageRecord(Base):
 # LGPD audit trail (Tier 2.4.2 — backfill retroativo de PII)
 # ---------------------------------------------------------------------------
 
+class PIISentinelState(Base):
+    """Histórico INSERT-only de execucoes da sentinela PII (Tier 2.4.5).
+
+    Cada chamada de POST /api/admin/pii/sentinel-check insere 1 linha aqui,
+    independente de ter detectado leak ou nao. Permite:
+      - /sentinel-status detectar cron parado (last_scan_at vs now())
+      - Auditoria de quando alertas foram disparados (alert_fired=True)
+      - Telemetria de duracao (duration_ms) pra detectar regressao de perf
+    Sem UPDATE — append-only. Cleanup retroativo eh decisao operacional
+    (DELETE WHERE scanned_at < NOW() - INTERVAL '90 days').
+    """
+    __tablename__ = "pii_sentinel_state"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    scanned_at = Column(DateTime, default=_utcnow, nullable=False, index=True)
+    has_leaks = Column(Boolean, nullable=False, default=False)
+    total_leaks = Column(Integer, nullable=False, default=0)
+    tables_with_leaks = Column(Text, nullable=True)  # JSON: ["clients", ...]
+    alert_fired = Column(Boolean, nullable=False, default=False)
+    duration_ms = Column(Integer, nullable=True)
+
+
 class PIIBackfillAudit(Base):
     """Trilha auditavel de execucoes do PII backfill (LGPD).
 
