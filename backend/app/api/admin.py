@@ -1003,9 +1003,12 @@ async def admin_margin_all(
 
 
 # ============================================================================
-# PII BACKFILL — Tier 2.4.2 (LGPD remediacao retroativa)
-# Aplica mask em chat_messages antigos onde pii_masked=False/NULL.
-# Default dry_run=true. Real run requer dry_run=false&confirm=true.
+# PII BACKFILL — Tier 2.4.2/2.4.3 (LGPD remediacao retroativa)
+# Estrategia REGEX (v2 a partir de 2026-05-07): scan completo + deteccao
+# por count_pii_matches_detailed. A v1 usava filtro WHERE pii_masked=false
+# OR NULL e tinha bug fundamental: ALTER TABLE ADD COLUMN DEFAULT TRUE
+# preencheu rows legadas com pii_masked=true sem nunca processar conteudo.
+# A flag virou efeito-colateral, nao pre-condicao.
 # Nao reversivel (consistente com Tier 2.4: minimizacao > recuperabilidade).
 # ============================================================================
 
@@ -1016,28 +1019,23 @@ async def admin_pii_backfill(
     batch_size: int = Query(default=500, ge=1, le=2000, description="Linhas por batch (commit incremental)."),
     admin: dict[str, Any] = Depends(require_admin),
 ):
-    """Aplica PII mask retroativamente em chat_messages.content.
+    """Aplica PII mask retroativamente em chat_messages.content (modo regex v2).
 
-    Escopo: APENAS chat_messages (Tier 2.4.2). Outras tabelas com texto livre
-    (Client.notes, Interaction.content, ActivityLog.details) requerem listener
-    preventivo (Tier 2.4.1) antes de seu proprio backfill.
+    Estrategia: scan COMPLETO via cursor (id > last_id). Para cada row:
+      - Conta PII via count_pii_matches_detailed (DV-validado em CPF/CNPJ).
+      - Se total_matches > 0: aplica mask + marca pii_masked=true (rows_modified++).
+      - Se total_matches == 0: marca pii_masked=true (idempotencia).
+    Flag pii_masked deixa de ser INPUT do filtro e passa a ser OUTPUT do
+    trabalho — semantica invertida resolve o bug histórico onde ALTER TABLE
+    DEFAULT TRUE marcou rows legadas como mascaradas sem processar.
 
-    Targets: rows com pii_masked=false OR NULL.
-    Idempotente: re-run e no-op (rows ja processadas tem pii_masked=true).
+    Idempotente naturalmente: rows ja sem PII detectavel = no-op.
 
-    Modo padrao (dry_run=true):
-      Conta linhas afetadas + breakdown por tipo de PII. Nao altera dados.
-
-    Modo real (dry_run=false&confirm=true):
-      Mascara content em batches de batch_size, commit incremental, marca
-      pii_masked=true. Falha mid-batch = rollback do batch (proximo run resume).
-
-    Returns: stats da operacao + audit_id (referencia para tabela
-    pii_backfill_audit, queryavel via SQL admin).
+    Escopo: APENAS chat_messages. Outras tabelas (Client.notes etc) requerem
+    listener preventivo (Tier 2.4.1) antes de seu proprio backfill.
     """
     import json as _json
     from datetime import datetime, timezone
-    from sqlalchemy import or_
     from database.models import (
         SessionLocal,
         ChatMessage,
@@ -1059,67 +1057,65 @@ async def admin_pii_backfill(
     db = SessionLocal()
     audit: PIIBackfillAudit | None = None
     try:
-        # Cria linha de audit ANTES de comecar (assim mesmo se travar, fica registro)
         audit = PIIBackfillAudit(
             target_table="chat_messages",
             triggered_by_email=(admin.get("email") or "")[:254],
             dry_run=dry_run,
+            detection_mode="regex",
         )
         db.add(audit)
         db.commit()
         db.refresh(audit)
 
         rows_scanned = 0
-        rows_modified = 0
+        rows_with_pii = 0       # rows onde regex detectou pelo menos 1 match
+        rows_modified = 0       # rows onde mask alterou content (so em real run)
         type_counts = {"cpf": 0, "cnpj": 0, "email": 0, "phone": 0, "cep": 0, "card": 0}
         oldest_ts: datetime | None = None
 
-        # Filtro target: rows nao processadas (pii_masked=False OU NULL)
-        target_filter = or_(
-            ChatMessage.pii_masked.is_(False),
-            ChatMessage.pii_masked.is_(None),
-        )
-
-        offset = 0
+        # Cursor-based pagination (robusto contra concurrent insert/delete)
+        last_id = 0
         while True:
-            q = db.query(ChatMessage).filter(target_filter).order_by(ChatMessage.id)
-            # Em dry_run nada muda no banco, entao precisa usar offset.
-            # Em real run, rows processadas saem do filter (pii_masked=true), offset fica 0.
-            if dry_run:
-                q = q.offset(offset)
-            batch = q.limit(batch_size).all()
+            batch = (
+                db.query(ChatMessage)
+                .filter(ChatMessage.id > last_id)
+                .order_by(ChatMessage.id)
+                .limit(batch_size)
+                .all()
+            )
             if not batch:
                 break
 
             for msg in batch:
                 rows_scanned += 1
+                last_id = msg.id  # avanca cursor mesmo em dry_run
                 if oldest_ts is None or (msg.created_at and msg.created_at < oldest_ts):
                     oldest_ts = msg.created_at
 
-                # Conta PII por tipo (sem mascarar ainda)
-                if msg.content:
-                    detailed = count_pii_matches_detailed(msg.content)
+                if not msg.content:
+                    if not dry_run:
+                        msg.pii_masked = True
+                    continue
+
+                detailed = count_pii_matches_detailed(msg.content)
+                total_matches = sum(detailed.values())
+                if total_matches > 0:
+                    rows_with_pii += 1
                     for k, v in detailed.items():
                         type_counts[k] = type_counts.get(k, 0) + v
 
                 if not dry_run:
-                    # Aplica mask. Mesmo se nao houver PII detectado, marcamos
-                    # pii_masked=true pra excluir do filter no proximo run (idempotente).
-                    if msg.content:
+                    if total_matches > 0:
                         masked = mask_pii(msg.content)
                         if masked != msg.content:
                             msg.content = masked
                             rows_modified += 1
+                    # Sempre marca processada — flag e OUTPUT do trabalho
                     msg.pii_masked = True
 
             if not dry_run:
-                # Commit incremental: rollback de UM batch nao perde os anteriores.
-                db.commit()
-            else:
-                # Em dry_run, avanca offset (filter nao excluiu nada).
-                offset += batch_size
+                db.commit()  # commit incremental por batch
 
-        # Atualiza audit com stats finais
         audit.rows_scanned = rows_scanned
         audit.rows_modified = rows_modified
         audit.pii_matches_by_type = _json.dumps(type_counts)
@@ -1129,16 +1125,18 @@ async def admin_pii_backfill(
         return {
             "dry_run_resolved": dry_run,
             "audit_id": audit.id,
+            "detection_mode": "regex",
             "target_table": "chat_messages",
             "triggered_by": admin.get("email"),
             "rows_scanned": rows_scanned,
+            "rows_with_pii_detected": rows_with_pii,
             "rows_modified": rows_modified if not dry_run else None,
-            "would_affect_total": rows_scanned if dry_run else None,
+            "would_affect_total": rows_with_pii if dry_run else None,
             "by_pii_type": type_counts,
             "oldest_record_ts": oldest_ts.isoformat() if oldest_ts else None,
             "batch_size": batch_size,
             "message": (
-                f"DRY RUN: {rows_scanned} rows seriam processadas. "
+                f"DRY RUN: {rows_scanned} rows escaneadas, {rows_with_pii} com PII detectavel. "
                 f"Para aplicar, rode com dry_run=false&confirm=true."
             ) if dry_run else (
                 f"REAL RUN concluido: {rows_scanned} scanned, {rows_modified} modificadas."
@@ -1148,7 +1146,6 @@ async def admin_pii_backfill(
         raise
     except Exception as e:
         logger.error(f"admin_pii_backfill erro: {e}", exc_info=True)
-        # Marca o audit com erro pra forensica
         if audit is not None:
             try:
                 audit.error = str(e)[:1000]
@@ -1157,6 +1154,95 @@ async def admin_pii_backfill(
                 db.commit()
             except Exception:
                 pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+@router.get("/pii/audit-leaks")
+async def admin_pii_audit_leaks(
+    since_id: int = Query(default=0, ge=0, description="Cursor: scan a partir de id > since_id."),
+    limit: int = Query(default=100, ge=1, le=1000, description="Cap de leaks reportados (default 100, max 1000)."),
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Sentinela LGPD (Tier 2.4.4): detecta rows com PII bruto residual.
+
+    Read-only. Faz scan em chat_messages e reporta rows onde regex detecta
+    PII (independente do valor de pii_masked). Util pra detectar regressao
+    de bug do tipo: 'flag mente, content tem PII'.
+
+    Cursor-based: passe since_id pra continuar de onde parou.
+    Cap interno: scan ate ALL rows mas reporta no maximo `limit` leaks.
+
+    Response: has_leaks (bool top-level pra alertas), leaks (com preview
+    JA MASCARADO pra debug seguro), truncated (true se atingiu cap interno).
+    """
+    from database.models import SessionLocal, ChatMessage
+    from utils.pii_masker import mask_pii, count_pii_matches_detailed
+
+    HARD_SCAN_CAP = 50_000  # protecao contra DB enorme; nunca scaneia mais que isso
+    PREVIEW_CHARS = 80
+    BATCH = 500
+
+    db = SessionLocal()
+    try:
+        scanned = 0
+        leaks: list[dict[str, Any]] = []
+        truncated = False
+        last_id = max(0, since_id)
+        last_id_seen = last_id
+
+        while scanned < HARD_SCAN_CAP and len(leaks) < limit:
+            batch = (
+                db.query(ChatMessage)
+                .filter(ChatMessage.id > last_id_seen)
+                .order_by(ChatMessage.id)
+                .limit(BATCH)
+                .all()
+            )
+            if not batch:
+                break
+
+            for msg in batch:
+                scanned += 1
+                last_id_seen = msg.id
+                if not msg.content:
+                    continue
+                detailed = count_pii_matches_detailed(msg.content)
+                total = sum(detailed.values())
+                if total > 0:
+                    # Preview com mask aplicada — endpoint nao vaza PII por design
+                    preview = mask_pii(msg.content)[:PREVIEW_CHARS]
+                    leaks.append({
+                        "id": msg.id,
+                        "user_id": msg.user_id,
+                        "agent_id": msg.agent_id,
+                        "role": msg.role,
+                        "pii_masked": bool(msg.pii_masked) if msg.pii_masked is not None else None,
+                        "by_type": {k: v for k, v in detailed.items() if v > 0},
+                        "total_matches": total,
+                        "preview_masked": preview,
+                        "created_at": msg.created_at.isoformat() if msg.created_at else None,
+                    })
+                    if len(leaks) >= limit:
+                        truncated = True
+                        break
+
+            if scanned >= HARD_SCAN_CAP:
+                truncated = True
+                break
+
+        return {
+            "has_leaks": len(leaks) > 0,
+            "scanned": scanned,
+            "leaks_count": len(leaks),
+            "truncated": truncated,
+            "next_since_id": last_id_seen if truncated else None,
+            "hard_scan_cap": HARD_SCAN_CAP,
+            "leaks": leaks,
+        }
+    except Exception as e:
+        logger.error(f"admin_pii_audit_leaks erro: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()

@@ -943,6 +943,8 @@ class PIIBackfillAudit(Base):
     triggered_by_email = Column(String(254), nullable=True)  # RFC 5321 limit
     dry_run = Column(Boolean, default=True, nullable=False)
     error = Column(Text, nullable=True)
+    # Tier 2.4.3+ : "regex" (atual) | NULL (legacy "flag" mode, antes do fix)
+    detection_mode = Column(String(20), nullable=True, default="regex")
 
 
 # ---------------------------------------------------------------------------
