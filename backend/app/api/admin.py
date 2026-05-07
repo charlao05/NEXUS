@@ -1887,3 +1887,132 @@ async def admin_billing_resync_invoices(
     except Exception as e:
         logger.error(f"admin_billing_resync_invoices erro: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# WEBHOOK STATS — Tier 2.3.1.1 (telemetria + recommendation engine)
+# Permite descobrir empiricamente qual rota Stripe Dashboard esta usando
+# pra deprecar a inativa em Tier 2.3.1.2 futuro.
+# ============================================================================
+
+@router.get("/billing/webhook-stats")
+async def admin_billing_webhook_stats(
+    since_days: int = Query(default=7, ge=1, le=90, description="Janela em dias (default 7)."),
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Telemetria de webhook hits por rota (Tier 2.3.1.1).
+
+    Le da tabela webhook_hits — cada hit em /webhook/stripe (auth_v1) ou
+    /webhook (billing_v1) registra 1 linha. Resposta agrega:
+      - hits totais por rota
+      - first_at / last_at por rota
+      - breakdown por event_type por rota
+      - recommendation heuristica: rotas com 0 hits em N dias podem ser
+        deprecadas com seguranca (sinal automatizado, nao decisao final)
+    """
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func, case
+    from database.models import SessionLocal, WebhookHit
+
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=since_days)
+
+        # Hits totais + first/last por rota
+        rows = db.query(
+            WebhookHit.route,
+            func.count(WebhookHit.id),
+            func.min(WebhookHit.created_at),
+            func.max(WebhookHit.created_at),
+            func.coalesce(
+                func.sum(
+                    case((WebhookHit.processed.is_(True), 1), else_=0)
+                ),
+                0,
+            ),
+        ).filter(
+            WebhookHit.created_at >= cutoff
+        ).group_by(WebhookHit.route).all()
+
+        # Breakdown por (route, event_type)
+        breakdown_rows = db.query(
+            WebhookHit.route,
+            WebhookHit.event_type,
+            func.count(WebhookHit.id),
+        ).filter(
+            WebhookHit.created_at >= cutoff
+        ).group_by(WebhookHit.route, WebhookHit.event_type).all()
+
+        # Erros
+        error_rows = db.query(
+            WebhookHit.route,
+            func.count(WebhookHit.id),
+        ).filter(
+            WebhookHit.created_at >= cutoff,
+            WebhookHit.error.isnot(None),
+        ).group_by(WebhookHit.route).all()
+        errors_by_route = {r[0]: int(r[1]) for r in error_rows}
+
+        by_route: dict[str, dict[str, Any]] = {}
+        for (route, hits, first_at, last_at, processed) in rows:
+            # Normaliza tz
+            if first_at and first_at.tzinfo is None:
+                first_at = first_at.replace(tzinfo=timezone.utc)
+            if last_at and last_at.tzinfo is None:
+                last_at = last_at.replace(tzinfo=timezone.utc)
+            by_route[route] = {
+                "hits": int(hits),
+                "processed": int(processed or 0),
+                "duplicates_skipped": int(hits) - int(processed or 0),
+                "errors": errors_by_route.get(route, 0),
+                "first_at": first_at.isoformat() if first_at else None,
+                "last_at": last_at.isoformat() if last_at else None,
+                "events": {},
+            }
+
+        for (route, event_type, count) in breakdown_rows:
+            if route not in by_route:
+                continue
+            by_route[route]["events"][event_type or "unknown"] = int(count)
+
+        # Garante que ambas as rotas conhecidas aparecem (mesmo com 0 hits)
+        for known_route in ("auth_v1", "billing_v1"):
+            if known_route not in by_route:
+                by_route[known_route] = {
+                    "hits": 0,
+                    "processed": 0,
+                    "duplicates_skipped": 0,
+                    "errors": 0,
+                    "first_at": None,
+                    "last_at": None,
+                    "events": {},
+                }
+
+        # Recommendation heuristica
+        recommendation: str
+        active = [r for r, info in by_route.items() if info["hits"] > 0]
+        dormant = [r for r, info in by_route.items() if info["hits"] == 0]
+        if not active:
+            recommendation = "Nenhuma rota recebeu hits — verificar Stripe Dashboard config"
+        elif len(active) == 1:
+            recommendation = (
+                f"{active[0]} ativo, {dormant[0] if dormant else '(nenhuma)'} dormant — "
+                f"safe to deprecate {dormant[0]} apos 14 dias"
+                if dormant else f"{active[0]} ativo, nenhuma dormant"
+            )
+        else:
+            recommendation = (
+                f"Multiplas rotas ativas ({', '.join(active)}) — Stripe pode estar "
+                f"configurado pra ambas (raro). Investigar antes de deprecar."
+            )
+
+        return {
+            "since_days": since_days,
+            "by_route": by_route,
+            "recommendation": recommendation,
+        }
+    except Exception as e:
+        logger.error(f"admin_billing_webhook_stats erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()

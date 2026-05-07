@@ -1374,187 +1374,37 @@ async def checkout_addon_clients(
 
 @router.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
-    """
-    Webhook Stripe REAL (idempotente):
-    - checkout.session.completed → ativa plano
-    - customer.subscription.deleted → cancela plano
-    - customer.subscription.updated → atualiza período
-    - invoice.paid → renova período da subscription
-    - invoice.payment_failed → marca subscription como past_due
-    """
-    stripe = _init_stripe()
-    webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+    """Webhook Stripe — route thin que delega pra dispatch_stripe_event.
 
+    Tier 2.3.1.1: logica fundida agora vive em _stripe_webhook_handler.py.
+    Este endpoint apenas:
+      1. Le payload + signature header
+      2. Valida via stripe.Webhook.construct_event
+      3. Delega processamento (idempotency, dispatch por event_type, persist)
+      4. Retorna result JSON
+
+    source_route="auth_v1" eh registrado em WebhookHit pra telemetria.
+    """
+    from app.api._stripe_webhook_handler import (
+        validate_and_parse_webhook,
+        dispatch_stripe_event,
+    )
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
-
     try:
-        if webhook_secret:
-            event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
-        elif os.getenv("ENVIRONMENT") == "production":
-            raise HTTPException(status_code=500, detail="STRIPE_WEBHOOK_SECRET obrigatório em produção")
-        else:
-            import json
-            event_data = json.loads(payload)
-            event = stripe.Event.construct_from(event_data, stripe.api_key)
-            logger.warning("⚠️ Webhook sem validação de assinatura (configure STRIPE_WEBHOOK_SECRET)")
+        event = validate_and_parse_webhook(payload, sig_header)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Payload inválido")
-    except stripe.SignatureVerificationError:
-        raise HTTPException(status_code=400, detail="Assinatura inválida")
-
-    event_type = event.type  # type: ignore[union-attr]
-    logger.info(f"Stripe webhook: {event_type}")
-
-    # TAREFA 4: Idempotência global — verificar se já processamos este evento
-    event_id = event.get("id") if hasattr(event, "get") else getattr(event, "id", None)
-    if event_id:
-        _idem_db = _get_db_session()
-        try:
-            from database.models import StripeEvent as _StripeEventModel
-            existing_evt = _idem_db.query(_StripeEventModel).filter(
-                _StripeEventModel.stripe_event_id == event_id
-            ).first()
-            if existing_evt:
-                logger.info(f"⚠️ Evento Stripe já processado (idempotente): {event_id}")
-                return {"status": "already_processed", "event_id": event_id}
-            new_evt = _StripeEventModel(
-                stripe_event_id=event_id,
-                event_type=str(getattr(event, 'type', 'unknown')),
-            )
-            _idem_db.add(new_evt)
-            _idem_db.commit()
-        except ImportError:
-            pass
-        except Exception as idem_err:
-            logger.warning(f"Erro na verificação de idempotência: {idem_err}")
-        finally:
-            _idem_db.close()
+        raise HTTPException(status_code=400, detail="Payload invalido")
+    except Exception as e:
+        # Stripe raises stripe.SignatureVerificationError em sig invalida
+        if "signature" in str(type(e)).lower() or "SignatureVerification" in str(type(e)):
+            raise HTTPException(status_code=400, detail="Assinatura invalida")
+        raise
 
     db = _get_db_session()
-
     try:
-        if event_type == "checkout.session.completed":
-            session_obj: Any = event.data.object  # type: ignore[union-attr]
-            user_id = session_obj.metadata.get("user_id") if session_obj.metadata else None
-            raw_plan = session_obj.metadata.get("plan", "free") if session_obj.metadata else "free"
-            addon_type = session_obj.metadata.get("addon_type") if session_obj.metadata else None
-
-            if user_id:
-                user = db.query(User).filter(User.id == int(user_id)).first()
-                if user:
-                    if addon_type == "extra_clients":
-                        if getattr(user, 'addon_clients_purchased', False):
-                            logger.info(f"⚠️ Addon já processado para User {user_id} (idempotente)")
-                        else:
-                            slots = int(session_obj.metadata.get("slots", "10"))
-                            current_extra = getattr(user, 'extra_client_slots', 0) or 0
-                            user.extra_client_slots = current_extra + slots  # type: ignore[assignment]
-                            user.addon_clients_purchased = True  # type: ignore[assignment]
-                            if session_obj.customer:
-                                user.stripe_customer_id = session_obj.customer  # type: ignore[assignment]
-                            db.commit()
-                            logger.info(f"✅ Addon clientes: User {user_id} → +{slots} slots (total: {user.extra_client_slots})")
-                    else:
-                        existing_sub = db.query(Subscription).filter(
-                            Subscription.stripe_checkout_session_id == session_obj.id
-                        ).first()
-                        if existing_sub:
-                            logger.info(f"⚠️ Checkout {session_obj.id} já processado (idempotente) — sub #{existing_sub.id}")
-                        else:
-                            plan = _normalize_plan(raw_plan)
-                            user.plan = plan  # type: ignore[assignment]
-                            if session_obj.customer:
-                                user.stripe_customer_id = session_obj.customer  # type: ignore[assignment]
-
-                            sub = Subscription(
-                                user_id=int(user_id),
-                                stripe_subscription_id=session_obj.subscription,
-                                stripe_checkout_session_id=session_obj.id,
-                                plan=plan,
-                                status="active",
-                                amount=float(PLANS.get(plan, {}).get("price", 0)),
-                                current_period_start=datetime.now(timezone.utc),
-                                current_period_end=datetime.now(timezone.utc) + timedelta(days=30),
-                            )
-                            db.add(sub)
-                            db.commit()
-                            logger.info(f"✅ Plano atualizado: User {user_id} → {plan}")
-
-        elif event_type == "invoice.paid":
-            invoice_obj: Any = event.data.object  # type: ignore[union-attr]
-            stripe_sub_id = getattr(invoice_obj, "subscription", None)
-            if stripe_sub_id:
-                sub = db.query(Subscription).filter(
-                    Subscription.stripe_subscription_id == stripe_sub_id
-                ).first()
-                if sub:
-                    sub.status = "active"  # type: ignore[assignment]
-                    sub.current_period_end = datetime.now(timezone.utc) + timedelta(days=30)  # type: ignore[assignment]
-                    db.commit()
-                    logger.info(f"✅ Renovação paga: subscription {stripe_sub_id}")
-
-            # Tier 2.3.1: persistir InvoicePayment p/ calculo de margem real.
-            # Helper eh idempotente + NUNCA propaga excecao + Sentry capture
-            # em falha (criticidade fiscal — webhook 200 com perda silenciosa
-            # de dado financeiro eh o pior bug imaginavel).
-            try:
-                from app.api._billing_helpers import persist_invoice_payment
-                persist_invoice_payment(
-                    db,
-                    invoice_obj,
-                    raw_event_id=getattr(event, "id", None),
-                )
-            except Exception:
-                pass
-
-        elif event_type == "customer.subscription.updated":
-            sub_data: Any = event.data.object  # type: ignore[union-attr]
-            sub = db.query(Subscription).filter(
-                Subscription.stripe_subscription_id == sub_data.id
-            ).first()
-            if sub:
-                new_status = getattr(sub_data, "status", "active")
-                sub.status = new_status  # type: ignore[assignment]
-                period_end = getattr(sub_data, "current_period_end", None)
-                if period_end:
-                    sub.current_period_end = datetime.fromtimestamp(period_end, tz=timezone.utc)  # type: ignore[assignment]
-                db.commit()
-                logger.info(f"Subscription atualizada: {sub_data.id} → status={new_status}")
-
-        elif event_type == "customer.subscription.deleted":
-            sub_data = event.data.object  # type: ignore[union-attr]
-            sub = db.query(Subscription).filter(
-                Subscription.stripe_subscription_id == sub_data.id
-            ).first()
-            if sub:
-                sub.status = "cancelled"  # type: ignore[assignment]
-                sub.cancelled_at = datetime.now(timezone.utc)  # type: ignore[assignment]
-                user = db.query(User).filter(User.id == sub.user_id).first()
-                if user:
-                    user.plan = "free"  # type: ignore[assignment]
-                db.commit()
-                logger.info(f"Assinatura cancelada: {sub_data.id}")
-
-        elif event_type == "invoice.payment_failed":
-            invoice_obj = event.data.object  # type: ignore[union-attr]
-            stripe_sub_id = getattr(invoice_obj, "subscription", None)
-            customer_id = getattr(invoice_obj, "customer", "unknown")
-            logger.warning(f"⚠️ Pagamento falhou: customer={customer_id}, subscription={stripe_sub_id}")
-            if stripe_sub_id:
-                sub = db.query(Subscription).filter(
-                    Subscription.stripe_subscription_id == stripe_sub_id
-                ).first()
-                if sub:
-                    sub.status = "past_due"  # type: ignore[assignment]
-                    db.commit()
-                    logger.warning(f"Subscription {stripe_sub_id} marcada como past_due")
-
-        return {"status": "processed", "type": event_type}
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Erro webhook: {e}")
-        raise HTTPException(status_code=500, detail="Erro interno")
+        result = dispatch_stripe_event(event, db, source_route="auth_v1")
+        return result
     finally:
         db.close()
 

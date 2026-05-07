@@ -250,116 +250,26 @@ async def stripe_webhook(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Webhook Stripe - processa eventos de pagamento e assinatura."""
+    """Webhook Stripe — route thin que delega pra dispatch_stripe_event.
+
+    Tier 2.3.1.1: logica fundida vive em _stripe_webhook_handler.py.
+    source_route="billing_v1" registrado em WebhookHit pra telemetria —
+    permite descobrir empiricamente qual rota Stripe Dashboard esta usando
+    de fato (auth_v1 vs billing_v1) antes de deprecar a inativa.
+    """
+    from app.api._stripe_webhook_handler import (
+        validate_and_parse_webhook,
+        dispatch_stripe_event,
+    )
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
-    endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-    if not endpoint_secret:
-        raise HTTPException(status_code=503, detail="Webhook secret nao configurado")
     try:
-        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+        event = validate_and_parse_webhook(payload, sig_header)
     except ValueError:
         raise HTTPException(status_code=400, detail="Payload invalido")
-    except stripe.error.SignatureVerificationError:
-        raise HTTPException(status_code=400, detail="Assinatura invalida")
+    except Exception as e:
+        if "signature" in str(type(e)).lower() or "SignatureVerification" in str(type(e)):
+            raise HTTPException(status_code=400, detail="Assinatura invalida")
+        raise
 
-    event_type = event["type"]
-    logger.info(f"Webhook received: {event_type}")
-
-    if event_type == "checkout.session.completed":
-        session_obj = event["data"]["object"]
-        user_id = session_obj.get("metadata", {}).get("user_id")
-        plan = session_obj.get("metadata", {}).get("plan", "")
-        addon_type = session_obj.get("metadata", {}).get("addon_type", "")
-        stripe_sub_id = session_obj.get("subscription")
-        stripe_customer_id = session_obj.get("customer")
-
-        if addon_type == "extra_clients" and user_id:
-            extra_clients = int(session_obj.get("metadata", {}).get("extra_clients", "10"))
-            user = db.query(User).filter(User.id == int(user_id)).first()
-            if user:
-                # extra_client_slots é usado para clientes E fornecedores (limit_service.py:46)
-                user.extra_client_slots = (user.extra_client_slots or 0) + extra_clients
-                user.stripe_customer_id = stripe_customer_id
-                db.commit()
-                logger.info(f"Addon applied: user={user_id}, +{extra_clients} slots (clientes e fornecedores)")
-
-        elif user_id and stripe_sub_id and plan:
-            stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
-            sub = Subscription(
-                user_id=int(user_id),
-                stripe_subscription_id=stripe_sub_id,
-                stripe_checkout_session_id=session_obj.get("id"),
-                plan=plan,
-                status="active",
-                current_period_start=datetime.fromtimestamp(stripe_sub["current_period_start"], tz=timezone.utc),
-                current_period_end=datetime.fromtimestamp(stripe_sub["current_period_end"], tz=timezone.utc),
-                amount=(session_obj.get("amount_total") or 0) / 100,
-                currency=(session_obj.get("currency") or "brl").upper(),
-            )
-            db.add(sub)
-            user = db.query(User).filter(User.id == int(user_id)).first()
-            if user:
-                user.plan = plan
-                user.stripe_customer_id = stripe_customer_id
-                user.plan_activated_at = datetime.utcnow()
-            db.commit()
-            logger.info(f"Subscription created: user={user_id}, plan={plan}")
-
-    elif event_type == "customer.subscription.updated":
-        stripe_sub = event["data"]["object"]
-        sub = (
-            db.query(Subscription)
-            .filter(Subscription.stripe_subscription_id == stripe_sub["id"])
-            .first()
-        )
-        if sub:
-            sub.status = stripe_sub["status"]
-            sub.current_period_end = datetime.fromtimestamp(stripe_sub["current_period_end"], tz=timezone.utc)
-            db.commit()
-
-    elif event_type == "customer.subscription.deleted":
-        stripe_sub = event["data"]["object"]
-        sub = (
-            db.query(Subscription)
-            .filter(Subscription.stripe_subscription_id == stripe_sub["id"])
-            .first()
-        )
-        if sub:
-            sub.status = "cancelled"
-            db.commit()
-            user = db.query(User).filter(User.id == sub.user_id).first()
-            if user:
-                user.plan = "free"
-                db.commit()
-
-    elif event_type == "invoice.payment_failed":
-        stripe_invoice = event["data"]["object"]
-        stripe_sub_id = stripe_invoice.get("subscription")
-        if stripe_sub_id:
-            sub = (
-                db.query(Subscription)
-                .filter(Subscription.stripe_subscription_id == stripe_sub_id)
-                .first()
-            )
-            if sub:
-                sub.status = "past_due"
-                db.commit()
-
-    # Tier 2.3.1: defesa em profundidade — captura invoice.paid TAMBEM aqui
-    # porque ha 2 webhook handlers paralelos (auth.py /webhook/stripe e este).
-    # Idempotente via stripe_invoice_id unique constraint.
-    # TODO 2.3.1.1: investigar e consolidar em um unico handler.
-    elif event_type == "invoice.paid":
-        invoice_obj = event["data"]["object"]
-        try:
-            from app.api._billing_helpers import persist_invoice_payment
-            persist_invoice_payment(
-                db,
-                invoice_obj,
-                raw_event_id=event.get("id") if hasattr(event, "get") else getattr(event, "id", None),
-            )
-        except Exception:
-            pass
-
-    return {"received": True, "type": event_type}
+    return dispatch_stripe_event(event, db, source_route="billing_v1")

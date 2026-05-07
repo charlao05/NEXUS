@@ -325,12 +325,17 @@ class Subscription(Base):
     # Período
     current_period_start = Column(DateTime, nullable=True)
     current_period_end = Column(DateTime, nullable=True)
+    # Tier 2.3.1.1: como period_start/end foram resolvidos.
+    #   "stripe_api"           = stripe.Subscription.retrieve OK (canonico)
+    #   "fallback_30d_estimate" = Stripe API falhou; usamos now+30d
+    #   "unknown"              = legacy / sem rastreio
+    period_source = Column(String(30), default="unknown", nullable=False)
     cancelled_at = Column(DateTime, nullable=True)
-    
+
     # Valores
     amount = Column(Float, default=0.0)
     currency = Column(String(3), default="brl")
-    
+
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
     
@@ -931,6 +936,31 @@ class AutomationUsageRecord(Base):
 # ---------------------------------------------------------------------------
 # LGPD audit trail (Tier 2.4.2 — backfill retroativo de PII)
 # ---------------------------------------------------------------------------
+
+class WebhookHit(Base):
+    """Trilha auditavel de hits em webhook handlers Stripe (Tier 2.3.1.1).
+
+    Permite descobrir empiricamente qual rota Stripe Dashboard esta usando
+    de fato (auth_v1 vs billing_v1) — pre-requisito pra deprecar a inativa
+    com seguranca em Tier 2.3.1.2 futuro.
+
+    INSERT-only. Cleanup retroativo eh decisao operacional (DELETE WHERE
+    created_at < NOW() - INTERVAL '180 days').
+    """
+    __tablename__ = "webhook_hits"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    route = Column(String(30), nullable=False, index=True)  # "auth_v1" | "billing_v1"
+    event_type = Column(String(100), nullable=True, index=True)
+    stripe_event_id = Column(String(200), nullable=True, index=True)  # NAO unique: 2 routes podem receber mesmo event
+    processed = Column(Boolean, default=True, nullable=False)  # False quando idempotency skip
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        # Composite pra query "hits por rota nas ultimas X horas/dias"
+        Index("ix_webhook_hits_route_created", "route", "created_at"),
+    )
+
 
 class InvoicePayment(Base):
     """Pagamento Stripe persistido (Tier 2.3.1).
