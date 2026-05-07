@@ -214,17 +214,29 @@ def count_pii_matches(text: str) -> int:
     """
     if not text or not isinstance(text, str):
         return 0
-    n = 0
-    n += len(_RE_CARD.findall(text))
-    # Validados (so conta se DV bate)
+    detailed = count_pii_matches_detailed(text)
+    return sum(detailed.values())
+
+
+def count_pii_matches_detailed(text: str) -> dict[str, int]:
+    """Retorna breakdown de matches por tipo de PII: cpf, cnpj, email, phone, cep, card.
+
+    Para uso em backfill (Tier 2.4.2): permite reportar 'X CPFs, Y emails, Z phones'
+    no dry_run antes de aplicar mask. So conta CPF/CNPJ que passam validacao DV.
+    """
+    out = {"cpf": 0, "cnpj": 0, "email": 0, "phone": 0, "cep": 0, "card": 0}
+    if not text or not isinstance(text, str):
+        return out
+    out["card"] = len(_RE_CARD.findall(text))
     for m in _RE_CPF.findall(text):
         if _is_valid_cpf(re.sub(r"\D", "", m)):
-            n += 1
+            out["cpf"] += 1
     for m in _RE_CNPJ.findall(text):
         if _is_valid_cnpj(re.sub(r"\D", "", m)):
-            n += 1
-    n += len(_RE_EMAIL.findall(text))
-    n += len(_RE_CEP.findall(text))
-    n += len(_RE_PHONE_FORMATTED.findall(text))
-    n += len(_RE_PHONE_MOBILE_RAW.findall(text))
-    return n
+            out["cnpj"] += 1
+    out["email"] = len(_RE_EMAIL.findall(text))
+    out["cep"] = len(_RE_CEP.findall(text))
+    # Phone: formatado + mobile-raw sao mutuamente exclusivos (um requer separador,
+    # outro requer 11 digitos contiguos). Sem risco de double count.
+    out["phone"] = len(_RE_PHONE_FORMATTED.findall(text)) + len(_RE_PHONE_MOBILE_RAW.findall(text))
+    return out

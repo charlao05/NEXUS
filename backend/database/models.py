@@ -921,6 +921,31 @@ class AutomationUsageRecord(Base):
 
 
 # ---------------------------------------------------------------------------
+# LGPD audit trail (Tier 2.4.2 — backfill retroativo de PII)
+# ---------------------------------------------------------------------------
+
+class PIIBackfillAudit(Base):
+    """Trilha auditavel de execucoes do PII backfill (LGPD).
+
+    Persistente — sobrevive a Sentry retention. Cada chamada do endpoint
+    /api/admin/pii/backfill cria uma linha aqui (dry_run ou nao). Permite
+    reports de compliance: quem rodou, quando, quantas linhas afetadas,
+    breakdown por tipo de PII.
+    """
+    __tablename__ = "pii_backfill_audit"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    started_at = Column(DateTime, default=_utcnow, index=True)
+    finished_at = Column(DateTime, nullable=True)
+    target_table = Column(String(50), default="chat_messages")
+    rows_scanned = Column(Integer, default=0)
+    rows_modified = Column(Integer, default=0)
+    pii_matches_by_type = Column(Text, nullable=True)  # JSON serializado
+    triggered_by_email = Column(String(254), nullable=True)  # RFC 5321 limit
+    dry_run = Column(Boolean, default=True, nullable=False)
+    error = Column(Text, nullable=True)
+
+
+# ---------------------------------------------------------------------------
 # LGPD — Mascaramento PII em ChatMessage.content (Tier 2.4)
 # Event listener SQLAlchemy: aplica mask automaticamente antes de INSERT.
 # Garante que NENHUM caminho de write escapa do mask (centralizado, robusto).

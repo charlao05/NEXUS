@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy import func
 
 from database.models import (  # type: ignore[import]
@@ -999,4 +999,219 @@ async def admin_margin_all(
         raise
     except Exception as e:
         logger.error(f"admin_margin_all erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# PII BACKFILL — Tier 2.4.2 (LGPD remediacao retroativa)
+# Aplica mask em chat_messages antigos onde pii_masked=False/NULL.
+# Default dry_run=true. Real run requer dry_run=false&confirm=true.
+# Nao reversivel (consistente com Tier 2.4: minimizacao > recuperabilidade).
+# ============================================================================
+
+@router.post("/pii/backfill")
+async def admin_pii_backfill(
+    dry_run: bool = Query(default=True, description="Default true. Apenas conta sem alterar."),
+    confirm: bool = Query(default=False, description="Quando dry_run=false, confirm=true e obrigatorio."),
+    batch_size: int = Query(default=500, ge=1, le=2000, description="Linhas por batch (commit incremental)."),
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Aplica PII mask retroativamente em chat_messages.content.
+
+    Escopo: APENAS chat_messages (Tier 2.4.2). Outras tabelas com texto livre
+    (Client.notes, Interaction.content, ActivityLog.details) requerem listener
+    preventivo (Tier 2.4.1) antes de seu proprio backfill.
+
+    Targets: rows com pii_masked=false OR NULL.
+    Idempotente: re-run e no-op (rows ja processadas tem pii_masked=true).
+
+    Modo padrao (dry_run=true):
+      Conta linhas afetadas + breakdown por tipo de PII. Nao altera dados.
+
+    Modo real (dry_run=false&confirm=true):
+      Mascara content em batches de batch_size, commit incremental, marca
+      pii_masked=true. Falha mid-batch = rollback do batch (proximo run resume).
+
+    Returns: stats da operacao + audit_id (referencia para tabela
+    pii_backfill_audit, queryavel via SQL admin).
+    """
+    import json as _json
+    from datetime import datetime, timezone
+    from sqlalchemy import or_
+    from database.models import (
+        SessionLocal,
+        ChatMessage,
+        PIIBackfillAudit,
+    )
+    from utils.pii_masker import mask_pii, count_pii_matches_detailed
+
+    # Gate de seguranca: real run exige duas flags explicitas
+    if not dry_run and not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Real run requer dry_run=false E confirm=true. "
+                "Default eh dry_run=true por seguranca. "
+                "Rode primeiro com dry_run=true pra ver os numeros."
+            ),
+        )
+
+    db = SessionLocal()
+    audit: PIIBackfillAudit | None = None
+    try:
+        # Cria linha de audit ANTES de comecar (assim mesmo se travar, fica registro)
+        audit = PIIBackfillAudit(
+            target_table="chat_messages",
+            triggered_by_email=(admin.get("email") or "")[:254],
+            dry_run=dry_run,
+        )
+        db.add(audit)
+        db.commit()
+        db.refresh(audit)
+
+        rows_scanned = 0
+        rows_modified = 0
+        type_counts = {"cpf": 0, "cnpj": 0, "email": 0, "phone": 0, "cep": 0, "card": 0}
+        oldest_ts: datetime | None = None
+
+        # Filtro target: rows nao processadas (pii_masked=False OU NULL)
+        target_filter = or_(
+            ChatMessage.pii_masked.is_(False),
+            ChatMessage.pii_masked.is_(None),
+        )
+
+        offset = 0
+        while True:
+            q = db.query(ChatMessage).filter(target_filter).order_by(ChatMessage.id)
+            # Em dry_run nada muda no banco, entao precisa usar offset.
+            # Em real run, rows processadas saem do filter (pii_masked=true), offset fica 0.
+            if dry_run:
+                q = q.offset(offset)
+            batch = q.limit(batch_size).all()
+            if not batch:
+                break
+
+            for msg in batch:
+                rows_scanned += 1
+                if oldest_ts is None or (msg.created_at and msg.created_at < oldest_ts):
+                    oldest_ts = msg.created_at
+
+                # Conta PII por tipo (sem mascarar ainda)
+                if msg.content:
+                    detailed = count_pii_matches_detailed(msg.content)
+                    for k, v in detailed.items():
+                        type_counts[k] = type_counts.get(k, 0) + v
+
+                if not dry_run:
+                    # Aplica mask. Mesmo se nao houver PII detectado, marcamos
+                    # pii_masked=true pra excluir do filter no proximo run (idempotente).
+                    if msg.content:
+                        masked = mask_pii(msg.content)
+                        if masked != msg.content:
+                            msg.content = masked
+                            rows_modified += 1
+                    msg.pii_masked = True
+
+            if not dry_run:
+                # Commit incremental: rollback de UM batch nao perde os anteriores.
+                db.commit()
+            else:
+                # Em dry_run, avanca offset (filter nao excluiu nada).
+                offset += batch_size
+
+        # Atualiza audit com stats finais
+        audit.rows_scanned = rows_scanned
+        audit.rows_modified = rows_modified
+        audit.pii_matches_by_type = _json.dumps(type_counts)
+        audit.finished_at = datetime.now(timezone.utc)
+        db.commit()
+
+        return {
+            "dry_run_resolved": dry_run,
+            "audit_id": audit.id,
+            "target_table": "chat_messages",
+            "triggered_by": admin.get("email"),
+            "rows_scanned": rows_scanned,
+            "rows_modified": rows_modified if not dry_run else None,
+            "would_affect_total": rows_scanned if dry_run else None,
+            "by_pii_type": type_counts,
+            "oldest_record_ts": oldest_ts.isoformat() if oldest_ts else None,
+            "batch_size": batch_size,
+            "message": (
+                f"DRY RUN: {rows_scanned} rows seriam processadas. "
+                f"Para aplicar, rode com dry_run=false&confirm=true."
+            ) if dry_run else (
+                f"REAL RUN concluido: {rows_scanned} scanned, {rows_modified} modificadas."
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"admin_pii_backfill erro: {e}", exc_info=True)
+        # Marca o audit com erro pra forensica
+        if audit is not None:
+            try:
+                audit.error = str(e)[:1000]
+                from datetime import datetime, timezone
+                audit.finished_at = datetime.now(timezone.utc)
+                db.commit()
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+@router.get("/pii/backfill/history")
+async def admin_pii_backfill_history(
+    limit: int = Query(default=50, ge=1, le=500),
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Lista historico de execucoes de backfill (mais recentes primeiro).
+
+    Util para audit retrospectivo: quem rodou, quando, quantas linhas
+    afetadas, breakdown por tipo. Read-only.
+    """
+    try:
+        import json as _json
+        from database.models import SessionLocal, PIIBackfillAudit
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(PIIBackfillAudit)
+                .order_by(PIIBackfillAudit.started_at.desc())
+                .limit(limit)
+                .all()
+            )
+
+            def _parse_types(raw: str | None) -> dict[str, int] | None:
+                if not raw:
+                    return None
+                try:
+                    return _json.loads(raw)
+                except Exception:
+                    return None
+
+            return {
+                "shown": len(rows),
+                "items": [
+                    {
+                        "id": r.id,
+                        "started_at": r.started_at.isoformat() if r.started_at else None,
+                        "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+                        "target_table": r.target_table,
+                        "triggered_by_email": r.triggered_by_email,
+                        "dry_run": bool(r.dry_run),
+                        "rows_scanned": r.rows_scanned,
+                        "rows_modified": r.rows_modified,
+                        "by_pii_type": _parse_types(r.pii_matches_by_type),
+                        "error": r.error,
+                    }
+                    for r in rows
+                ],
+            }
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"admin_pii_backfill_history erro: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
