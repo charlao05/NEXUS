@@ -392,6 +392,63 @@ def _handle_subscription_deleted(event: Any, db: Any) -> dict[str, Any]:
     return {"status": "ok", "action": "subscription_cancelled", "stripe_sub_id": sub_id}
 
 
+def _handle_charge_refunded(event: Any, db: Any) -> dict[str, Any]:
+    """charge.refunded: aplica refund cumulative em InvoicePayment (Tier 2.3.3).
+
+    Sentry alert level=warning com fingerprint per-tenant (issue por user_id —
+    permite detectar padrao 'user X com N refunds em periodo' sem ruido global).
+    """
+    from app.api._billing_helpers import apply_charge_refunded
+    from database.models import InvoicePayment
+
+    charge_obj = event.data.object if hasattr(event, "data") else event["data"]["object"]
+    event_id = _get_attr(event, "id")
+
+    action, payment_id, refunded_brl = apply_charge_refunded(
+        db, charge_obj, raw_event_id=event_id
+    )
+
+    # Sentry alert apenas em refund efetivamente aplicado
+    if action == "updated" and payment_id is not None:
+        try:
+            payment = db.query(InvoicePayment).filter(InvoicePayment.id == payment_id).first()
+            if payment is not None:
+                amount_paid_brl = (payment.amount_cents or 0) / 100.0
+                refund_type = "full" if payment.status == "refunded" else "partial"
+                user_id = payment.user_id or 0
+                try:
+                    import sentry_sdk
+                    with sentry_sdk.new_scope() as scope:
+                        # Per-tenant fingerprint: 1 issue por user, agrupa events do mesmo
+                        scope.fingerprint = ["stripe-refund", str(user_id)]
+                        scope.set_tag("refund", "true")
+                        scope.set_tag("refund_type", refund_type)
+                        scope.set_tag("user_id", str(user_id))
+                        scope.set_extra("invoice_id", payment.stripe_invoice_id)
+                        scope.set_extra("amount_refunded_brl", round(refunded_brl or 0.0, 2))
+                        scope.set_extra("amount_paid_brl", round(amount_paid_brl, 2))
+                        scope.set_extra("refund_count", payment.refund_count)
+                        scope.set_extra("currency", payment.currency)
+                        scope.set_user({"id": str(user_id)})
+                        sentry_sdk.capture_message(
+                            f"Refund processado ({refund_type}): "
+                            f"R${refunded_brl:.2f} de R${amount_paid_brl:.2f} "
+                            f"(invoice {payment.stripe_invoice_id})",
+                            level="warning",
+                        )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    return {
+        "status": "ok" if action == "updated" else "skipped",
+        "action": action,
+        "invoice_payment_id": payment_id,
+        "refunded_brl": refunded_brl,
+    }
+
+
 def _handle_invoice_payment_failed(event: Any, db: Any) -> dict[str, Any]:
     from database.models import Subscription
 
@@ -418,9 +475,10 @@ def _handle_invoice_payment_failed(event: Any, db: Any) -> dict[str, Any]:
 _HANDLERS: dict[str, Any] = {
     "checkout.session.completed": _handle_checkout_session_completed,
     "invoice.paid": _handle_invoice_paid,
+    "invoice.payment_failed": _handle_invoice_payment_failed,
+    "charge.refunded": _handle_charge_refunded,  # Tier 2.3.3
     "customer.subscription.updated": _handle_subscription_updated,
     "customer.subscription.deleted": _handle_subscription_deleted,
-    "invoice.payment_failed": _handle_invoice_payment_failed,
 }
 
 

@@ -167,6 +167,123 @@ def persist_invoice_payment(
         return False, None
 
 
+def apply_charge_refunded(
+    db,
+    charge_obj: Any,
+    *,
+    raw_event_id: Optional[str] = None,
+    capture_sentry_on_error: bool = True,
+) -> tuple[str, Optional[int], Optional[float]]:
+    """Aplica refund cumulative em InvoicePayment a partir de charge.refunded event.
+
+    Stripe envia amount_refunded cumulativo (nao delta). Re-receber mesmo valor
+    = idempotent no-op. Charge sem invoice (PaymentIntent direto sem subscription)
+    = skip gracefully.
+
+    Status transition baseado em cumulative:
+      refund_amount == 0       -> "paid" (nunca acontece aqui mas defensivo)
+      0 < refund < amount      -> "partial_refunded"
+      refund >= amount         -> "refunded"
+
+    Returns:
+        (action, payment_id, refunded_brl):
+            action: "skipped_no_invoice" | "skipped_invoice_not_found"
+                  | "skipped_idempotent" | "updated"
+            payment_id: id da InvoicePayment se atualizada (None caso contrario)
+            refunded_brl: total cumulativo BRL apos update (None se skipped)
+
+    NUNCA propaga excecao. Sentry capture em falha por criticidade fiscal.
+    """
+    try:
+        from database.models import InvoicePayment, INVOICE_PAYMENT_STATUSES
+        from datetime import datetime, timezone
+
+        invoice_id = _get_str_attr(charge_obj, "invoice")
+        if not invoice_id:
+            logger.info(
+                f"charge.refunded sem invoice (PaymentIntent direto): "
+                f"charge_id={getattr(charge_obj, 'id', '?')} — skip"
+            )
+            return "skipped_no_invoice", None, None
+
+        payment = db.query(InvoicePayment).filter(
+            InvoicePayment.stripe_invoice_id == invoice_id
+        ).first()
+        if not payment:
+            logger.warning(
+                f"charge.refunded apontando pra invoice nao registrada: {invoice_id} — "
+                f"InvoicePayment ausente. Use /admin/billing/resync-invoices."
+            )
+            return "skipped_invoice_not_found", None, None
+
+        # Cumulative idempotency check ANTES de tocar o DB
+        new_cumulative = int(getattr(charge_obj, "amount_refunded", 0) or 0)
+        if payment.refund_amount_cents == new_cumulative and new_cumulative > 0:
+            logger.debug(
+                f"charge.refunded idempotente (cumulative inalterado): "
+                f"invoice={invoice_id} refund={new_cumulative}c"
+            )
+            return "skipped_idempotent", payment.id, None
+
+        # Transicao de status pelo cumulative
+        if new_cumulative == 0:
+            new_status = "paid"
+        elif new_cumulative >= payment.amount_cents:
+            new_status = "refunded"
+        else:
+            new_status = "partial_refunded"
+
+        # Defesa em codigo: assert status no enum permitido (constante validada)
+        if new_status not in INVOICE_PAYMENT_STATUSES:
+            logger.error(f"status invalido derivado: {new_status!r} — abortando")
+            return "skipped_invoice_not_found", None, None
+
+        payment.refund_amount_cents = new_cumulative
+        payment.refund_count = (payment.refund_count or 0) + 1
+        payment.refunded_at = datetime.now(timezone.utc)
+        payment.status = new_status
+        db.commit()
+        db.refresh(payment)
+
+        refunded_brl = cents_to_brl(new_cumulative, payment.currency or "brl")
+        logger.info(
+            f"InvoicePayment refund aplicado: invoice={invoice_id} "
+            f"refund={new_cumulative}c status={new_status} count={payment.refund_count}"
+        )
+        return "updated", payment.id, refunded_brl
+
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.warning(
+            f"apply_charge_refunded FALHOU pra charge="
+            f"{getattr(charge_obj, 'id', '?')}: {e}",
+            exc_info=True,
+        )
+        if capture_sentry_on_error:
+            try:
+                import sentry_sdk
+                sentry_sdk.capture_exception(e)
+            except Exception:
+                pass
+        return "skipped_invoice_not_found", None, None
+
+
+def _get_str_attr(obj: Any, key: str) -> Optional[str]:
+    """Extrai atributo como string. Stripe campos podem vir como obj expandido."""
+    val = getattr(obj, key, None)
+    if val is None and isinstance(obj, dict):
+        val = obj.get(key)
+    if val is None:
+        return None
+    if isinstance(val, str):
+        return val
+    # Objeto expandido — pega .id
+    return getattr(val, "id", None) or (val.get("id") if isinstance(val, dict) else None)
+
+
 def cents_to_brl(amount_cents: int, currency: str, usd_brl_rate: float = 5.20) -> float:
     """Converte amount_cents pra valor BRL.
 

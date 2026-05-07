@@ -729,8 +729,17 @@ def _period_bounds_current_month():
     return start, now
 
 
-def _resolve_margin_status(margin_pct: float | None) -> str:
-    """healthy >= 70%, warning 0-70%, loss < 0%, n/a se margin_pct=null."""
+def _resolve_margin_status(margin_pct: float | None, *, refund_dominant: bool = False) -> str:
+    """Status semantico da margem.
+
+    refund_dominant: True quando effective_brl <= 0 por causa de refund que
+    excedeu pagamentos do periodo (ex: refund chegou em mes posterior).
+    Distingue 'residuo contabil de refund' de 'loss real do produto'.
+
+    Faixa: healthy >= 70%, warning 0-70%, loss < 0%, n/a se margin_pct=null.
+    """
+    if refund_dominant:
+        return "refund_dominant"
     if margin_pct is None:
         return "n/a"
     if margin_pct < 0:
@@ -778,40 +787,74 @@ def _resolve_user_revenue(db, user_id: int) -> tuple[float, str]:
 
 def _resolve_invoice_paid_in_period(
     db, user_id: int, start, end, usd_brl_rate: float,
-) -> tuple[float | None, int, str | None]:
+) -> dict[str, Any]:
     """Soma InvoicePayment de user_id no periodo [start, end] em BRL.
 
-    Returns:
-        (paid_brl, count, last_paid_at_iso):
-            paid_brl: total BRL pago no periodo (None se nenhum invoice).
-            count: quantos invoices contribuiram.
-            last_paid_at_iso: timestamp ISO do invoice mais recente.
+    Tier 2.3.3: agora retorna dict com refund tracking incluido. Refund eh
+    contabilizado se refunded_at >= start (mesmo periodo), permitindo
+    capturar refund que aconteceu DEPOIS do paid_at mas antes do fim.
 
-    Nao mexe em status='refunded' (Tier 2.3.3 separado).
+    Returns dict:
+        paid_brl: total BRL pago bruto (status in {paid, partial_refunded, refunded})
+        refunded_brl: total BRL refundado no periodo
+        count: total de invoices contadas
+        refunded_count: invoices com status partial_refunded ou refunded
+        last_paid_at: ISO timestamp do invoice mais recente
+        last_refund_at: ISO timestamp do ultimo refund no periodo
     """
     from database.models import InvoicePayment
     from app.api._billing_helpers import cents_to_brl
+    # Inclui qualquer status (paid, partial_refunded, refunded, uncollectible) —
+    # refund nao remove a row, so atualiza fields. Se quiser excluir uncollectible
+    # do calculo, filtramos abaixo.
     rows = (
         db.query(InvoicePayment)
         .filter(
             InvoicePayment.user_id == user_id,
-            InvoicePayment.status == "paid",
             InvoicePayment.paid_at >= start,
             InvoicePayment.paid_at <= end,
+            InvoicePayment.status.in_(["paid", "partial_refunded", "refunded"]),
         )
         .order_by(InvoicePayment.paid_at.desc())
         .all()
     )
     if not rows:
-        return None, 0, None
-    total_brl = 0.0
+        return {
+            "paid_brl": None,
+            "refunded_brl": 0.0,
+            "count": 0,
+            "refunded_count": 0,
+            "last_paid_at": None,
+            "last_refund_at": None,
+        }
+    total_paid = 0.0
+    total_refunded = 0.0
+    refunded_count = 0
+    last_refund_dt = None
     for r in rows:
-        total_brl += cents_to_brl(r.amount_cents, r.currency or "brl", usd_brl_rate)
+        total_paid += cents_to_brl(r.amount_cents, r.currency or "brl", usd_brl_rate)
+        if (r.refund_amount_cents or 0) > 0:
+            refunded_count += 1
+            total_refunded += cents_to_brl(r.refund_amount_cents, r.currency or "brl", usd_brl_rate)
+            if r.refunded_at and (last_refund_dt is None or r.refunded_at > last_refund_dt):
+                last_refund_dt = r.refunded_at
+
     last_paid_at = rows[0].paid_at
     if last_paid_at and last_paid_at.tzinfo is None:
         from datetime import timezone as _tz
         last_paid_at = last_paid_at.replace(tzinfo=_tz.utc)
-    return round(total_brl, 2), len(rows), (last_paid_at.isoformat() if last_paid_at else None)
+    if last_refund_dt and last_refund_dt.tzinfo is None:
+        from datetime import timezone as _tz
+        last_refund_dt = last_refund_dt.replace(tzinfo=_tz.utc)
+
+    return {
+        "paid_brl": round(total_paid, 2),
+        "refunded_brl": round(total_refunded, 2),
+        "count": len(rows),
+        "refunded_count": refunded_count,
+        "last_paid_at": last_paid_at.isoformat() if last_paid_at else None,
+        "last_refund_at": last_refund_dt.isoformat() if last_refund_dt else None,
+    }
 
 
 @router.get("/margin")
@@ -866,23 +909,39 @@ async def admin_margin(
             llm_brl = float(llm_usd) * usd_brl
             automation_cost_brl = 0.0  # TODO 2.3.2
 
-            # Tier 2.3.1: invoice paid real no periodo (sobre-escreve MRR teorico
-            # se disponivel). revenue_source identifica qual estrela do norte
-            # foi usada — evita media enganosa em dashboards mistos.
-            invoice_paid_brl, invoice_count, last_paid_iso = _resolve_invoice_paid_in_period(
-                db, user_id, start, end, usd_brl
-            )
+            # Tier 2.3.1 + 2.3.3: invoice paid real (com refund tracking)
+            inv = _resolve_invoice_paid_in_period(db, user_id, start, end, usd_brl)
+            invoice_paid_brl = inv["paid_brl"]
+            refunded_brl = inv["refunded_brl"]
+            invoice_count = inv["count"]
+            refunded_count = inv["refunded_count"]
+            last_paid_iso = inv["last_paid_at"]
+            last_refund_iso = inv["last_refund_at"]
+
             if invoice_paid_brl is not None:
-                effective_revenue_brl = invoice_paid_brl
-                revenue_source = "stripe_real"
+                effective_revenue_brl = (invoice_paid_brl or 0.0) - (refunded_brl or 0.0)
+                if refunded_brl > 0:
+                    revenue_source = "stripe_real_with_refunds"
+                else:
+                    revenue_source = "stripe_real"
             else:
                 effective_revenue_brl = mrr_brl
                 revenue_source = "mrr_theoretical"
 
             costs_total = llm_brl + automation_cost_brl
             margin_brl = effective_revenue_brl - costs_total
-            margin_pct = _safe_margin_pct(effective_revenue_brl, costs_total)
-            status = _resolve_margin_status(margin_pct)
+
+            # Edge case: effective negativo por dominancia de refund
+            refund_dominant = (
+                refunded_brl > 0
+                and effective_revenue_brl <= 0
+                and revenue_source.startswith("stripe_real")
+            )
+            if refund_dominant:
+                margin_pct = None  # explicitamente n/a — divisao por <=0 distorce
+            else:
+                margin_pct = _safe_margin_pct(effective_revenue_brl, costs_total)
+            status = _resolve_margin_status(margin_pct, refund_dominant=refund_dominant)
 
             return {
                 "disclaimer": "Aproximacao gerencial. Nao usar para contabilidade fiscal.",
@@ -899,8 +958,11 @@ async def admin_margin(
                 "revenue": {
                     "mrr_brl": round(mrr_brl, 2),
                     "stripe_invoice_paid_brl": invoice_paid_brl,
+                    "stripe_refunded_brl": round(refunded_brl, 2),
                     "invoice_count": invoice_count,
+                    "refunded_invoice_count": refunded_count,
                     "last_invoice_paid_at": last_paid_iso,
+                    "last_refund_at": last_refund_iso,
                     "revenue_source": revenue_source,
                     "effective_brl": round(effective_revenue_brl, 2),
                 },
@@ -949,7 +1011,7 @@ async def admin_margin_all(
     if period != "current_month":
         raise HTTPException(status_code=400, detail="period suportado: current_month")
 
-    valid_status = {"healthy", "warning", "loss", "n/a"}
+    valid_status = {"healthy", "warning", "loss", "n/a", "refund_dominant"}
     if status_filter is not None and status_filter not in valid_status:
         raise HTTPException(
             status_code=400,
@@ -996,24 +1058,39 @@ async def admin_margin_all(
                 mrr_brl, sub_status = _resolve_user_revenue(db, uid) if uid > 0 else (0.0, "anonymous")
                 llm_brl = float(llm_usd) * usd_brl
 
-                # Tier 2.3.1: invoice paid real (sobre-escreve MRR teorico)
+                # Tier 2.3.1 + 2.3.3: invoice paid real (com refund tracking)
                 if uid > 0:
-                    invoice_paid_brl, invoice_count, _last_paid = _resolve_invoice_paid_in_period(
-                        db, uid, start, end, usd_brl
-                    )
+                    inv = _resolve_invoice_paid_in_period(db, uid, start, end, usd_brl)
                 else:
-                    invoice_paid_brl, invoice_count = None, 0
+                    inv = {"paid_brl": None, "refunded_brl": 0.0, "count": 0,
+                           "refunded_count": 0, "last_paid_at": None, "last_refund_at": None}
+                invoice_paid_brl = inv["paid_brl"]
+                refunded_brl = inv["refunded_brl"]
+                invoice_count = inv["count"]
+                refunded_count = inv["refunded_count"]
+
                 if invoice_paid_brl is not None:
-                    effective_revenue_brl = invoice_paid_brl
-                    revenue_source = "stripe_real"
+                    effective_revenue_brl = (invoice_paid_brl or 0.0) - (refunded_brl or 0.0)
+                    if refunded_brl > 0:
+                        revenue_source = "stripe_real_with_refunds"
+                    else:
+                        revenue_source = "stripe_real"
                 else:
                     effective_revenue_brl = mrr_brl
                     revenue_source = "mrr_theoretical"
 
                 costs_total = llm_brl  # automation cost = 0 nesta versao
                 margin_brl = effective_revenue_brl - costs_total
-                margin_pct = _safe_margin_pct(effective_revenue_brl, costs_total)
-                status = _resolve_margin_status(margin_pct)
+                refund_dominant = (
+                    refunded_brl > 0
+                    and effective_revenue_brl <= 0
+                    and revenue_source.startswith("stripe_real")
+                )
+                if refund_dominant:
+                    margin_pct = None
+                else:
+                    margin_pct = _safe_margin_pct(effective_revenue_brl, costs_total)
+                status = _resolve_margin_status(margin_pct, refund_dominant=refund_dominant)
 
                 if status_filter and status != status_filter:
                     continue
@@ -1025,7 +1102,9 @@ async def admin_margin_all(
                     "subscription_status": sub_status,
                     "mrr_brl": round(mrr_brl, 2),
                     "stripe_invoice_paid_brl": invoice_paid_brl,
+                    "stripe_refunded_brl": round(refunded_brl, 2),
                     "invoice_count": invoice_count,
+                    "refunded_invoice_count": refunded_count,
                     "revenue_source": revenue_source,
                     "effective_revenue_brl": round(effective_revenue_brl, 2),
                     "llm_brl": round(llm_brl, 4),
@@ -2016,3 +2095,189 @@ async def admin_billing_webhook_stats(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
+
+
+# ============================================================================
+# RESYNC REFUNDS — Tier 2.3.3 (cobre buraco historico de refunds antes do deploy)
+# Usa stripe.Refund.list() (API canonica) + retrieve do charge pra resolver invoice.
+# Idempotente via cumulative comparison em apply_charge_refunded.
+# ============================================================================
+
+@router.post("/billing/resync-refunds")
+async def admin_billing_resync_refunds(
+    since_days: int = Query(default=180, ge=1, le=365, description="Janela de busca (default 180d)."),
+    dry_run: bool = Query(default=True, description="Default true. So conta, nao aplica."),
+    confirm: bool = Query(default=False, description="Quando dry_run=false, confirm=true e obrigatorio."),
+    cap: int = Query(default=1000, ge=1, le=2000, description="Max refunds processados por chamada."),
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Resync de refunds via stripe.Refund.list (Tier 2.3.3).
+
+    Cobre buraco historico: refunds processados ANTES do deploy do handler
+    charge.refunded. Itera Stripe Refund.list, resolve charge -> invoice,
+    e atualiza InvoicePayment via apply_charge_refunded (idempotente).
+
+    Charge sem invoice (PaymentIntent direto): skip_no_invoice — registrado
+    no reporting mas nao eh erro.
+
+    Returns: scanned, updated, skipped_no_invoice, skipped_invoice_not_found,
+    skipped_idempotent, errors, by_status (breakdown final), total_refunded_brl.
+    """
+    if not dry_run and not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Real run requer dry_run=false E confirm=true.",
+        )
+
+    try:
+        import stripe
+        from datetime import datetime, timedelta, timezone
+        from database.models import SessionLocal, InvoicePayment
+        from app.api._billing_helpers import apply_charge_refunded, cents_to_brl
+
+        if not stripe.api_key:
+            stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+        if not stripe.api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="STRIPE_SECRET_KEY nao configurada — resync indisponivel",
+            )
+
+        cutoff_ts = int(
+            (datetime.now(timezone.utc) - timedelta(days=since_days)).timestamp()
+        )
+
+        # Coleta Refunds via API
+        refunds_collected: list[Any] = []
+        try:
+            for refund in stripe.Refund.list(
+                created={"gte": cutoff_ts},
+                limit=100,
+            ).auto_paging_iter():
+                refunds_collected.append(refund)
+                if len(refunds_collected) >= cap:
+                    break
+        except stripe.error.StripeError as e:  # type: ignore[attr-defined]
+            logger.error(f"Stripe Refund.list erro: {e}", exc_info=True)
+            raise HTTPException(status_code=502, detail=f"Stripe API erro: {e}")
+
+        scanned = len(refunds_collected)
+        updated = 0
+        skipped_no_invoice = 0
+        skipped_invoice_not_found = 0
+        skipped_idempotent = 0
+        errors = 0
+        total_refunded_cents = 0
+        usd_brl = float(os.getenv("USD_BRL_RATE", "5.20") or "5.20")
+
+        if not dry_run:
+            db = SessionLocal()
+            try:
+                for refund in refunds_collected:
+                    charge_id = refund.charge if hasattr(refund, "charge") else refund.get("charge")
+                    if not charge_id:
+                        skipped_no_invoice += 1
+                        continue
+                    try:
+                        # Retrieve charge pra resolver invoice_id
+                        charge = stripe.Charge.retrieve(charge_id)
+                    except Exception as e:
+                        logger.warning(f"stripe.Charge.retrieve falhou pra {charge_id}: {e}")
+                        errors += 1
+                        continue
+                    action, _pid, _refunded_brl = apply_charge_refunded(
+                        db, charge,
+                        raw_event_id=None,  # resync sem event_id (nao veio de webhook)
+                        capture_sentry_on_error=False,  # nao Sentry-spam em batch
+                    )
+                    if action == "updated":
+                        updated += 1
+                        total_refunded_cents += int(charge.amount_refunded or 0)
+                    elif action == "skipped_no_invoice":
+                        skipped_no_invoice += 1
+                    elif action == "skipped_invoice_not_found":
+                        skipped_invoice_not_found += 1
+                    elif action == "skipped_idempotent":
+                        skipped_idempotent += 1
+            finally:
+                db.close()
+        else:
+            # Dry-run: so calcula stats sem aplicar
+            from sqlalchemy import or_
+            db = SessionLocal()
+            try:
+                # Conta quantos charges teriam invoice resolvivel
+                for refund in refunds_collected:
+                    charge_id = refund.charge if hasattr(refund, "charge") else refund.get("charge")
+                    if not charge_id:
+                        skipped_no_invoice += 1
+                        continue
+                    try:
+                        charge = stripe.Charge.retrieve(charge_id)
+                        invoice_id = charge.invoice
+                    except Exception:
+                        errors += 1
+                        continue
+                    if not invoice_id:
+                        skipped_no_invoice += 1
+                        continue
+                    payment = db.query(InvoicePayment).filter(
+                        InvoicePayment.stripe_invoice_id == invoice_id
+                    ).first()
+                    if not payment:
+                        skipped_invoice_not_found += 1
+                        continue
+                    new_cumulative = int(getattr(charge, "amount_refunded", 0) or 0)
+                    if payment.refund_amount_cents == new_cumulative:
+                        skipped_idempotent += 1
+                    else:
+                        updated += 1  # would-update
+                        total_refunded_cents += new_cumulative
+            finally:
+                db.close()
+
+        # Breakdown final por status (snapshot atual)
+        by_status: dict[str, int] = {}
+        try:
+            from sqlalchemy import func
+            db2 = SessionLocal()
+            try:
+                rows = db2.query(
+                    InvoicePayment.status, func.count(InvoicePayment.id)
+                ).group_by(InvoicePayment.status).all()
+                by_status = {str(s or "unknown"): int(c) for s, c in rows}
+            finally:
+                db2.close()
+        except Exception:
+            pass
+
+        total_refunded_brl = round(cents_to_brl(total_refunded_cents, "brl", usd_brl), 2)
+
+        return {
+            "dry_run_resolved": dry_run,
+            "since_days": since_days,
+            "cap": cap,
+            "stripe_filter": {"created_gte_ts": cutoff_ts},
+            "scanned": scanned,
+            "updated" if not dry_run else "would_update": updated,
+            "skipped_no_invoice": skipped_no_invoice,
+            "skipped_invoice_not_found": skipped_invoice_not_found,
+            "skipped_idempotent": skipped_idempotent,
+            "errors": errors,
+            "total_refunded_cents": total_refunded_cents,
+            "total_refunded_brl": total_refunded_brl,
+            "by_status": by_status,
+            "truncated_at_cap": scanned >= cap,
+            "message": (
+                f"DRY RUN: {scanned} refunds escaneados, {updated} aplicaveis. "
+                f"Aplicar: dry_run=false&confirm=true."
+            ) if dry_run else (
+                f"REAL RUN: {scanned} scanned, {updated} updated, "
+                f"R${total_refunded_brl} refunded total."
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"admin_billing_resync_refunds erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

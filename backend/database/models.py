@@ -962,15 +962,29 @@ class WebhookHit(Base):
     )
 
 
-class InvoicePayment(Base):
-    """Pagamento Stripe persistido (Tier 2.3.1).
+# Tier 2.3.3: enum de status de InvoicePayment validado em codigo.
+# DB usa String(20) sem CHECK (compatibilidade SQLite + auto-migrate),
+# validacao acontece em persist_invoice_payment + handler de refund.
+INVOICE_PAYMENT_STATUSES = frozenset({"paid", "refunded", "partial_refunded", "uncollectible"})
 
-    Fonte: webhook handler invoice.paid (em auth.py + billing.py defesa-em-profundidade).
-    Schema otimizado pra queries de margem por periodo. Idempotencia via unique
-    stripe_invoice_id; query-first em codigo (defesa em profundidade).
+
+class InvoicePayment(Base):
+    """Pagamento Stripe persistido (Tier 2.3.1 + refund tracking 2.3.3).
+
+    Fonte: webhook handlers invoice.paid + charge.refunded (dispatch unificado
+    em _stripe_webhook_handler.py). Schema otimizado pra queries de margem
+    por periodo. Idempotencia via unique stripe_invoice_id (write) + cumulative
+    comparison (refund updates).
 
     NUNCA usar Float pra dinheiro — amount_cents (int) eh fonte canonica.
     BRL: amount_cents/100. USD: amount_cents/100 * USD_BRL_RATE em runtime.
+
+    Refund tracking (Tier 2.3.3):
+      - refund_amount_cents: cumulativo (ultimo amount_refunded enviado pelo Stripe)
+      - refund_count: numero de eventos charge.refunded processados
+        (distingue 1xR$80 vs 2xR$40 sem persistir timeline completo)
+      - refunded_at: timestamp do ULTIMO refund (nao do primeiro)
+      - status transita: paid -> partial_refunded -> refunded conforme cumulative
     """
     __tablename__ = "invoice_payments"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -980,11 +994,15 @@ class InvoicePayment(Base):
     stripe_subscription_id = Column(String(100), nullable=True, index=True)
     amount_cents = Column(Integer, nullable=False)        # centavos pra evitar erro float
     currency = Column(String(3), default="brl", nullable=False)  # brl | usd | etc
-    status = Column(String(20), default="paid", nullable=False)  # paid | refunded | uncollectible
+    status = Column(String(20), default="paid", nullable=False, index=True)  # ver INVOICE_PAYMENT_STATUSES
     paid_at = Column(DateTime, nullable=False, index=True)  # timestamp Stripe (status_transitions.paid_at)
     period_start = Column(DateTime, nullable=True)          # invoice.period_start
     period_end = Column(DateTime, nullable=True)            # invoice.period_end
     raw_event_id = Column(String(200), nullable=True, index=True)  # link p/ StripeEvent.stripe_event_id
+    # Refund tracking (Tier 2.3.3)
+    refund_amount_cents = Column(Integer, default=0, nullable=False)
+    refund_count = Column(Integer, default=0, nullable=False)
+    refunded_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
 
     __table_args__ = (
