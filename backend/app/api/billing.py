@@ -346,4 +346,20 @@ async def stripe_webhook(
                 sub.status = "past_due"
                 db.commit()
 
+    # Tier 2.3.1: defesa em profundidade — captura invoice.paid TAMBEM aqui
+    # porque ha 2 webhook handlers paralelos (auth.py /webhook/stripe e este).
+    # Idempotente via stripe_invoice_id unique constraint.
+    # TODO 2.3.1.1: investigar e consolidar em um unico handler.
+    elif event_type == "invoice.paid":
+        invoice_obj = event["data"]["object"]
+        try:
+            from app.api._billing_helpers import persist_invoice_payment
+            persist_invoice_payment(
+                db,
+                invoice_obj,
+                raw_event_id=event.get("id") if hasattr(event, "get") else getattr(event, "id", None),
+            )
+        except Exception:
+            pass
+
     return {"received": True, "type": event_type}

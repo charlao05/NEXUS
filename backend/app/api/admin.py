@@ -776,6 +776,44 @@ def _resolve_user_revenue(db, user_id: int) -> tuple[float, str]:
     return float(sub.amount or 0.0), sub_status
 
 
+def _resolve_invoice_paid_in_period(
+    db, user_id: int, start, end, usd_brl_rate: float,
+) -> tuple[float | None, int, str | None]:
+    """Soma InvoicePayment de user_id no periodo [start, end] em BRL.
+
+    Returns:
+        (paid_brl, count, last_paid_at_iso):
+            paid_brl: total BRL pago no periodo (None se nenhum invoice).
+            count: quantos invoices contribuiram.
+            last_paid_at_iso: timestamp ISO do invoice mais recente.
+
+    Nao mexe em status='refunded' (Tier 2.3.3 separado).
+    """
+    from database.models import InvoicePayment
+    from app.api._billing_helpers import cents_to_brl
+    rows = (
+        db.query(InvoicePayment)
+        .filter(
+            InvoicePayment.user_id == user_id,
+            InvoicePayment.status == "paid",
+            InvoicePayment.paid_at >= start,
+            InvoicePayment.paid_at <= end,
+        )
+        .order_by(InvoicePayment.paid_at.desc())
+        .all()
+    )
+    if not rows:
+        return None, 0, None
+    total_brl = 0.0
+    for r in rows:
+        total_brl += cents_to_brl(r.amount_cents, r.currency or "brl", usd_brl_rate)
+    last_paid_at = rows[0].paid_at
+    if last_paid_at and last_paid_at.tzinfo is None:
+        from datetime import timezone as _tz
+        last_paid_at = last_paid_at.replace(tzinfo=_tz.utc)
+    return round(total_brl, 2), len(rows), (last_paid_at.isoformat() if last_paid_at else None)
+
+
 @router.get("/margin")
 async def admin_margin(
     user_id: int,
@@ -828,9 +866,22 @@ async def admin_margin(
             llm_brl = float(llm_usd) * usd_brl
             automation_cost_brl = 0.0  # TODO 2.3.2
 
+            # Tier 2.3.1: invoice paid real no periodo (sobre-escreve MRR teorico
+            # se disponivel). revenue_source identifica qual estrela do norte
+            # foi usada — evita media enganosa em dashboards mistos.
+            invoice_paid_brl, invoice_count, last_paid_iso = _resolve_invoice_paid_in_period(
+                db, user_id, start, end, usd_brl
+            )
+            if invoice_paid_brl is not None:
+                effective_revenue_brl = invoice_paid_brl
+                revenue_source = "stripe_real"
+            else:
+                effective_revenue_brl = mrr_brl
+                revenue_source = "mrr_theoretical"
+
             costs_total = llm_brl + automation_cost_brl
-            margin_brl = mrr_brl - costs_total
-            margin_pct = _safe_margin_pct(mrr_brl, costs_total)
+            margin_brl = effective_revenue_brl - costs_total
+            margin_pct = _safe_margin_pct(effective_revenue_brl, costs_total)
             status = _resolve_margin_status(margin_pct)
 
             return {
@@ -847,7 +898,11 @@ async def admin_margin(
                 "usd_brl_rate": usd_brl,
                 "revenue": {
                     "mrr_brl": round(mrr_brl, 2),
-                    "stripe_invoice_paid_brl": None,  # TODO 2.3.1
+                    "stripe_invoice_paid_brl": invoice_paid_brl,
+                    "invoice_count": invoice_count,
+                    "last_invoice_paid_at": last_paid_iso,
+                    "revenue_source": revenue_source,
+                    "effective_brl": round(effective_revenue_brl, 2),
                 },
                 "costs": {
                     "llm_usd": round(float(llm_usd), 6),
@@ -940,9 +995,24 @@ async def admin_margin_all(
                 user = users_by_id.get(uid)
                 mrr_brl, sub_status = _resolve_user_revenue(db, uid) if uid > 0 else (0.0, "anonymous")
                 llm_brl = float(llm_usd) * usd_brl
+
+                # Tier 2.3.1: invoice paid real (sobre-escreve MRR teorico)
+                if uid > 0:
+                    invoice_paid_brl, invoice_count, _last_paid = _resolve_invoice_paid_in_period(
+                        db, uid, start, end, usd_brl
+                    )
+                else:
+                    invoice_paid_brl, invoice_count = None, 0
+                if invoice_paid_brl is not None:
+                    effective_revenue_brl = invoice_paid_brl
+                    revenue_source = "stripe_real"
+                else:
+                    effective_revenue_brl = mrr_brl
+                    revenue_source = "mrr_theoretical"
+
                 costs_total = llm_brl  # automation cost = 0 nesta versao
-                margin_brl = mrr_brl - costs_total
-                margin_pct = _safe_margin_pct(mrr_brl, costs_total)
+                margin_brl = effective_revenue_brl - costs_total
+                margin_pct = _safe_margin_pct(effective_revenue_brl, costs_total)
                 status = _resolve_margin_status(margin_pct)
 
                 if status_filter and status != status_filter:
@@ -954,6 +1024,10 @@ async def admin_margin_all(
                     "plan": user.plan if user else "unknown",
                     "subscription_status": sub_status,
                     "mrr_brl": round(mrr_brl, 2),
+                    "stripe_invoice_paid_brl": invoice_paid_brl,
+                    "invoice_count": invoice_count,
+                    "revenue_source": revenue_source,
+                    "effective_revenue_brl": round(effective_revenue_brl, 2),
                     "llm_brl": round(llm_brl, 4),
                     "llm_calls": int(calls),
                     "llm_total_tokens": int(total_tokens),
@@ -1608,3 +1682,208 @@ async def admin_pii_sentinel_status(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
+
+
+# ============================================================================
+# BILLING — Tier 2.3.1: resync de invoices via Stripe API
+# Cobre o "buraco historico": invoices pagas ANTES do deploy do webhook
+# handler novo nao foram persistidas em InvoicePayment. Este endpoint busca
+# direto na Stripe API e popula a tabela. Idempotente via unique constraint.
+# ============================================================================
+
+@router.post("/billing/resync-invoices")
+async def admin_billing_resync_invoices(
+    user_id: int | None = Query(default=None, description="Filtra por user_id (None = scan global por customer)."),
+    since_days: int = Query(default=90, ge=1, le=365, description="Janela de busca pra tras (em dias)."),
+    dry_run: bool = Query(default=True, description="Default true. So conta, nao persiste."),
+    confirm: bool = Query(default=False, description="Quando dry_run=false, confirm=true e obrigatorio."),
+    cap: int = Query(default=1000, ge=1, le=2000, description="Max invoices processadas por chamada (defensivo)."),
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Resync de invoices pagas a partir da Stripe API.
+
+    Cobre buraco historico: invoices pagas ANTES do deploy do handler novo
+    (que persiste em InvoicePayment) nao foram registradas. Este endpoint
+    busca via Stripe API.list e popula via persist_invoice_payment.
+
+    Estrategia:
+      - Cursor Stripe-native (`starting_after=<id>`), NUNCA offset
+      - Ordem cronologica antiga -> nova (Stripe default eh nova->antiga,
+        mas processamos em ordem inversa pra que cap=1000 perca apenas
+        invoices mais novas, recuperaveis no proximo resync)
+      - Idempotente via stripe_invoice_id unique check em persist_invoice_payment
+      - Filtros: status='paid', created>=since_days_ago
+
+    Args:
+        user_id: se passado, filtra por customer do user (resolve via Subscription).
+                 None = global (todos os customers Stripe da conta).
+        since_days: janela em dias (default 90).
+        dry_run: true (default) = apenas conta. false = aplica.
+        confirm: obrigatorio com dry_run=false (double-flag protetivo).
+        cap: max invoices processadas (default 1000).
+    """
+    if not dry_run and not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Real run requer dry_run=false E confirm=true. "
+                "Default dry_run=true por seguranca. "
+                "Rode primeiro com dry_run=true pra ver os numeros."
+            ),
+        )
+
+    try:
+        import stripe
+        from datetime import datetime, timedelta, timezone
+        from database.models import SessionLocal, Subscription
+        from app.api._billing_helpers import persist_invoice_payment
+
+        if not stripe.api_key:
+            stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+        if not stripe.api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="STRIPE_SECRET_KEY nao configurada — resync indisponivel",
+            )
+
+        # Resolver customer_id se user_id passado
+        customer_filter: str | None = None
+        if user_id is not None:
+            db = SessionLocal()
+            try:
+                sub = db.query(Subscription).filter(
+                    Subscription.user_id == user_id
+                ).order_by(Subscription.id.desc()).first()
+                if sub is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"user_id {user_id} sem Subscription (sem customer Stripe).",
+                    )
+                # Resolve customer via subscription -> Stripe API
+                if sub.stripe_subscription_id:
+                    try:
+                        stripe_sub = stripe.Subscription.retrieve(sub.stripe_subscription_id)
+                        customer_filter = stripe_sub.customer
+                    except Exception as e:
+                        raise HTTPException(
+                            status_code=503,
+                            detail=f"Falha ao resolver customer via Stripe: {e}",
+                        )
+            finally:
+                db.close()
+
+        cutoff_ts = int(
+            (datetime.now(timezone.utc) - timedelta(days=since_days)).timestamp()
+        )
+
+        # Stripe.Invoice.list — paginacao via auto_paging_iter() ou starting_after manual.
+        # Filtramos status='paid' e created>=cutoff_ts. Cap defensivo aplicado abaixo.
+        list_kwargs = {
+            "status": "paid",
+            "created": {"gte": cutoff_ts},
+            "limit": 100,  # Stripe per-page max
+        }
+        if customer_filter:
+            list_kwargs["customer"] = customer_filter
+
+        # Coleta todas (capped) — auto_paging_iter cuida do cursor starting_after
+        invoices_collected: list[Any] = []
+        try:
+            for inv in stripe.Invoice.list(**list_kwargs).auto_paging_iter():
+                invoices_collected.append(inv)
+                if len(invoices_collected) >= cap:
+                    break
+        except stripe.error.StripeError as e:  # type: ignore[attr-defined]
+            logger.error(f"Stripe API erro em resync: {e}", exc_info=True)
+            raise HTTPException(status_code=502, detail=f"Stripe API erro: {e}")
+
+        # Ordem cronologica antiga -> nova (Stripe retorna nova->antiga por default)
+        invoices_collected.sort(key=lambda i: getattr(i, "created", 0))
+
+        scanned = len(invoices_collected)
+        inserted = 0
+        skipped_existing = 0
+        errors = 0
+        oldest_ts: datetime | None = None
+        newest_ts: datetime | None = None
+
+        if not dry_run:
+            db = SessionLocal()
+            try:
+                for inv in invoices_collected:
+                    created_dt = datetime.fromtimestamp(
+                        getattr(inv, "created", 0), tz=timezone.utc
+                    )
+                    if oldest_ts is None or created_dt < oldest_ts:
+                        oldest_ts = created_dt
+                    if newest_ts is None or created_dt > newest_ts:
+                        newest_ts = created_dt
+
+                    created, _pid = persist_invoice_payment(
+                        db, inv,
+                        raw_event_id=None,  # resync nao tem event_id (nao veio de webhook)
+                        capture_sentry_on_error=False,  # nao Sentry-spam em resync batch
+                    )
+                    if created:
+                        inserted += 1
+                    else:
+                        skipped_existing += 1
+            except Exception as e:
+                logger.error(f"resync mid-batch erro: {e}", exc_info=True)
+                errors += 1
+            finally:
+                db.close()
+        else:
+            # Dry-run: so calcula timestamps + checa quantos JA existem
+            from database.models import InvoicePayment
+            db = SessionLocal()
+            try:
+                existing_ids = {
+                    r[0] for r in db.query(InvoicePayment.stripe_invoice_id).all()
+                }
+                for inv in invoices_collected:
+                    created_dt = datetime.fromtimestamp(
+                        getattr(inv, "created", 0), tz=timezone.utc
+                    )
+                    if oldest_ts is None or created_dt < oldest_ts:
+                        oldest_ts = created_dt
+                    if newest_ts is None or created_dt > newest_ts:
+                        newest_ts = created_dt
+                    if getattr(inv, "id", None) in existing_ids:
+                        skipped_existing += 1
+                    else:
+                        inserted += 1  # would-be insert in real run
+            finally:
+                db.close()
+
+        return {
+            "dry_run_resolved": dry_run,
+            "user_id_filter": user_id,
+            "since_days": since_days,
+            "cap": cap,
+            "stripe_filter": {
+                "status": "paid",
+                "customer": customer_filter,
+                "since_ts": cutoff_ts,
+            },
+            "scanned": scanned,
+            "inserted": inserted if not dry_run else None,
+            "would_insert": inserted if dry_run else None,
+            "skipped_existing": skipped_existing,
+            "errors": errors,
+            "oldest_invoice_ts": oldest_ts.isoformat() if oldest_ts else None,
+            "newest_invoice_ts": newest_ts.isoformat() if newest_ts else None,
+            "truncated_at_cap": scanned >= cap,
+            "message": (
+                f"DRY RUN: {scanned} invoices encontradas, {inserted} novas + "
+                f"{skipped_existing} ja existentes. Aplicar: dry_run=false&confirm=true."
+            ) if dry_run else (
+                f"REAL RUN: {scanned} scanned, {inserted} novas, "
+                f"{skipped_existing} skipped (ja existentes), {errors} erros."
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"admin_billing_resync_invoices erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

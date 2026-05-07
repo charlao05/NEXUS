@@ -1494,6 +1494,20 @@ async def stripe_webhook(request: Request):
                     db.commit()
                     logger.info(f"✅ Renovação paga: subscription {stripe_sub_id}")
 
+            # Tier 2.3.1: persistir InvoicePayment p/ calculo de margem real.
+            # Helper eh idempotente + NUNCA propaga excecao + Sentry capture
+            # em falha (criticidade fiscal — webhook 200 com perda silenciosa
+            # de dado financeiro eh o pior bug imaginavel).
+            try:
+                from app.api._billing_helpers import persist_invoice_payment
+                persist_invoice_payment(
+                    db,
+                    invoice_obj,
+                    raw_event_id=getattr(event, "id", None),
+                )
+            except Exception:
+                pass
+
         elif event_type == "customer.subscription.updated":
             sub_data: Any = event.data.object  # type: ignore[union-attr]
             sub = db.query(Subscription).filter(

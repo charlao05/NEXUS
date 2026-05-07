@@ -932,6 +932,37 @@ class AutomationUsageRecord(Base):
 # LGPD audit trail (Tier 2.4.2 — backfill retroativo de PII)
 # ---------------------------------------------------------------------------
 
+class InvoicePayment(Base):
+    """Pagamento Stripe persistido (Tier 2.3.1).
+
+    Fonte: webhook handler invoice.paid (em auth.py + billing.py defesa-em-profundidade).
+    Schema otimizado pra queries de margem por periodo. Idempotencia via unique
+    stripe_invoice_id; query-first em codigo (defesa em profundidade).
+
+    NUNCA usar Float pra dinheiro — amount_cents (int) eh fonte canonica.
+    BRL: amount_cents/100. USD: amount_cents/100 * USD_BRL_RATE em runtime.
+    """
+    __tablename__ = "invoice_payments"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    stripe_invoice_id = Column(String(100), unique=True, nullable=False, index=True)
+    stripe_customer_id = Column(String(100), nullable=True, index=True)
+    stripe_subscription_id = Column(String(100), nullable=True, index=True)
+    amount_cents = Column(Integer, nullable=False)        # centavos pra evitar erro float
+    currency = Column(String(3), default="brl", nullable=False)  # brl | usd | etc
+    status = Column(String(20), default="paid", nullable=False)  # paid | refunded | uncollectible
+    paid_at = Column(DateTime, nullable=False, index=True)  # timestamp Stripe (status_transitions.paid_at)
+    period_start = Column(DateTime, nullable=True)          # invoice.period_start
+    period_end = Column(DateTime, nullable=True)            # invoice.period_end
+    raw_event_id = Column(String(200), nullable=True, index=True)  # link p/ StripeEvent.stripe_event_id
+    created_at = Column(DateTime, default=_utcnow, nullable=False)
+
+    __table_args__ = (
+        # Index composto p/ query "invoices pagas de user X no periodo Y" — eficiente desde dia 1
+        Index("ix_invoice_payments_user_paid", "user_id", "paid_at"),
+    )
+
+
 class PIISentinelState(Base):
     """Histórico INSERT-only de execucoes da sentinela PII (Tier 2.4.5).
 
