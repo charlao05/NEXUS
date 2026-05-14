@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
@@ -34,14 +34,165 @@ except ImportError:
         return {"user_id": 1, "email": "dev@local", "plan": "free", "role": "user"}
 
 # ---------------------------------------------------------------------------
-# Estado em memória das automações pendentes
+# Estado das automações pendentes (Tier 2.4.7-bugfix)
 # ---------------------------------------------------------------------------
-_automation_tasks: dict[str, dict[str, Any]] = {}
+# DB-first storage. Fallback dict in-memory APENAS em dev/local (env !=
+# production) se DB indisponivel. Em prod, DB e fonte unica — falha = 500
+# + Sentry capture, NUNCA cai silenciosamente pra memoria (que quebrava o
+# bug original de multi-worker).
+_automation_tasks: dict[str, dict[str, Any]] = {}  # dev-only fallback
 
 # Rate limit para automações (por user_id)
 _automation_rate: dict[int, list[float]] = {}  # user_id -> [timestamps]
 _AUTOMATION_MAX_PER_HOUR = 10
 _AUTOMATION_WINDOW_SECONDS = 3600
+
+
+# ---------------------------------------------------------------------------
+# Storage helpers (Tier 2.4.7-bugfix) — DB-first com compat dev-only
+# ---------------------------------------------------------------------------
+
+def _is_production() -> bool:
+    """True se ENVIRONMENT=production (caso contrario eh dev/test/staging)."""
+    import os
+    return (os.getenv("ENVIRONMENT") or "").lower() == "production"
+
+
+def _task_to_dict(t: Any) -> dict[str, Any]:
+    """Serializa AutomationTask -> dict (formato compat com codigo legacy in-memory).
+
+    plan_json / site_config_json / result_json sao desserializados pra dict/list.
+    """
+    import json as _json
+    return {
+        "task_id": t.task_id,
+        "agent_id": t.agent_id,
+        "user_id": t.user_id,
+        "goal": t.goal or "",
+        "message": t.message or "",
+        "site_hint": t.site_hint or "",
+        "plan": _json.loads(t.plan_json) if t.plan_json else {},
+        "steps": (_json.loads(t.plan_json).get("steps", []) if t.plan_json else []),
+        "site_config": _json.loads(t.site_config_json) if t.site_config_json else None,
+        "status": t.status or "awaiting_approval",
+        "result": _json.loads(t.result_json) if t.result_json else None,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+        "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+    }
+
+
+def _save_automation_task(task_data: dict[str, Any]) -> None:
+    """Persiste task no DB. Em dev, fallback in-memory se DB falhar."""
+    import json as _json
+    try:
+        from database.models import SessionLocal, AutomationTask
+        db = SessionLocal()
+        try:
+            existing = db.query(AutomationTask).filter(
+                AutomationTask.task_id == task_data["task_id"]
+            ).first()
+            if existing:
+                # Update parcial: mantem task_id/user_id/created_at; atualiza estado
+                existing.status = task_data.get("status", existing.status)
+                if "plan" in task_data:
+                    existing.plan_json = _json.dumps(task_data["plan"])
+                if "site_config" in task_data:
+                    existing.site_config_json = _json.dumps(task_data["site_config"]) if task_data.get("site_config") else None
+                if "result" in task_data:
+                    existing.result_json = _json.dumps(task_data["result"]) if task_data.get("result") else None
+            else:
+                new_task = AutomationTask(
+                    task_id=task_data["task_id"],
+                    user_id=task_data["user_id"],
+                    agent_id=task_data.get("agent_id"),
+                    goal=task_data["goal"],
+                    message=task_data.get("message"),
+                    site_hint=task_data.get("site_hint"),
+                    plan_json=_json.dumps(task_data.get("plan", {})),
+                    site_config_json=(_json.dumps(task_data["site_config"]) if task_data.get("site_config") else None),
+                    status=task_data.get("status", "awaiting_approval"),
+                    result_json=(_json.dumps(task_data["result"]) if task_data.get("result") else None),
+                )
+                db.add(new_task)
+            db.commit()
+            return
+        finally:
+            db.close()
+    except Exception as e:
+        # PROD: nunca cai pra memoria. Loga + Sentry + propaga (caller decide 500).
+        if _is_production():
+            logger.error(f"AutomationTask save FALHOU em producao: {e}", exc_info=True)
+            try:
+                import sentry_sdk
+                sentry_sdk.capture_exception(e)
+            except Exception:
+                pass
+            raise
+        # DEV: fallback in-memory + warning
+        logger.warning(f"DB indisponivel em DEV, fallback in-memory: {e}")
+        _automation_tasks[task_data["task_id"]] = dict(task_data)
+
+
+def _get_automation_task(task_id: str) -> Optional[dict[str, Any]]:
+    """Busca task no DB. Em dev, fallback in-memory se DB falhar."""
+    try:
+        from database.models import SessionLocal, AutomationTask
+        db = SessionLocal()
+        try:
+            t = db.query(AutomationTask).filter(AutomationTask.task_id == task_id).first()
+            if t is None:
+                return None
+            return _task_to_dict(t)
+        finally:
+            db.close()
+    except Exception as e:
+        if _is_production():
+            logger.error(f"AutomationTask get FALHOU em producao: {e}", exc_info=True)
+            try:
+                import sentry_sdk
+                sentry_sdk.capture_exception(e)
+            except Exception:
+                pass
+            raise
+        logger.warning(f"DB indisponivel em DEV, fallback in-memory: {e}")
+        return _automation_tasks.get(task_id)
+
+
+def _update_automation_task_status(
+    task_id: str,
+    status: str,
+    result: dict[str, Any] | None = None,
+) -> None:
+    """Atualiza apenas status + result (operacao mais comum nos endpoints)."""
+    import json as _json
+    try:
+        from database.models import SessionLocal, AutomationTask
+        db = SessionLocal()
+        try:
+            t = db.query(AutomationTask).filter(AutomationTask.task_id == task_id).first()
+            if t is not None:
+                t.status = status
+                if result is not None:
+                    t.result_json = _json.dumps(result)
+                db.commit()
+                return
+        finally:
+            db.close()
+    except Exception as e:
+        if _is_production():
+            logger.error(f"AutomationTask update FALHOU em producao: {e}", exc_info=True)
+            try:
+                import sentry_sdk
+                sentry_sdk.capture_exception(e)
+            except Exception:
+                pass
+            raise
+        logger.warning(f"DB indisponivel em DEV, fallback in-memory: {e}")
+        existing = _automation_tasks.get(task_id)
+        if existing is not None:
+            existing["status"] = status
+            if result is not None:
+                existing["result"] = result
 
 
 def _check_automation_rate_limit(user_id: int) -> None:
@@ -906,8 +1057,8 @@ async def _start_automation_core(
     except Exception:
         pass
 
-    # Salvar estado
-    _automation_tasks[task_id] = {
+    # Persistir estado no DB (Tier 2.4.7-bugfix: compartilhado entre workers)
+    _save_automation_task({
         "task_id": task_id,
         "agent_id": request.agent_id,
         "user_id": user_id,
@@ -915,11 +1066,9 @@ async def _start_automation_core(
         "message": request.message,
         "site_hint": site_hint,
         "plan": plan,
-        "steps": plan.get("steps", []),
         "site_config": site_config,
         "status": "awaiting_approval",
-        "created_at": datetime.now().isoformat(),
-    }
+    })
 
     return AutomationStartResponse(
         task_id=task_id,
@@ -937,7 +1086,7 @@ async def approve_automation(
     current_user: dict = Depends(get_current_user),
 ) -> AutomationResultResponse:
     """Aprova e executa a automação, ou rejeita. Requer autenticação."""
-    task = _automation_tasks.get(request.task_id)
+    task = _get_automation_task(request.task_id)
     # Verificar que o usuário é o dono da task
     if task and task.get("user_id") != current_user["user_id"]:
         raise HTTPException(status_code=403, detail="Você não tem permissão para esta automação")
@@ -948,7 +1097,7 @@ async def approve_automation(
         raise HTTPException(status_code=400, detail=f"Automação já processada: {task['status']}")
 
     if not request.approved:
-        task["status"] = "rejected"
+        _update_automation_task_status(request.task_id, "rejected")
         return AutomationResultResponse(
             task_id=request.task_id,
             status="rejected",
@@ -956,13 +1105,13 @@ async def approve_automation(
         )
 
     # Executar!
-    task["status"] = "executing"
+    _update_automation_task_status(request.task_id, "executing")
     logger.info(f"🚀 Executando automação {request.task_id}: {task['goal'][:80]}")
 
     result = await _execute_automation(task)
 
-    task["status"] = result.get("status", "completed")
-    task["result"] = result
+    final_status = result.get("status", "completed")
+    _update_automation_task_status(request.task_id, final_status, result=result)
 
     return AutomationResultResponse(
         task_id=request.task_id,
@@ -979,7 +1128,7 @@ async def automation_status(
     current_user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Retorna status de uma automação. Requer autenticação."""
-    task = _automation_tasks.get(task_id)
+    task = _get_automation_task(task_id)
     # Verificar que o usuário é o dono da task
     if task and task.get("user_id") != current_user["user_id"]:
         raise HTTPException(status_code=403, detail="Você não tem permissão para esta automação")
@@ -1009,7 +1158,7 @@ async def continue_automation(
     O browser permanece aberto desde a execução anterior. Este endpoint
     re-sente a página atual, re-planeja e executa os próximos passos.
     """
-    task = _automation_tasks.get(request.task_id)
+    task = _get_automation_task(request.task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Automação não encontrada")
     if task.get("user_id") != current_user["user_id"]:
@@ -1020,13 +1169,13 @@ async def continue_automation(
             detail=f"Automação não está aguardando continuação (status: {task['status']})",
         )
 
-    task["status"] = "executing"
+    _update_automation_task_status(request.task_id, "executing")
     logger.info(f"🔄 Continuando automação {request.task_id} após input do usuário")
 
     result = await _continue_automation(task)
 
-    task["status"] = result.get("status", "completed")
-    task["result"] = result
+    final_status = result.get("status", "completed")
+    _update_automation_task_status(request.task_id, final_status, result=result)
 
     return AutomationResultResponse(
         task_id=request.task_id,

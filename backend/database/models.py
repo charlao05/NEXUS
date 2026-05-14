@@ -937,6 +937,46 @@ class AutomationUsageRecord(Base):
 # LGPD audit trail (Tier 2.4.2 — backfill retroativo de PII)
 # ---------------------------------------------------------------------------
 
+class AutomationTask(Base):
+    """Plano de automacao persistido (Tier 2.4.7-bugfix).
+
+    Substitui dict in-memory _automation_tasks que quebrava em multi-worker
+    Gunicorn (--workers 2 = 50% das aprovacoes falhavam com 404 "Automacao nao
+    encontrada"). Cada worker tinha seu proprio dict; round-robin do balancer
+    fazia POST /start (Worker A) e POST /approve (Worker B) verem estados
+    diferentes.
+
+    Compat layer dev-only: em ENVIRONMENT != "production", fallback in-memory
+    eh ativado se DB indisponivel. Em prod, DB eh fonte unica (falha = 500
+    + Sentry).
+
+    NOTE PII: campos `goal` e `plan_json` podem conter texto puro com
+    CPF/CNPJ/email/telefone do usuario (ex: 'consulte CPF 111.444.777-35 na
+    receita'). TODO Tier 2.4.7+: criptografar em rest + retention agressiva.
+    Issue label sugerida: 'tier-2-4-7-pii-automation-tasks'.
+    """
+    __tablename__ = "automation_tasks"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(50), unique=True, nullable=False, index=True)  # "auto_<hex12>"
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    agent_id = Column(String(30), nullable=True, index=True)
+
+    # Conteudo (PII presente — ver TODO acima)
+    goal = Column(Text, nullable=False)
+    message = Column(Text, nullable=True)
+    site_hint = Column(String(50), nullable=True)
+    plan_json = Column(Text, nullable=False)         # dict completo do LLM (inclui steps)
+    site_config_json = Column(Text, nullable=True)   # template config opcional
+
+    # Estado
+    # awaiting_approval | executing | completed | rejected | failed | waiting_for_user | circuit_open
+    status = Column(String(30), default="awaiting_approval", nullable=False, index=True)
+    result_json = Column(Text, nullable=True)        # AutomationResultResponse serializada
+
+    created_at = Column(DateTime, default=_utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+
+
 class InfraCostSnapshot(Base):
     """Snapshot mensal do custo de infraestrutura (Tier 2.3.2).
 
