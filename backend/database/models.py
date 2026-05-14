@@ -937,6 +937,37 @@ class AutomationUsageRecord(Base):
 # LGPD audit trail (Tier 2.4.2 — backfill retroativo de PII)
 # ---------------------------------------------------------------------------
 
+class InfraCostSnapshot(Base):
+    """Snapshot mensal do custo de infraestrutura (Tier 2.3.2).
+
+    Operador registra manualmente o total mensal pago de Render + outros
+    fixed costs. O endpoint /margin distribui esse total proporcionalmente
+    entre tenants com usage > 0 no periodo, ponderado por:
+      1. SUM(total_tokens) em LLMUsageRecord (peso primario)
+      2. SUM(duration_ms) em AutomationUsageRecord (fallback se tokens=0)
+
+    Tenants sem usage no periodo NAO recebem rateio (compute_cost=0,
+    compute_cost_source='zero_no_usage'). Custo desses tenants fica
+    "unattributed" no /infra-cost-distribution.
+
+    Append-only via DELETE explicito (audit log no logger). POST com
+    period_start ja existente faz update (idempotente). Overlap de periodos
+    eh rejeitado em 409 antes do INSERT.
+    """
+    __tablename__ = "infra_cost_snapshot"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    period_start = Column(Date, nullable=False, unique=True, index=True)
+    period_end = Column(Date, nullable=False)
+    total_brl = Column(Float, nullable=False)
+    source = Column(String(20), default="manual", nullable=False)  # manual | env_var | api
+    notes = Column(Text, nullable=True)
+    # Tier 2.3.2 Ajuste 2: defesa contra migration futura
+    currency = Column(String(3), default="BRL", nullable=False)
+    period_kind = Column(String(20), default="monthly", nullable=False)  # monthly | weekly | biweekly
+    created_at = Column(DateTime, default=_utcnow, nullable=False)
+    created_by_email = Column(String(254), nullable=True)
+
+
 class WebhookHit(Base):
     """Trilha auditavel de hits em webhook handlers Stripe (Tier 2.3.1.1).
 

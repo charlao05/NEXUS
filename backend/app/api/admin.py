@@ -7,10 +7,11 @@ Acesso restrito a usuários com role=admin ou plano enterprise.
 
 import os
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Depends, Query
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func
 
 from database.models import (  # type: ignore[import]
@@ -907,7 +908,28 @@ async def admin_margin(
             (calls, llm_usd, total_tokens, avg_dur) = agg
 
             llm_brl = float(llm_usd) * usd_brl
-            automation_cost_brl = 0.0  # TODO 2.3.2
+            automation_cost_brl = 0.0  # variavel direta = 0 (sem proxy/captcha pago ainda)
+
+            # Tier 2.3.2: compute prorateado a partir de InfraCostSnapshot
+            from database.models import LLMUsageRecord as _LLMU, AutomationUsageRecord as _AU
+            _period_start_date = start.date() if hasattr(start, "date") else start
+            snap = _cached_snapshot(db, _period_start_date)
+            if snap is not None:
+                pool_tokens = int(
+                    db.query(func.coalesce(func.sum(_LLMU.total_tokens), 0))
+                    .filter(_LLMU.ts >= start, _LLMU.ts <= end)
+                    .scalar() or 0
+                )
+                pool_duration = int(
+                    db.query(func.coalesce(func.sum(_AU.duration_ms), 0))
+                    .filter(_AU.ts >= start, _AU.ts <= end)
+                    .scalar() or 0
+                )
+                compute_cost_brl, compute_cost_source = _resolve_user_compute_cost(
+                    db, user_id, start, end, snap, pool_tokens, pool_duration
+                )
+            else:
+                compute_cost_brl, compute_cost_source = 0.0, "zero_no_snapshot"
 
             # Tier 2.3.1 + 2.3.3: invoice paid real (com refund tracking)
             inv = _resolve_invoice_paid_in_period(db, user_id, start, end, usd_brl)
@@ -928,7 +950,7 @@ async def admin_margin(
                 effective_revenue_brl = mrr_brl
                 revenue_source = "mrr_theoretical"
 
-            costs_total = llm_brl + automation_cost_brl
+            costs_total = llm_brl + automation_cost_brl + compute_cost_brl
             margin_brl = effective_revenue_brl - costs_total
 
             # Edge case: effective negativo por dominancia de refund
@@ -973,6 +995,8 @@ async def admin_margin(
                     "llm_total_tokens": int(total_tokens),
                     "llm_avg_duration_ms": int(avg_dur or 0),
                     "automation_cost_brl": automation_cost_brl,
+                    "compute_cost_brl": round(compute_cost_brl, 4),
+                    "compute_cost_source": compute_cost_source,
                     "total_brl": round(costs_total, 4),
                 },
                 "margin": {
@@ -1027,7 +1051,7 @@ async def admin_margin_all(
 
     try:
         from sqlalchemy import func
-        from database.models import SessionLocal, User, LLMUsageRecord
+        from database.models import SessionLocal, User, LLMUsageRecord, AutomationUsageRecord
 
         usd_brl = float(os.getenv("USD_BRL_RATE", "5.20") or "5.20")
         start, end = _period_bounds_current_month()
@@ -1035,6 +1059,20 @@ async def admin_margin_all(
 
         db = SessionLocal()
         try:
+            # Tier 2.3.2: snapshot + pools (1 query cada, reusada no loop)
+            _period_start_date = start.date() if hasattr(start, "date") else start
+            snap = _cached_snapshot(db, _period_start_date)
+            pool_tokens = int(
+                db.query(func.coalesce(func.sum(LLMUsageRecord.total_tokens), 0))
+                .filter(LLMUsageRecord.ts >= start, LLMUsageRecord.ts <= end)
+                .scalar() or 0
+            )
+            pool_duration = int(
+                db.query(func.coalesce(func.sum(AutomationUsageRecord.duration_ms), 0))
+                .filter(AutomationUsageRecord.ts >= start, AutomationUsageRecord.ts <= end)
+                .scalar() or 0
+            )
+
             # 1. Usuarios com tracafego LLM no periodo
             traffic_rows = db.query(
                 LLMUsageRecord.user_id,
@@ -1079,7 +1117,15 @@ async def admin_margin_all(
                     effective_revenue_brl = mrr_brl
                     revenue_source = "mrr_theoretical"
 
-                costs_total = llm_brl  # automation cost = 0 nesta versao
+                # Tier 2.3.2: compute prorateado por tenant
+                if uid > 0:
+                    compute_cost_brl, compute_cost_source = _resolve_user_compute_cost(
+                        db, uid, start, end, snap, pool_tokens, pool_duration
+                    )
+                else:
+                    compute_cost_brl, compute_cost_source = 0.0, "zero_no_snapshot"
+
+                costs_total = llm_brl + compute_cost_brl  # automation direta = 0
                 margin_brl = effective_revenue_brl - costs_total
                 refund_dominant = (
                     refunded_brl > 0
@@ -1111,6 +1157,8 @@ async def admin_margin_all(
                     "llm_calls": int(calls),
                     "llm_total_tokens": int(total_tokens),
                     "automation_cost_brl": 0.0,
+                    "compute_cost_brl": round(compute_cost_brl, 4),
+                    "compute_cost_source": compute_cost_source,
                     "margin_brl": round(margin_brl, 2),
                     "margin_pct": margin_pct,
                     "status": status,
@@ -2280,4 +2328,520 @@ async def admin_billing_resync_refunds(
         raise
     except Exception as e:
         logger.error(f"admin_billing_resync_refunds erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# INFRA COST PRORATION — Tier 2.3.2
+# Snapshot mensal manual do custo de infra (Render + etc.) distribuido
+# proporcionalmente entre tenants com usage > 0.
+#
+# Estrategia de rateio (peso primario -> fallback):
+#   1. SUM(LLMUsageRecord.total_tokens) — tokens eh proxy fiel de carga real
+#      no servidor (latencia, memoria, network egress). Backend hoje faz LLM
+#      sincrono no worker FastAPI, entao tokens correlaciona com tempo-de-worker.
+#   2. SUM(AutomationUsageRecord.duration_ms) — fallback quando tenant so usa
+#      automacao (zero chat). Mantem cobertura.
+#   3. Tenant sem nenhum dos dois = inelegivel (compute_cost_brl=0).
+# TODO(@charlao): revisar apos 30 dias comparando SUM(total_tokens) vs
+# SUM(duration_ms) por tenant pra validar peso primario. Quando backend
+# migrar pra LLM assincrono (worker separado), reabrir. Issue:
+# label=tier-2-3-2-review.
+# ============================================================================
+
+
+class InfraCostSnapshotIn(BaseModel):
+    """Body do POST /infra-cost-snapshot. Validator total_brl<=100k (sanity)."""
+    period_start: date
+    period_end: date
+    total_brl: float = Field(..., gt=0, le=100_000.00, description="Total mensal BRL. Cap sanity 100k.")
+    source: str = Field(default="manual", max_length=20)
+    notes: str | None = Field(default=None)
+    currency: str = Field(default="BRL", min_length=3, max_length=3)
+    period_kind: str = Field(default="monthly", max_length=20)
+
+    @field_validator("period_end")
+    @classmethod
+    def _end_after_start(cls, v: date, info) -> date:
+        start = info.data.get("period_start") if info.data else None
+        if start and v <= start:
+            raise ValueError("period_end deve ser DEPOIS de period_start")
+        return v
+
+
+def _check_period_overlap(db, period_start: date, period_end: date, exclude_id: int | None = None) -> Any:
+    """Retorna primeira snapshot que CONFLITA com [period_start, period_end].
+
+    Conflito = overlap real (range existente cruza range novo) OU mesmo period_start.
+    Returns None se nao houver conflito.
+    """
+    from database.models import InfraCostSnapshot
+    q = db.query(InfraCostSnapshot).filter(
+        # Overlap: existente.start < novo.end AND existente.end > novo.start
+        InfraCostSnapshot.period_start < period_end,
+        InfraCostSnapshot.period_end > period_start,
+    )
+    if exclude_id is not None:
+        q = q.filter(InfraCostSnapshot.id != exclude_id)
+    return q.first()
+
+
+def _resolve_snapshot_for_period(db, period_start: date) -> Any:
+    """Busca snapshot exato pelo period_start (unique constraint)."""
+    from database.models import InfraCostSnapshot
+    return db.query(InfraCostSnapshot).filter(
+        InfraCostSnapshot.period_start == period_start
+    ).first()
+
+
+# Fator de conversao duration_ms -> token-equivalent (Tier 2.3.2).
+# Heuristica inicial: 1ms compute ~ 1 token (gpt-4o-mini ~800 tok/s = 1.25ms/tok).
+# TODO(@charlao): calibrar no review 30d com SUM(total_tokens) vs SUM(duration_ms)
+# real por tenant. Issue: label=tier-2-3-2-review.
+_DURATION_TO_TOKEN_EQUIV = 1.0
+
+
+def _resolve_user_compute_cost(
+    db,
+    user_id: int,
+    start: datetime,
+    end: datetime,
+    snapshot: Any,
+    total_pool_tokens: int,
+    total_pool_duration_ms: int,
+) -> tuple[float, str]:
+    """Calcula compute_cost_brl + compute_cost_source pra um user_id no periodo.
+
+    Pool UNIFICADO via fator de conversao (evita double allocation): peso de cada
+    usuario = user_tokens + K * user_duration_ms. Pool total = soma de todos os
+    pesos. Cada tenant recebe (peso_dele / pool_total) * snapshot.total_brl.
+    Shares somam exatamente 100%.
+
+    Source enum (descreve ORIGEM do peso, nao "pool separado"):
+      "prorated_real"     — tenant tem tokens > 0 (peso primario, mesmo se tambem
+                            tem duration somada)
+      "prorated_fallback" — tenant sem tokens mas com duration > 0 (peso so via
+                            equivalence factor — fonte alternativa)
+      "zero_no_snapshot"  — snapshot ausente pro periodo
+      "zero_no_usage"     — snapshot existe mas tenant sem usage algum
+    """
+    from database.models import LLMUsageRecord, AutomationUsageRecord
+
+    if snapshot is None:
+        return 0.0, "zero_no_snapshot"
+
+    user_tokens = int(
+        db.query(func.coalesce(func.sum(LLMUsageRecord.total_tokens), 0))
+        .filter(
+            LLMUsageRecord.user_id == user_id,
+            LLMUsageRecord.ts >= start,
+            LLMUsageRecord.ts <= end,
+        )
+        .scalar() or 0
+    )
+    user_duration = int(
+        db.query(func.coalesce(func.sum(AutomationUsageRecord.duration_ms), 0))
+        .filter(
+            AutomationUsageRecord.user_id == user_id,
+            AutomationUsageRecord.ts >= start,
+            AutomationUsageRecord.ts <= end,
+        )
+        .scalar() or 0
+    )
+
+    # Pool unificado: pool_total = tokens + K * duration
+    pool_unified = float(total_pool_tokens) + _DURATION_TO_TOKEN_EQUIV * float(total_pool_duration_ms)
+    if pool_unified <= 0:
+        return 0.0, "zero_no_usage"
+
+    user_weight = float(user_tokens) + _DURATION_TO_TOKEN_EQUIV * float(user_duration)
+    if user_weight <= 0:
+        return 0.0, "zero_no_usage"
+
+    share = user_weight / pool_unified
+    cost = round(float(snapshot.total_brl) * share, 4)
+
+    # Source descreve ORIGEM dominante do peso: tokens (primario) vs duration (fallback)
+    if user_tokens > 0:
+        return cost, "prorated_real"
+    return cost, "prorated_fallback"
+
+
+# Cache leve em memoria (bonus d): TTL 5min do snapshot do periodo corrente.
+# Reduz query SQL repetida em /margin/all (1 chamada vs N).
+_SNAPSHOT_CACHE: dict[str, tuple[float, Any]] = {}  # key: period_start ISO -> (expiry_ts, snapshot)
+_SNAPSHOT_CACHE_TTL_S = 300
+
+
+def _cached_snapshot(db, period_start: date) -> Any:
+    """Cache leve do snapshot. Invalida em POST/DELETE (chamadores explicitos)."""
+    import time as _time
+    key = period_start.isoformat()
+    entry = _SNAPSHOT_CACHE.get(key)
+    now = _time.time()
+    if entry and entry[0] > now:
+        return entry[1]
+    snap = _resolve_snapshot_for_period(db, period_start)
+    _SNAPSHOT_CACHE[key] = (now + _SNAPSHOT_CACHE_TTL_S, snap)
+    return snap
+
+
+def _invalidate_snapshot_cache(period_start: date) -> None:
+    _SNAPSHOT_CACHE.pop(period_start.isoformat(), None)
+
+
+# ----------------------------------------------------------------------------
+# Endpoints
+# ----------------------------------------------------------------------------
+
+@router.post("/billing/infra-cost-snapshot", status_code=201)
+async def admin_infra_cost_snapshot_create(
+    body: InfraCostSnapshotIn,
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Cria ou atualiza snapshot mensal de custo de infra.
+
+    Idempotente: re-POST com mesmo period_start sobrescreve total_brl e notes
+    (mantem audit via created_at). Overlap de periodos com snapshot diferente
+    -> 409. Validation: total_brl<=100k (sanity cap), period_end>period_start.
+    """
+    from database.models import SessionLocal, InfraCostSnapshot
+
+    db = SessionLocal()
+    try:
+        existing_exact = _resolve_snapshot_for_period(db, body.period_start)
+
+        # Overlap check: exclui o exato (idempotency) — outros overlaps = 409
+        conflict = _check_period_overlap(
+            db,
+            body.period_start,
+            body.period_end,
+            exclude_id=existing_exact.id if existing_exact else None,
+        )
+        if conflict and (not existing_exact or conflict.id != existing_exact.id):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Snapshot existente em [{conflict.period_start}..{conflict.period_end}] "
+                    f"conflita com novo periodo [{body.period_start}..{body.period_end}]. "
+                    f"Delete o existente primeiro ou ajuste os periodos."
+                ),
+            )
+
+        if existing_exact:
+            # Idempotent update
+            existing_exact.period_end = body.period_end
+            existing_exact.total_brl = body.total_brl
+            existing_exact.source = body.source
+            existing_exact.notes = body.notes
+            existing_exact.currency = body.currency.upper()
+            existing_exact.period_kind = body.period_kind
+            existing_exact.created_by_email = (admin.get("email") or "")[:254]
+            db.commit()
+            db.refresh(existing_exact)
+            result_id = existing_exact.id
+            action = "updated"
+        else:
+            new_snap = InfraCostSnapshot(
+                period_start=body.period_start,
+                period_end=body.period_end,
+                total_brl=body.total_brl,
+                source=body.source,
+                notes=body.notes,
+                currency=body.currency.upper(),
+                period_kind=body.period_kind,
+                created_by_email=(admin.get("email") or "")[:254],
+            )
+            db.add(new_snap)
+            db.commit()
+            db.refresh(new_snap)
+            result_id = new_snap.id
+            action = "created"
+
+        _invalidate_snapshot_cache(body.period_start)
+        logger.info(
+            f"InfraCostSnapshot {action}: id={result_id} "
+            f"period={body.period_start}..{body.period_end} "
+            f"total={body.total_brl} {body.currency} by={admin.get('email')}"
+        )
+
+        return {
+            "id": result_id,
+            "action": action,
+            "period_start": body.period_start.isoformat(),
+            "period_end": body.period_end.isoformat(),
+            "total_brl": body.total_brl,
+            "currency": body.currency.upper(),
+            "period_kind": body.period_kind,
+            "source": body.source,
+            "created_by_email": admin.get("email"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"admin_infra_cost_snapshot_create erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+@router.get("/billing/infra-cost-snapshot")
+async def admin_infra_cost_snapshot_get(
+    period: str | None = Query(default=None, description="ISO date YYYY-MM-DD. Default: 1o dia do mes corrente."),
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Le snapshot exato pelo period_start. Default: 1o dia do mes corrente."""
+    try:
+        if period:
+            try:
+                period_start = date.fromisoformat(period)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="period invalido (formato: YYYY-MM-DD)")
+        else:
+            now = datetime.now(timezone.utc)
+            period_start = date(now.year, now.month, 1)
+
+        from database.models import SessionLocal
+        db = SessionLocal()
+        try:
+            snap = _resolve_snapshot_for_period(db, period_start)
+            if snap is None:
+                return {
+                    "exists": False,
+                    "period_start_queried": period_start.isoformat(),
+                    "snapshot": None,
+                }
+            return {
+                "exists": True,
+                "period_start_queried": period_start.isoformat(),
+                "snapshot": {
+                    "id": snap.id,
+                    "period_start": snap.period_start.isoformat(),
+                    "period_end": snap.period_end.isoformat(),
+                    "total_brl": float(snap.total_brl),
+                    "currency": snap.currency,
+                    "period_kind": snap.period_kind,
+                    "source": snap.source,
+                    "notes": snap.notes,
+                    "created_at": snap.created_at.isoformat() if snap.created_at else None,
+                    "created_by_email": snap.created_by_email,
+                },
+            }
+        finally:
+            db.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"admin_infra_cost_snapshot_get erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/billing/infra-cost-snapshot")
+async def admin_infra_cost_snapshot_delete(
+    period: str = Query(..., description="ISO date YYYY-MM-DD do period_start a deletar."),
+    confirm: bool = Query(default=False, description="confirm=true obrigatorio (defesa contra DELETE acidental)."),
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Hard delete de snapshot. Loga audit (admin email + valor que estava registrado).
+
+    Defesa: confirm=true obrigatorio. Sentry capture_message level=warning
+    pra deixar rastro permanente alem do log local.
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="DELETE requer confirm=true (defesa contra acidente).",
+        )
+    try:
+        try:
+            period_start = date.fromisoformat(period)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="period invalido (formato: YYYY-MM-DD)")
+
+        from database.models import SessionLocal
+        db = SessionLocal()
+        try:
+            snap = _resolve_snapshot_for_period(db, period_start)
+            if snap is None:
+                raise HTTPException(status_code=404, detail=f"Snapshot nao encontrado pra period_start={period}")
+
+            # Audit ANTES de deletar (capturar valor que estava registrado)
+            audit_data = {
+                "id": snap.id,
+                "period_start": snap.period_start.isoformat(),
+                "period_end": snap.period_end.isoformat(),
+                "total_brl": float(snap.total_brl),
+                "currency": snap.currency,
+                "previous_created_by": snap.created_by_email,
+                "deleted_by": admin.get("email"),
+                "deleted_at": datetime.now(timezone.utc).isoformat(),
+            }
+            logger.warning(
+                f"InfraCostSnapshot DELETE: id={snap.id} "
+                f"period_start={snap.period_start} total={snap.total_brl} "
+                f"by={admin.get('email')}"
+            )
+            # Sentry capture pra audit trail permanente alem do log
+            try:
+                import sentry_sdk
+                with sentry_sdk.new_scope() as scope:
+                    scope.set_tag("infra_cost_delete", "true")
+                    scope.set_tag("period_start", str(snap.period_start))
+                    for k, v in audit_data.items():
+                        scope.set_extra(k, v)
+                    sentry_sdk.capture_message(
+                        f"InfraCostSnapshot deletado: period {snap.period_start} R${snap.total_brl}",
+                        level="warning",
+                    )
+            except Exception:
+                pass
+
+            db.delete(snap)
+            db.commit()
+            _invalidate_snapshot_cache(period_start)
+
+            return {
+                "deleted": True,
+                "snapshot_was": audit_data,
+            }
+        finally:
+            db.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"admin_infra_cost_snapshot_delete erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/billing/infra-cost-distribution")
+async def admin_infra_cost_distribution(
+    period: str | None = Query(default=None, description="ISO YYYY-MM-DD. Default: 1o dia mes corrente."),
+    limit: int = Query(default=100, ge=1, le=500),
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Preview do rateio do snapshot atual entre tenants com usage no periodo.
+
+    Util pra validar ANTES de o snapshot aparecer em /margin.
+    Retorna distribuicao ranqueada por compute_cost_brl desc + summary
+    com unattributed_brl (parcela nao distribuida pq tenants sem usage).
+    """
+    try:
+        from database.models import (
+            SessionLocal, LLMUsageRecord, AutomationUsageRecord, User
+        )
+
+        if period:
+            try:
+                period_start = date.fromisoformat(period)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="period invalido (formato: YYYY-MM-DD)")
+        else:
+            now = datetime.now(timezone.utc)
+            period_start = date(now.year, now.month, 1)
+
+        db = SessionLocal()
+        try:
+            snap = _resolve_snapshot_for_period(db, period_start)
+            if snap is None:
+                return {
+                    "period_start": period_start.isoformat(),
+                    "snapshot": None,
+                    "message": "Sem snapshot pra este periodo. POST /infra-cost-snapshot primeiro.",
+                    "distribution": [],
+                }
+
+            # Periodo como datetime [start, end)
+            start_dt = datetime(snap.period_start.year, snap.period_start.month,
+                                snap.period_start.day, tzinfo=timezone.utc)
+            end_dt = datetime(snap.period_end.year, snap.period_end.month,
+                              snap.period_end.day, tzinfo=timezone.utc)
+
+            # Pool totals (peso primario + fallback)
+            total_tokens = int(
+                db.query(func.coalesce(func.sum(LLMUsageRecord.total_tokens), 0))
+                .filter(LLMUsageRecord.ts >= start_dt, LLMUsageRecord.ts <= end_dt)
+                .scalar() or 0
+            )
+            total_duration = int(
+                db.query(func.coalesce(func.sum(AutomationUsageRecord.duration_ms), 0))
+                .filter(AutomationUsageRecord.ts >= start_dt, AutomationUsageRecord.ts <= end_dt)
+                .scalar() or 0
+            )
+
+            # User ids com qualquer usage
+            user_ids_llm = {
+                r[0] for r in db.query(LLMUsageRecord.user_id)
+                .filter(LLMUsageRecord.ts >= start_dt, LLMUsageRecord.ts <= end_dt)
+                .distinct().all() if r[0] is not None and r[0] > 0
+            }
+            user_ids_auto = {
+                r[0] for r in db.query(AutomationUsageRecord.user_id)
+                .filter(AutomationUsageRecord.ts >= start_dt, AutomationUsageRecord.ts <= end_dt)
+                .distinct().all() if r[0] is not None and r[0] > 0
+            }
+            user_ids = sorted(user_ids_llm | user_ids_auto)
+
+            users_by_id = {
+                u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()
+            } if user_ids else {}
+
+            distribution: list[dict[str, Any]] = []
+            total_attributed = 0.0
+
+            for uid in user_ids:
+                cost, source = _resolve_user_compute_cost(
+                    db, uid, start_dt, end_dt, snap, total_tokens, total_duration
+                )
+                if cost <= 0 and source == "zero_no_usage":
+                    continue  # nao aparece na distribution
+                total_attributed += cost
+                u = users_by_id.get(uid)
+                user_tokens = int(
+                    db.query(func.coalesce(func.sum(LLMUsageRecord.total_tokens), 0))
+                    .filter(
+                        LLMUsageRecord.user_id == uid,
+                        LLMUsageRecord.ts >= start_dt,
+                        LLMUsageRecord.ts <= end_dt,
+                    )
+                    .scalar() or 0
+                )
+                tokens_share = (user_tokens / total_tokens * 100.0) if total_tokens > 0 else 0.0
+                distribution.append({
+                    "user_id": uid,
+                    "email": u.email if u else None,
+                    "tokens": user_tokens,
+                    "tokens_share_pct": round(tokens_share, 2),
+                    "compute_cost_brl": round(cost, 4),
+                    "compute_cost_source": source,
+                })
+
+            distribution.sort(key=lambda x: -x["compute_cost_brl"])
+            unattributed_brl = round(float(snap.total_brl) - total_attributed, 4)
+
+            return {
+                "period": {
+                    "start": snap.period_start.isoformat(),
+                    "end": snap.period_end.isoformat(),
+                },
+                "snapshot": {
+                    "id": snap.id,
+                    "total_brl": float(snap.total_brl),
+                    "currency": snap.currency,
+                },
+                "pool": {
+                    "total_tokens": total_tokens,
+                    "total_duration_ms": total_duration,
+                    "tenants_with_usage": len(distribution),
+                },
+                "attributed_brl": round(total_attributed, 4),
+                "unattributed_brl": unattributed_brl,
+                "distribution": distribution[:limit],
+                "truncated": len(distribution) > limit,
+            }
+        finally:
+            db.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"admin_infra_cost_distribution erro: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
