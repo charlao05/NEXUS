@@ -67,6 +67,9 @@ _STEALTH_CHROMIUM_ARGS: list[str] = [
     "--disable-background-timer-throttling",
     "--disable-renderer-backgrounding",
     "--disable-backgrounding-occluded-windows",
+        "--no-sandbox",
+        "--disable-gpu",
+        "--disable-setuid-sandbox",
 ]
 
 
