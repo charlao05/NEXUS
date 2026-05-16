@@ -250,11 +250,17 @@ class AutomationResultResponse(BaseModel):
     message: str
     action_results: list[dict[str, Any]] = []
     preview_screenshot: str | None = None  # PNG base64 (apenas em waiting_for_user)
+    pending_user_input: dict | None = None  # {screenshot, user_prompt, step_id} quando waiting_for_user
 
 
 class AutomationContinueRequest(BaseModel):
     """Requisição para continuar automação após input do usuário."""
     task_id: str
+    user_input: Optional[str] = None  # texto digitado pelo usuário (CAPTCHA, OTP, etc.)
+
+    def model_post_init(self, __context) -> None:
+        if isinstance(self.user_input, str) and not self.user_input.strip():
+            raise ValueError("user_input não pode ser string vazia")
 
 
 # ---------------------------------------------------------------------------
