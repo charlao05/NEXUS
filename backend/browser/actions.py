@@ -415,3 +415,51 @@ def drag_and_drop(page: Page, source: str, target: str) -> None:
         page.drag_and_drop(source, target)
     except Exception as exc:
         raise RuntimeError(f"Falha no drag & drop de {source} para {target}: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# LGPD — Whitelist de campos permitidos para consultas na Receita Federal
+# ---------------------------------------------------------------------------
+def sanitize_receita_result(
+    raw_page_text: str,
+    task_id: str,
+    status: str,
+) -> dict[str, Any]:
+    """Extrai apenas campos permitidos do texto da página da Receita Federal.
+
+    Whitelist POR DESIGN — só passa o que está listado explicitamente.
+    Nunca persiste nome, data de nascimento, endereço ou qualquer outro PII
+    além dos 4 campos abaixo, mesmo que o site os retorne.
+
+    Campos permitidos:
+        - situacao: str  (REGULAR | IRREGULAR | PENDENTE | OUTRO)
+        - consulted_at: str  (ISO timestamp)
+        - task_id: str  (echo do task_id)
+        - status: str  (completed | failed)
+
+    # TODO: tier-2-4-7-pii-automation-tasks — criptografar goal/plan_json
+    #   CPF em texto plano em plan_json continua sendo issue separada.
+    """
+    import re
+    from datetime import datetime, timezone
+
+    # Detectar situação cadastral via regex (case-insensitive)
+    situacao = "OUTRO"
+    situacao_patterns = [
+        (r"\bREGULAR\b", "REGULAR"),
+        (r"\bIRREGULAR\b", "IRREGULAR"),
+        (r"\bPENDENTE\b", "PENDENTE"),
+    ]
+    for pattern, value in situacao_patterns:
+        if re.search(pattern, raw_page_text, re.IGNORECASE):
+            situacao = value
+            break
+
+    return {
+        "situacao": situacao,
+        "consulted_at": datetime.now(timezone.utc).isoformat(),
+        "task_id": task_id,
+        "status": status,
+        # NUNCA adicionar: nome, data_nascimento, inscricao, endereco, telefone
+        # Blacklist by design: se não está na whitelist acima, não entra.
+    }
