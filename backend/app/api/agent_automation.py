@@ -869,7 +869,7 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
                 params = step.get("params", {})
 
                 try:
-                    handler = action_map.get(action)
+                    # HIL: passo exige input do usuário e não foi fornecido                     if step.get("needs_user_input") and not user_input:                         user_prompt = step.get("user_prompt", "Forneça o dado necessário.")                         _pui_screenshot: str | None = None                         try:                             _pui_screenshot = _capture_preview_screenshot(task.get("user_id", 0))                         except Exception:                             pass                         return results, True, True, {                             "screenshot": _pui_screenshot,                             "user_prompt": user_prompt,                             "step_id": step.get("step"),                         }                     # Se user_input fornecido e este passo é type com needs_user_input, injetar                     if step.get("needs_user_input") and user_input and action == "type":                         params = {**params, "text": user_input}                     handler = action_map.get(action)
                     if handler:
                         r = handler(params, minimal_state)
                     else:
