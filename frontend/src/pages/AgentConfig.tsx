@@ -33,6 +33,7 @@ interface Message {
     risk_level?: string;
     status?: string;  // awaiting_approval, approved, rejected, executing, completed, waiting_for_user
     preview_screenshot?: string | null;  // PNG base64 (sem prefixo data:image)
+            pending_user_input?: { user_prompt: string; input_type?: string } | null;
   };
   confirmation?: {
     tool_name: string;
@@ -893,7 +894,7 @@ function AgentConfig() {
   };
 
   // --- Continuação de Automação (após user inserir creds no browser) ---
-  const handleAutomationContinue = async (taskId: string) => {
+    const handleAutomationContinue = async (taskId: string, userInput?: string) => {
     setIsLoading(true);
 
     // Atualizar status visualmente
@@ -918,6 +919,7 @@ function AgentConfig() {
     try {
       const response = await apiClient.post(apiUrl('/api/agents/automation/continue'), {
         task_id: taskId,
+                ...(userInput ? { user_input: userInput } : {}),
       }, {
         headers: { Authorization: `Bearer ${token}` },
       });
