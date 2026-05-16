@@ -1111,22 +1111,35 @@ async def approve_automation(
             message="🚫 Automação cancelada conforme solicitado.",
         )
 
-    # Executar!
-    _update_automation_task_status(request.task_id, "executing")
-    logger.info(f"🚀 Executando automação {request.task_id}: {task['goal'][:80]}")
+# Executar em background — retorna imediatamente para evitar timeout HTTP
+        # O frontend faz polling via GET /status/{task_id}
+        _update_automation_task_status(request.task_id, "executing")
+        logger.info(f"🚀 Executando automação {request.task_id} em background")
 
-    result = await _execute_automation(task)
+        async def _execute_and_update(t: dict) -> None:
+            try:
+                res = await _execute_automation(t)
+                _update_automation_task_status(
+                    t["task_id"], res.get("status", "completed"), result=res
+                )
+            except Exception as exc:
+                logger.error(f"Background automation error {t['task_id']}: {exc}", exc_info=True)
+                _update_automation_task_status(
+                    t["task_id"], "failed",
+                    result={"final_response": f"⚠️ Erro interno: {exc}"}
+                )
 
-    final_status = result.get("status", "completed")
-    _update_automation_task_status(request.task_id, final_status, result=result)
+        import asyncio as _asyncio_bg
+        _asyncio_bg.create_task(_execute_and_update(task))
 
-    return AutomationResultResponse(
-        task_id=request.task_id,
-        status=result.get("status", "completed"),
-        message=result.get("final_response", "Automação concluída."),
-        action_results=result.get("action_results", []),
-        preview_screenshot=result.get("preview_screenshot"),
-    )
+        return AutomationResultResponse(
+            task_id=request.task_id,
+            status="executing",
+            message="🤖 Automação iniciada! Vou atualizar o resultado em instantes.",
+            action_results=[],
+            preview_screenshot=None,
+            pending_user_input=None,
+        )
 
 
 @router.get("/status/{task_id}")
