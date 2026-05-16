@@ -816,7 +816,7 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         pass
 
-    def _run_steps_sync() -> tuple[list[dict[str, Any]], bool, bool]:
+    def _run_steps_sync() -> tuple[list[dict[str, Any]], bool, bool, dict | None]:
         """Execução síncrona dos passos Playwright.
         
         Returns:
@@ -909,18 +909,18 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
                     pass
 
             all_ok = all(r.get("success", False) for r in results)
-            return results, all_ok, needs_user_input
+            return results, all_ok, needs_user_input, None
 
         except ImportError as e:
             logger.error(f"Playwright não disponível: {e}")
-            return [{"step": 0, "action": "import", "success": False, "error": str(e)}], False, False
+            return [{"step": 0, "action": "import", "success": False, "error": str(e)}], False, False, None
         except Exception as e:
             logger.error(f"Erro na execução direta: {e}", exc_info=True)
-            return [{"step": 0, "action": "error", "success": False, "error": str(e)}], False, False
+            return [{"step": 0, "action": "error", "success": False, "error": str(e)}], False, False, None
 
     # Executar em thread separada para não bloquear o event loop async
     try:
-        results, all_ok, needs_user_input = await asyncio.to_thread(_run_steps_sync)
+        results, all_ok, needs_user_input, pending_user_input_data = await asyncio.to_thread(_run_steps_sync)
     except Exception as e:
         logger.error(f"Erro ao executar em thread: {e}")
         results = [{"step": 0, "action": "thread", "success": False, "error": str(e)}]
@@ -1179,7 +1179,7 @@ async def continue_automation(
     _update_automation_task_status(request.task_id, "executing")
     logger.info(f"🔄 Continuando automação {request.task_id} após input do usuário")
 
-    result = await _continue_automation(task)
+    result = await _continue_automation(task, user_input=request.user_input)
 
     final_status = result.get("status", "completed")
     _update_automation_task_status(request.task_id, final_status, result=result)
@@ -1193,7 +1193,7 @@ async def continue_automation(
     )
 
 
-async def _continue_automation(task: dict[str, Any]) -> dict[str, Any]:
+async def _continue_automation(task: dict[str, Any], user_input: str | None = None) -> dict[str, Any]:
     """Continua automação: re-sensa a página e executa próximos passos.
 
     O browser já está aberto (não foi fechado na execução anterior).
@@ -1265,10 +1265,10 @@ async def _continue_automation(task: dict[str, Any]) -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Erro ao continuar automação: {e}", exc_info=True)
-        return await _continue_direct(task)
+        return await _continue_direct(task, user_input=user_input)
 
 
-async def _continue_direct(task: dict[str, Any]) -> dict[str, Any]:
+async def _continue_direct(task: dict[str, Any], user_input: str | None = None) -> dict[str, Any]:
     """Fallback de continuação: captura estado atual + screenshot + responde."""
     import asyncio
     import time as _time
