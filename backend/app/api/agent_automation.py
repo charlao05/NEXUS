@@ -1161,13 +1161,22 @@ async def automation_status(
         "goal": task.get("goal", ""),
         "created_at": task.get("created_at"),
         "plan_summary": task.get("plan", {}).get("plan_summary", ""),
+        "result": task.get("result"),
+        "preview_screenshot": (task.get("result") or {}).get("preview_screenshot"),
+        "pending_user_input": (task.get("result") or {}).get("pending_user_input"),
+        "message": (task.get("result") or {}).get("final_response", ""),
     }
-
-
 # ---------------------------------------------------------------------------
 # Continuação: retomar automação após input do usuário (login, etc.)
 # ---------------------------------------------------------------------------
 
+async def _continue_and_update(task: dict, user_input: "str | None") -> None:
+        try:
+                    res = await _continue_automation(task, user_input=user_input)
+                    _update_automation_task_status(task["task_id"], res.get("status", "completed"), result=res)
+                except Exception as exc:
+                            logger.error(f"BG continue {task['task_id']}: {exc}", exc_info=True)
+                                    _update_automation_task_status(task["task_id"], "failed", result={"final_response": f"Erro: {exc}"})
 @router.post("/continue", response_model=AutomationResultResponse)
 async def continue_automation(
     request: AutomationContinueRequest,
@@ -1192,17 +1201,17 @@ async def continue_automation(
     _update_automation_task_status(request.task_id, "executing")
     logger.info(f"🔄 Continuando automação {request.task_id} após input do usuário")
 
-    result = await _continue_automation(task, user_input=request.user_input)
+            import asyncio as _ai; _ai.create_task(_continue_and_update(task, request.user_input))
 
-    final_status = result.get("status", "completed")
-    _update_automation_task_status(request.task_id, final_status, result=result)
+        # Background task handles update — nothing to do here
+        # (handled by _continue_and_update background task)
 
     return AutomationResultResponse(
-        task_id=request.task_id,
-        status=result.get("status", "completed"),
-        message=result.get("final_response", "Automação concluída."),
-        action_results=result.get("action_results", []),
-        preview_screenshot=result.get("preview_screenshot"),
+                status="executing",
+                message="🔄 Retomando em background...",
+                action_results=[],
+                preview_screenshot=None,
+                task_id=request.task_id,
     )
 
 
