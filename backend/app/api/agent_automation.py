@@ -521,7 +521,8 @@ Formato:
     "plan_summary": "Resumo do plano em português simples",
     "risk_level": "low|medium|high",
     "steps": [
-        {{"step": 1, "action": "navigate", "description": "Abrir site X", "params": {{"url": "..."}}}}
+        {{"step": 1, "action": "navigate", "description": "Abrir site X", "params": {{"url": "..."}}}},
+        {{"step": 2, "action": "type", "description": "Digite o CAPTCHA", "params": {{"selector": "#captcha", "text": ""}}, "needs_user_input": true, "user_prompt": "Digite o codigo do CAPTCHA"}}
     ]
 }}
 """
