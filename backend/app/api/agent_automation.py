@@ -779,10 +779,27 @@ async def _execute_automation(task: dict[str, Any]) -> dict[str, Any]:
         return await _execute_direct(task)
 
 
-async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
+def _step_num(step: dict[str, Any]) -> int:
+    """Número do step (1-indexed) de forma tolerante a tipos."""
+    try:
+        return int(step.get("step") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+async def _execute_direct(
+    task: dict[str, Any],
+    *,
+    resume_from_step_id: int | None = None,
+    injected_input: str | None = None,
+) -> dict[str, Any]:
     """Fallback: executa passos diretamente via Playwright (sem orchestrator).
 
     Roda sync Playwright via asyncio.to_thread para não bloquear o event loop.
+
+    resume_from_step_id / injected_input: usados quando retomamos após uma
+    pausa step-level (ex: usuário digitou o CAPTCHA). Executa só os steps a
+    partir de resume_from_step_id, injetando injected_input no step pausado.
     """
     import asyncio
     import time as _time
@@ -825,6 +842,7 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
         """
         results: list[dict[str, Any]] = []
         needs_user_input = False
+        paused_step: dict[str, Any] | None = None
         try:
             from orchestrator.tools.browser import (
                 browser_navigate, browser_click, browser_type,
@@ -866,11 +884,47 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
             }
 
             for step in task.get("steps", []):
+                _sn = _step_num(step)
+
+                # Resume: pular steps já executados antes da pausa.
+                if resume_from_step_id is not None and _sn < resume_from_step_id:
+                    continue
+
                 action = step.get("action", "")
-                params = step.get("params", {})
+                params = dict(step.get("params", {}))
+
+                # Step pausado sendo retomado: injetar o que o usuário digitou
+                # (ex: código do CAPTCHA) no param de texto e não pausar de novo.
+                is_resume_target = (
+                    resume_from_step_id is not None and _sn == resume_from_step_id
+                )
+                if is_resume_target and injected_input is not None:
+                    params["text"] = injected_input
+                    params["value"] = injected_input
+
+                # Pausa step-level: step marcado pelo planner como
+                # needs_user_input pausa ANTES de executar — exceto o próprio
+                # step que estamos retomando (já tem o input injetado).
+                if (
+                    step.get("needs_user_input")
+                    and not is_resume_target
+                ):
+                    paused_step = {
+                        "step_id": _sn,
+                        "user_prompt": (
+                            step.get("user_prompt")
+                            or "Digite a informação solicitada na tela."
+                        ),
+                    }
+                    needs_user_input = True
+                    results.append({
+                        "step": _sn, "action": step.get("action", ""),
+                        "success": False, "paused_for_user_input": True,
+                    })
+                    break
 
                 try:
-                    # HIL: passo exige input do usuário e não foi fornecido                     if step.get("needs_user_input") and not user_input:                         user_prompt = step.get("user_prompt", "Forneça o dado necessário.")                         _pui_screenshot: str | None = None                         try:                             _pui_screenshot = _capture_preview_screenshot(task.get("user_id", 0))                         except Exception:                             pass                         return results, True, True, {                             "screenshot": _pui_screenshot,                             "user_prompt": user_prompt,                             "step_id": step.get("step"),                         }                     # Se user_input fornecido e este passo é type com needs_user_input, injetar                     if step.get("needs_user_input") and user_input and action == "type":                         params = {**params, "text": user_input}                     handler = action_map.get(action)
+                    handler = action_map.get(action)
                     if handler:
                         r = handler(params, minimal_state)
                     else:
@@ -890,15 +944,19 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
                     results.append({"step": step.get("step"), "action": action, "success": False, "error": str(e)})
                     break
 
-            # Pós-execução: verificar se a página precisa de input do usuário
-            try:
-                ps_result = browser_get_page_state({}, minimal_state)
-                if ps_result.get("success"):
-                    ps = ps_result.get("page_state", {})
-                    if isinstance(ps, dict) and ps.get("page_type") in ("login", "form"):
-                        needs_user_input = True
-            except Exception:
-                pass
+            # Pós-execução: detector reativo como SEGUNDA linha de defesa.
+            # Se o planner esqueceu de marcar needs_user_input mas a página é
+            # login/form, ainda pausamos. NÃO seta paused_step (sem step_id —
+            # é o fluxo legacy de login, não step-level).
+            if paused_step is None:
+                try:
+                    ps_result = browser_get_page_state({}, minimal_state)
+                    if ps_result.get("success"):
+                        ps = ps_result.get("page_state", {})
+                        if isinstance(ps, dict) and ps.get("page_type") in ("login", "form"):
+                            needs_user_input = True
+                except Exception:
+                    pass
 
             # Só fechar browser se NÃO precisar de input do usuário.
             # Passar user_id para liberar somente a sessao desse usuario
@@ -910,7 +968,7 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
                     pass
 
             all_ok = all(r.get("success", False) for r in results)
-            return results, all_ok, needs_user_input, None
+            return results, all_ok, needs_user_input, paused_step
 
         except ImportError as e:
             logger.error(f"Playwright não disponível: {e}")
@@ -921,12 +979,13 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
 
     # Executar em thread separada para não bloquear o event loop async
     try:
-        results, all_ok, needs_user_input, pending_user_input_data = await asyncio.to_thread(_run_steps_sync)
+        results, all_ok, needs_user_input, paused_step = await asyncio.to_thread(_run_steps_sync)
     except Exception as e:
         logger.error(f"Erro ao executar em thread: {e}")
         results = [{"step": 0, "action": "thread", "success": False, "error": str(e)}]
         all_ok = False
         needs_user_input = False
+        paused_step = None
 
     # Circuit breaker — detectar e formatar mensagem amigavel
     circuit_open_step = next(
@@ -943,6 +1002,16 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
             f"⚡ **{domain} está com instabilidade no momento.**\n\n"
             f"Para proteger sua conta, pausei tentativas por aproximadamente "
             f"{retry_min} min. Tente novamente depois — a automação volta automaticamente."
+        )
+    elif needs_user_input and paused_step is not None:
+        # Pausa step-level (ex: CAPTCHA): pede exatamente o que o planner
+        # definiu em user_prompt. O usuário digita aqui (não no site).
+        status = "waiting_for_user"
+        message = (
+            _format_results_for_chat(results)
+            + "\n\n🔐 **"
+            + str(paused_step.get("user_prompt", "Digite a informação solicitada."))
+            + "**\n\nDigite no campo abaixo e clique em **Continuar**."
         )
     elif needs_user_input:
         status = "waiting_for_user"
@@ -989,13 +1058,22 @@ async def _execute_direct(task: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             preview_b64 = None
 
-    return {
+    out: dict[str, Any] = {
         "task_id": task.get("task_id", "unknown"),
         "status": status,
         "final_response": message,
         "action_results": results,
         "preview_screenshot": preview_b64,
     }
+    # Pausa step-level genérica (qualquer step pode pausar, não só CAPTCHA —
+    # step_id substitui captcha_selector).
+    if status == "waiting_for_user" and paused_step is not None:
+        out["pending_user_input"] = {
+            "screenshot": preview_b64,
+            "user_prompt": paused_step.get("user_prompt"),
+            "step_id": paused_step.get("step_id"),
+        }
+    return out
 
 
 def _format_results_for_chat(results: list[dict[str, Any]]) -> str:
@@ -1172,12 +1250,12 @@ async def automation_status(
 # ---------------------------------------------------------------------------
 
 async def _continue_and_update(task: dict, user_input: "str | None") -> None:
-        try:
-                    res = await _continue_automation(task, user_input=user_input)
-                    _update_automation_task_status(task["task_id"], res.get("status", "completed"), result=res)
-                except Exception as exc:
-                            logger.error(f"BG continue {task['task_id']}: {exc}", exc_info=True)
-                                    _update_automation_task_status(task["task_id"], "failed", result={"final_response": f"Erro: {exc}"})
+    try:
+        res = await _continue_automation(task, user_input=user_input)
+        _update_automation_task_status(task["task_id"], res.get("status", "completed"), result=res)
+    except Exception as exc:
+        logger.error(f"BG continue {task['task_id']}: {exc}", exc_info=True)
+        _update_automation_task_status(task["task_id"], "failed", result={"final_response": f"Erro: {exc}"})
 @router.post("/continue", response_model=AutomationResultResponse)
 async def continue_automation(
     request: AutomationContinueRequest,
@@ -1202,17 +1280,17 @@ async def continue_automation(
     _update_automation_task_status(request.task_id, "executing")
     logger.info(f"🔄 Continuando automação {request.task_id} após input do usuário")
 
-            import asyncio as _ai; _ai.create_task(_continue_and_update(task, request.user_input))
-
-        # Background task handles update — nothing to do here
-        # (handled by _continue_and_update background task)
+    import asyncio as _ai
+    _ai.create_task(_continue_and_update(task, request.user_input))
+    # Background task handles update — nothing to do here
+    # (handled by _continue_and_update background task)
 
     return AutomationResultResponse(
-                status="executing",
-                message="🔄 Retomando em background...",
-                action_results=[],
-                preview_screenshot=None,
-                task_id=request.task_id,
+        status="executing",
+        message="🔄 Retomando em background...",
+        action_results=[],
+        preview_screenshot=None,
+        task_id=request.task_id,
     )
 
 
@@ -1227,6 +1305,23 @@ async def _continue_automation(task: dict[str, Any], user_input: str | None = No
     2. plan_node: planejar ações normais (sem wait_for_user_login, já que a tela mudou)
     3. act_node: executar ações (extrair dados, baixar PDF, etc.)
     """
+    # Resume step-level: se a pausa anterior foi por um step com
+    # needs_user_input (pending_user_input.step_id presente) E o usuário
+    # digitou algo, retomamos direto os steps injetando o input. Não passa
+    # pelo orchestrator (que é o fluxo legacy de login no browser).
+    pending = (task.get("result") or {}).get("pending_user_input") or {}
+    pending_step_id = pending.get("step_id")
+    if pending_step_id is not None and user_input is not None:
+        logger.info(
+            f"↪️ Resume step-level task {task.get('task_id')} "
+            f"step_id={pending_step_id} (input do usuário injetado)"
+        )
+        return await _execute_direct(
+            task,
+            resume_from_step_id=int(pending_step_id),
+            injected_input=user_input,
+        )
+
     try:
         import orchestrator.tools.browser  # noqa: F401
         from orchestrator.graph import run_task
