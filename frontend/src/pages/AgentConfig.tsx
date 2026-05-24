@@ -879,7 +879,7 @@ function AgentConfig() {
 
     } catch (err) {
       const errorMsg = axios.isAxiosError(err)
-        ? ((err.response?.data?.detail && err.response.data.detail !== 'None' ? err.response.data.detail : 'Erro ao processar automação')ção')
+              ? (err.response?.data?.detail || 'Erro ao processar automação')
         : 'Erro ao processar automação';
       const agentResponse: Message = {
         id: (Date.now() + 1).toString(),
