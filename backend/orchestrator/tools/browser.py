@@ -672,3 +672,34 @@ def browser_get_page_state(params: dict, state: AgentState) -> dict[str, Any]:
         }
 
     return _execute(state, "browser_get_page_state", _fn, risk="low")
+
+
+@register_browser_tool("browser_fill_form")
+def browser_fill_form(params: dict, state: AgentState) -> dict[str, Any]:
+    """Preenche multiplos campos de formulario de uma vez.
+
+    params:
+        fields: list[{selector: str, value: str, humanize?: bool}]
+        submit: bool = False
+    """
+    fields = params.get("fields", [])
+    submit_after = params.get("submit", False)
+    if not fields:
+        return {"success": False, "message": "Nenhum campo fornecido em 'fields'"}
+    results = []
+    for field in fields:
+        res = browser_type(
+            {"selector": field.get("selector", ""), "text": field.get("value", ""), "humanize": field.get("humanize", False)},
+            state,
+        )
+        results.append({"selector": field.get("selector"), "ok": res.get("success", False)})
+        if not res.get("success", False):
+            return {"success": False, "message": f"Falha em '{field.get('selector')}': {res.get('message', '')}", "results": results}
+    if submit_after:
+        submit_res = browser_submit_form({}, state)
+        results.append({"submit": True, "ok": submit_res.get("success", False)})
+    return {
+        "success": True,
+        "message": f"{len(fields)} campo(s) preenchido(s)" + (". Formulario enviado." if submit_after else ""),
+        "results": results,
+    }
