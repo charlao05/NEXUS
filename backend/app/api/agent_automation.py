@@ -84,6 +84,10 @@ def _task_to_dict(t: Any) -> dict[str, Any]:
 
 def _save_automation_task(task_data: dict[str, Any]) -> None:
     """Persiste task no DB. Em dev, fallback in-memory se DB falhar."""
+    # LGPD: sanitizar PII antes de qualquer acesso ao BD
+    for _pii_key in ("goal", "message"):
+        if _pii_key in task_data and task_data[_pii_key]:
+            task_data[_pii_key] = _sanitize_pii(task_data[_pii_key])
     import json as _json
     try:
         from database.models import SessionLocal, AutomationTask
