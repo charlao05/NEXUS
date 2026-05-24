@@ -1587,3 +1587,46 @@ async def _continue_direct(task: dict[str, Any], user_input: str | None = None) 
         "final_response": message,
         "action_results": results,
     }
+
+
+# ============================================================
+# UTILIDADE: Sanitizacao de PII antes do armazenamento
+# Mascara CPF e CNPJ em texto livre para LGPD compliance
+# ============================================================
+import re as _re
+
+def _sanitize_pii(text: str) -> str:
+    """Mascara CPF e CNPJ em texto livre.
+
+    CPF formatado:   000.000.000-00  -> ***.***.***-**
+    CPF puro:        00000000000     -> ***.***.***-**
+    CNPJ formatado:  00.000.000/0000-00 -> **.***.***/****-**
+    CNPJ puro:       00000000000000  -> **.***.***/****-**
+    """
+    if not isinstance(text, str):
+        return text
+    # CNPJ formatado (14 digitos com mascara)
+    text = _re.sub(
+        r'\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}',
+        '**.***.***/****-**',
+        text,
+    )
+    # CNPJ puro (14 digitos consecutivos)
+    text = _re.sub(
+        r'(?<!\d)\d{14}(?!\d)',
+        '**.***.***/****-**',
+        text,
+    )
+    # CPF formatado (11 digitos com mascara)
+    text = _re.sub(
+        r'\d{3}\.\d{3}\.\d{3}-\d{2}',
+        '***.***.***.***-**',
+        text,
+    )
+    # CPF puro (11 digitos consecutivos) — nao sobrepoe CNPJ ja mascarado
+    text = _re.sub(
+        r'(?<!\d)\d{11}(?!\d)',
+        '***.***.***-**',
+        text,
+    )
+    return text
