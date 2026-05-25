@@ -656,6 +656,7 @@ async def execute_agent_action(
                     "automation": {
                         "task_id": auto_result.task_id,
                         "requires_approval": True,
+                        "status": "awaiting_approval",
                         "plan_summary": auto_result.plan_summary,
                         "steps": auto_result.steps,
                         "risk_level": auto_result.risk_level,
