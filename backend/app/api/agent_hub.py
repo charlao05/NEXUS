@@ -629,6 +629,73 @@ async def execute_agent_action(
             except Exception as e2:
                 logger.debug(f"Chat não persistido: {e2}")
 
+    # ── Auto-Approve: se ha automacao pendente, "sim/ok/pode" executa direto ───
+    # NEXUS DNA: execucao imediata. NUNCA criar lembrete quando ha plano pendente.
+    user_message_raw = action.parameters.get("message", "") or ""
+    _automation_agents_aa = {"assistente", "contabilidade", "agenda"}
+    if user_message_raw and action.action in ("smart_chat", "chat") and agent_id in _automation_agents_aa:
+        try:
+            _msg_lower = user_message_raw.strip().lower()
+            _approve_words = (
+                "sim", "ok", "okay", "pode", "pode prosseguir", "prossiga", "prosseguir",
+                "vai", "manda", "manda bala", "executa", "executar", "aprovo", "aprovado",
+                "confirma", "confirmo", "confirmado", "tudo certo", "beleza", "blz",
+                "concordo", "autorizo", "autorizado", "faz", "faca", "faça", "segue",
+                "yes", "go", "do it",
+            )
+            _reject_words = (
+                "nao", "não", "cancela", "cancelar", "cancelado", "rejeita", "rejeitar",
+                "para", "pare", "stop", "no", "negativo",
+            )
+            _is_approve = _msg_lower in _approve_words or any(
+                _msg_lower.startswith(w + " ") or _msg_lower.startswith(w + ",") or _msg_lower.startswith(w + "!")
+                for w in _approve_words
+            )
+            _is_reject = _msg_lower in _reject_words or any(
+                _msg_lower.startswith(w + " ") or _msg_lower.startswith(w + ",") or _msg_lower.startswith(w + "!")
+                for w in _reject_words
+            )
+            if (_is_approve or _is_reject) and _user_id:
+                try:
+                    from database.models import SessionLocal as _SL_AA, AutomationTask as _AT_AA
+                    _db_aa = _SL_AA()
+                    try:
+                        _pending = (
+                            _db_aa.query(_AT_AA)
+                            .filter(_AT_AA.user_id == _user_id)
+                            .filter(_AT_AA.agent_id == agent_id)
+                            .filter(_AT_AA.status == "awaiting_approval")
+                            .order_by(_AT_AA.created_at.desc())
+                            .first()
+                        )
+                        _pending_task_id = _pending.task_id if _pending else None
+                    finally:
+                        _db_aa.close()
+                except Exception as _ex_aa_db:
+                    logger.debug(f"Auto-approve DB lookup falhou: {_ex_aa_db}")
+                    _pending_task_id = None
+                if _pending_task_id:
+                    from app.api.agent_automation import approve_automation, AutomationApproveRequest
+                    _appr_req = AutomationApproveRequest(
+                        task_id=_pending_task_id,
+                        approved=_is_approve,
+                        reason="" if _is_approve else "Usuario cancelou via chat",
+                    )
+                    _appr_result = await approve_automation(_appr_req, current_user=current_user)
+                    _save_chat(user_message_raw, _appr_result.message, _user_id)
+                    return {
+                        "status": "success",
+                        "agent_id": agent_id,
+                        "action": "automation_approved" if _is_approve else "automation_rejected",
+                        "message": _appr_result.message,
+                        "automation": {
+                            "task_id": _appr_result.task_id,
+                            "status": _appr_result.status,
+                        },
+                    }
+        except Exception as _ex_aa:
+            logger.error(f"Auto-approve falhou: {_ex_aa}", exc_info=True)
+
     # ── Detectar intenção de automação web ────────────────────────
     user_message = action.parameters.get("message", "")
     # Automação disponível para assistente e contabilidade (DAS, NF, Receita)
