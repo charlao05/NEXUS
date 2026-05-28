@@ -642,10 +642,18 @@ async def execute_agent_action(
                 "confirma", "confirmo", "confirmado", "tudo certo", "beleza", "blz",
                 "concordo", "autorizo", "autorizado", "faz", "faca", "faça", "segue",
                 "yes", "go", "do it",
+                "bora", "bora la", "bora lá", "vai sim", "ta ok", "tá ok", "ta bom",
+                "tá bom", "deboa", "de boa", "demorou", "isso", "certo", "claro",
+                "com certeza", "pode sim", "manda ver", "pode ir", "vamo", "vamos",
+                "vamo la", "vamo lá", "show", "show de bola", "perfeito", "excelente",
+                "ótimo", "otimo", "boa", "fechou", "combinado", "aceitei", "aceito",
             )
             _reject_words = (
                 "nao", "não", "cancela", "cancelar", "cancelado", "rejeita", "rejeitar",
                 "para", "pare", "stop", "no", "negativo",
+                "espera", "aguarda", "calma", "espere", "perai", "pera",
+                "nao quero", "não quero", "desiste", "desistir", "esquece",
+                "aborta", "abortar", "suspende", "suspender",
             )
             _is_approve = _msg_lower in _approve_words or any(
                 _msg_lower.startswith(w + " ") or _msg_lower.startswith(w + ",") or _msg_lower.startswith(w + "!")
