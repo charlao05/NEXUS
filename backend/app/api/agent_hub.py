@@ -632,7 +632,8 @@ async def execute_agent_action(
     # ── Auto-Approve: se ha automacao pendente, "sim/ok/pode" executa direto ───
     # NEXUS DNA: execucao imediata. NUNCA criar lembrete quando ha plano pendente.
     user_message_raw = action.parameters.get("message", "") or ""
-    _automation_agents_aa = {"assistente", "contabilidade", "agenda"}
+    _automation_agents = 
+    {"assistente", "contabilidade", "agenda", "clientes", "cobranca"}
     if user_message_raw and action.action in ("smart_chat", "chat") and agent_id in _automation_agents_aa:
         try:
             _msg_lower = user_message_raw.strip().lower()
@@ -699,7 +700,7 @@ async def execute_agent_action(
     # ── Detectar intenção de automação web ────────────────────────
     user_message = action.parameters.get("message", "")
     # Automação disponível para assistente e contabilidade (DAS, NF, Receita)
-    _automation_agents = {"assistente", "contabilidade", "agenda"}
+    _automation_agents = {"assistente", "contabilidade", "agenda", "clientes", "cobranca"}
     if user_message and action.action in ("smart_chat", "chat") and agent_id in _automation_agents:
         try:
             from app.api.agent_automation import _detect_automation_intent
