@@ -723,6 +723,29 @@ async def execute_agent_action(
                 )
                 auto_result = await _start_automation_core(auto_req, user_id=_user_id or 1)
                 _save_chat(user_message, auto_result.message, _user_id)
+                # ── AUTOMATION_MSG_WEIGHT: debitar peso extra no contador diário ──
+                # 1 automação custa AUTOMATION_MSG_WEIGHT msgs equivalentes (custo real ~5x chat).
+                # Já foi salvo 1 ChatMessage(role="user") pelo _save_chat acima.
+                # Inserimos AUTOMATION_MSG_WEIGHT - 1 registros extras de débito.
+                try:
+                    from app.core.plan_limits import AUTOMATION_MSG_WEIGHT
+                    from database.models import ChatMessage as _CM, SessionLocal as _SL2
+                    _extra = AUTOMATION_MSG_WEIGHT - 1  # = 4 débitos extras (total: 5)
+                    if _extra > 0 and _user_id:
+                        _db2 = _SL2()
+                        try:
+                            for _ in range(_extra):
+                                _db2.add(_CM(
+                                    user_id=_user_id,
+                                    agent_id=agent_id,
+                                    role="user",
+                                    content="[automation_weight_debit]",
+                                ))
+                            _db2.commit()
+                        finally:
+                            _db2.close()
+                except Exception as _we:
+                    logger.warning(f"automation weight debit falhou (nao critico): {_we}")
                 return {
                     "status": "success",
                     "agent_id": agent_id,
