@@ -2818,6 +2818,70 @@ async def admin_infra_cost_distribution(
             distribution.sort(key=lambda x: -x["compute_cost_brl"])
             unattributed_brl = round(float(snap.total_brl) - total_attributed, 4)
 
+            # ── Issue #6 — Tier 2.3.2: Calibração do K (_DURATION_TO_TOKEN_EQUIV) ──
+            # Calcula ratio tokens/duration_ms no período para guiar ajuste do K.
+            # K ideal = media(tokens_i / duration_ms_i) por request com ambos > 0.
+            # Se K_atual (1.0) >> K_real → duration_ms tem peso exagerado (prejudica
+            # users lentos). Se K_atual << K_real → tokens domina (ignora infra cost).
+            # Recomendação: ajustar K = percentil_75 do ratio observado.
+            k_calibration: dict = {}
+            try:
+                from sqlalchemy import func as _sqlfunc
+                # Ratio médio: tokens / duration_ms por registro LLM com ambos > 0
+                ratio_rows = (
+                    db.query(
+                        LLMUsageRecord.total_tokens,
+                        LLMUsageRecord.duration_ms,
+                    )
+                    .filter(
+                        LLMUsageRecord.ts >= start_dt,
+                        LLMUsageRecord.ts <= end_dt,
+                        LLMUsageRecord.total_tokens > 0,
+                        LLMUsageRecord.duration_ms > 0,
+                    )
+                    .all()
+                )
+                if ratio_rows:
+                    ratios = [r[0] / r[1] for r in ratio_rows if r[1] > 0]
+                    ratios.sort()
+                    n = len(ratios)
+                    p50 = ratios[n // 2]
+                    p75 = ratios[int(n * 0.75)]
+                    p90 = ratios[int(n * 0.90)]
+                    avg = sum(ratios) / n
+                    # SUM(tokens) / SUM(duration_ms) = ratio agregado (mais estável)
+                    sum_tokens = sum(r[0] for r in ratio_rows)
+                    sum_duration = sum(r[1] for r in ratio_rows)
+                    ratio_aggregated = sum_tokens / sum_duration if sum_duration > 0 else 0.0
+                    k_calibration = {
+                        "current_K": _DURATION_TO_TOKEN_EQUIV,
+                        "sample_size": n,
+                        "ratio_avg": round(avg, 4),
+                        "ratio_p50": round(p50, 4),
+                        "ratio_p75": round(p75, 4),
+                        "ratio_p90": round(p90, 4),
+                        "ratio_aggregated": round(ratio_aggregated, 4),
+                        "recommended_K": round(p75, 4),
+                        "k_status": (
+                            "OK — K está próximo do P75 observado"
+                            if abs(_DURATION_TO_TOKEN_EQUIV - p75) / max(p75, 0.001) < 0.20
+                            else "REVISAR — K diverge mais de 20% do P75 observado"
+                        ),
+                        "note": (
+                            "Issue #6 Tier 2.3.2: ajuste K = recommended_K para "
+                            "calibrar peso duration_ms no rateio de custo."
+                        ),
+                    }
+                else:
+                    k_calibration = {
+                        "current_K": _DURATION_TO_TOKEN_EQUIV,
+                        "sample_size": 0,
+                        "note": "Sem dados LLM no período para calibrar K. Aguardar 30 dias de produção.",
+                    }
+            except Exception as _ke:
+                logger.warning(f"k_calibration falhou (nao critico): {_ke}")
+                k_calibration = {"current_K": _DURATION_TO_TOKEN_EQUIV, "error": str(_ke)}
+
             return {
                 "period": {
                     "start": snap.period_start.isoformat(),
@@ -2837,6 +2901,7 @@ async def admin_infra_cost_distribution(
                 "unattributed_brl": unattributed_brl,
                 "distribution": distribution[:limit],
                 "truncated": len(distribution) > limit,
+                "k_calibration": k_calibration,
             }
         finally:
             db.close()
