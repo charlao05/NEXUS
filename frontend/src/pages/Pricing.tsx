@@ -38,8 +38,8 @@ const plans: Plan[] = [
       '✅ CRM: até 10 clientes e 10 fornecedores',
       '✅ Cadastro de produtos e serviços',
       '✅ Agenda e compromissos básicos',
-      '🎁 Degustação de IA por 3 dias (20 msgs/dia)',
-      '🎁 2 automações web por dia na degustação',
+      '🎁 Degustação de IA por 3 dias (10 msgs/dia)',
+      '🎁 1 automação web por dia na degustação',
       '✅ Sem cartão de crédito',
     ],
   },
@@ -329,7 +329,7 @@ export default function Pricing() {
                 <h3 className="text-white font-bold text-base">Precisa de Mais Clientes Sem Mudar de Plano?</h3>
                 <p className="text-indigo-200 text-sm mt-1">
                   Adicione <span className="text-amber-300 font-semibold">+10 clientes e +10 fornecedores</span> ao seu plano gratuito por apenas{' '}
-                  <span className="text-amber-300 font-semibold">R$ 12,90 (compra única)</span>. Mensagens proporcionais inclusas.
+                  <span className="text-amber-300 font-semibold">R$ 12,90 (compra única)</span>. Expande apenas CRM (clientes/fornecedores).
                 </p>
                 <p className="text-green-400/80 text-xs mt-1 flex items-center gap-1">
                   <span>💳</span> Cartão ou <span className="font-semibold">PIX</span> — QR Code válido por 30 min
