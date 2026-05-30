@@ -721,7 +721,7 @@ async def execute_agent_action(
                     message=user_message,
                     user_id=_user_id or 1,
                 )
-                auto_result = await _start_automation_core(auto_req, user_id=_user_id or 1)
+                auto_result = await _start_automation_core(auto_req, user_id=_user_id or 1, current_user=current_user)
                 _save_chat(user_message, auto_result.message, _user_id)
                 # ── AUTOMATION_MSG_WEIGHT: debitar peso extra no contador diário ──
                 # 1 automação custa AUTOMATION_MSG_WEIGHT msgs equivalentes (custo real ~5x chat).
