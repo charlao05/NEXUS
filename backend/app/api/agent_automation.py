@@ -212,7 +212,8 @@ def _check_automation_rate_limit(user_id: int) -> None:
             status_code=429,
             detail={
                 "code": "AUTOMATION_RATE_LIMIT",
-                "message": f"Limite de {_AUTOMATION_MAX_PER_HOUR} automações por hora atingido. Tente novamente em alguns minutos.",
+                "message": f"Você atingiu o limite de {_AUTOMATION_MAX_PER_HOUR} automações por hora. Aguarde alguns minutos ou faça upgrade do plano.",
+                "upgrade_url": "/pricing",
             },
         )
     timestamps.append(now)
@@ -246,6 +247,7 @@ class AutomationStartResponse(BaseModel):
     steps: list[dict[str, Any]]  # Passos detalhados
     risk_level: str  # low, medium, high, critical
     message: str  # Mensagem amigável para o chat
+    trial_days_remaining: int | None = None  # Dias restantes no trial free (None = plano pago)
 
 
 class AutomationResultResponse(BaseModel):
@@ -1115,15 +1117,22 @@ async def start_automation(
 ) -> AutomationStartResponse:
     """Inicia automação: gera plano e retorna para aprovação do usuário. Requer autenticação."""
     user_id = current_user["user_id"]
-    return await _start_automation_core(request, user_id)
+    return await _start_automation_core(request, user_id, current_user=current_user)
 
 
 async def _start_automation_core(
     request: AutomationStartRequest,
     user_id: int,
+    current_user: dict | None = None,
 ) -> AutomationStartResponse:
     """Core logic para iniciar automação — chamável tanto pelo endpoint quanto por agent_hub."""
-    # Rate limit: máximo 10 automações/hora por usuário
+    # ── Freemium: verificar limite de automações do plano/trial ───────────
+    # Se current_user não foi passado (chamada interna), monta dict mínimo;
+    # check_automation_limit buscará created_at do DB pelo user_id.
+    _cu = current_user or {"user_id": user_id, "plan": "free", "role": "user"}
+    from app.services.limit_service import check_automation_limit as _check_auto_plan_limit
+    _check_auto_plan_limit(_cu)
+    # Rate limit de sessão (memória, por hora):
     _check_automation_rate_limit(user_id)
 
     task_id = f"auto_{uuid.uuid4().hex[:12]}"
@@ -1160,6 +1169,29 @@ async def _start_automation_core(
         "status": "awaiting_approval",
     })
 
+    # Calcular dias restantes do trial para expor ao frontend
+    _trial_days_left: int | None = None
+    if _cu.get("plan", "free") == "free":
+        try:
+            from app.core.plan_limits import is_in_ai_trial, FREE_AI_TRIAL_DAYS
+            _created = _cu.get("created_at")
+            if _created is None:
+                from database.models import User
+                _sess = __import__('app.services.limit_service', fromlist=['_get_session'])._get_session()
+                try:
+                    _db_u = _sess.query(User).filter(User.id == user_id).first()
+                    _created = getattr(_db_u, 'created_at', None) if _db_u else None
+                finally:
+                    _sess.close()
+            if _created and is_in_ai_trial(_created):
+                from datetime import timezone
+                _now = __import__('datetime').datetime.now(timezone.utc)
+                if hasattr(_created, 'tzinfo') and _created.tzinfo is None:
+                    _created = _created.replace(tzinfo=timezone.utc)
+                _elapsed = (_now - _created).days
+                _trial_days_left = max(0, FREE_AI_TRIAL_DAYS - _elapsed)
+        except Exception:
+            pass  # non-critical: UI só não mostrará o contador
     return AutomationStartResponse(
         task_id=task_id,
         status="awaiting_approval",
@@ -1167,6 +1199,7 @@ async def _start_automation_core(
         steps=plan.get("steps", []),
         risk_level=plan.get("risk_level", "medium"),
         message=chat_message,
+        trial_days_remaining=_trial_days_left,
     )
 
 
@@ -1280,6 +1313,12 @@ async def continue_automation(
             status_code=400,
             detail=f"Automação não está aguardando continuação (status: {task['status']})",
         )
+
+
+    # ── Freemium: re-verificar limite no /continue ─────────────────────────
+    # Cada "continue" consome recursos equivalentes a 1 automação.
+    from app.services.limit_service import check_automation_limit as _check_auto_plan_limit_cont
+    _check_auto_plan_limit_cont(current_user)
 
     _update_automation_task_status(request.task_id, "executing")
     logger.info(f"🔄 Continuando automação {request.task_id} após input do usuário")
