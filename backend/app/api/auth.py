@@ -83,6 +83,7 @@ class UserProfile(BaseModel):
     address_zip: Optional[str] = None
     birth_date: Optional[str] = None
     business_type: Optional[str] = None
+    trial_days_remaining: Optional[int] = None  # Dias restantes no trial free (apenas plan="free")
 
 
 class PaymentCheckout(BaseModel):
@@ -546,6 +547,19 @@ async def get_profile(current_user: dict[str, Any] = Depends(get_current_user)):
     finally:
         db.close()
 
+    # Calcular trial_days_remaining para plano free
+    _trial_days_remaining: int | None = None
+    if plan == "free":
+        try:
+            from app.core.plan_limits import is_in_ai_trial, FREE_AI_TRIAL_DAYS
+            if created_at and is_in_ai_trial(created_at):
+                _ca = created_at
+                if hasattr(_ca, 'tzinfo') and _ca.tzinfo is None:
+                    _ca = _ca.replace(tzinfo=timezone.utc)
+                _elapsed = (datetime.now(timezone.utc) - _ca).days
+                _trial_days_remaining = max(0, FREE_AI_TRIAL_DAYS - _elapsed)
+        except Exception:
+            pass  # não critico: frontend usa None para esconder o banner
     return UserProfile(
         user_id=str(current_user["user_id"]),
         email=str(current_user["email"]),
@@ -574,6 +588,7 @@ async def get_profile(current_user: dict[str, Any] = Depends(get_current_user)):
         address_zip=getattr(user, "address_zip", None) if user else None,
         birth_date=str(user.birth_date) if user and getattr(user, "birth_date", None) else None,
         business_type=getattr(user, "business_type", None) if user else None,
+        trial_days_remaining=_trial_days_remaining,
     )
 
 
