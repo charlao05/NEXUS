@@ -81,6 +81,7 @@ function Dashboard() {
   const { isDark, toggleTheme } = useTheme()
   const { notifications, unreadCount, markRead, clearAll } = useNotifications(token)
   const [userPlan, setUserPlan] = useState<string>('free')
+  const [trialDaysRemaining, setTrialDaysRemaining] = useState<number | null>(null)
   const [planReady, setPlanReady] = useState(false)
   const [userRole, setUserRole] = useState<string>(() => authRole || localStorage.getItem('user_role') || 'user')
   const [userName, setUserName] = useState<string>('')
@@ -132,6 +133,11 @@ function Dashboard() {
           if (response.data.plan) {
             setUserPlan(response.data.plan)
             localStorage.setItem('user_plan', response.data.plan)
+            if (response.data.plan === 'free' && response.data.trial_days_remaining != null) {
+              setTrialDaysRemaining(Number(response.data.trial_days_remaining))
+            } else {
+              setTrialDaysRemaining(null)
+            }
           }
           if (response.data.full_name && response.data.full_name !== 'Usuário') {
             const titleCased = toTitleCase(response.data.full_name)
@@ -305,6 +311,23 @@ function Dashboard() {
             Bem-vindo ao seu painel de controle NEXUS
           </p>
         </div>
+
+        {/* Trial Banner — visível apenas para free com trial ativo */}
+        {userPlan === 'free' && trialDaysRemaining !== null && (
+          <div className={`mb-2 px-4 py-3 rounded-xl flex items-center justify-between gap-3 ${isDark ? 'bg-yellow-900/30 border border-yellow-700/50 text-yellow-300' : 'bg-yellow-50 border border-yellow-300 text-yellow-800'}`}>
+            <span className="text-sm font-medium">
+              {trialDaysRemaining === 0
+                ? '⚠️ Seu período de degustação de IA termina hoje!'
+                : `🎁 ${trialDaysRemaining} dia${trialDaysRemaining === 1 ? '' : 's'} de IA grátis restante${trialDaysRemaining === 1 ? '' : 's'}`}
+            </span>
+            <button
+              onClick={() => navigate('/pricing')}
+              className={`text-xs font-bold px-3 py-1 rounded-lg ${isDark ? 'bg-yellow-600 hover:bg-yellow-500 text-white' : 'bg-yellow-500 hover:bg-yellow-600 text-white'}`}
+            >
+              Fazer Upgrade
+            </button>
+          </div>
+        )}
 
         {/* Stats Cards */}
         <div className="grid md:grid-cols-3 gap-6 mb-8">
