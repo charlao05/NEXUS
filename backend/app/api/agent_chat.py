@@ -891,6 +891,14 @@ Para FORNECEDORES:
 Para ESTOQUE:
 - get_stock_summary: resumo do estoque
 - search_products: busca produtos por nome ou categoria
+
+REGRA CRÍTICA ANTI-ALUCINAÇÃO (OBRIGATÓRIA PARA TODAS AS TOOLS):
+- Use SOMENTE os dados fornecidos explicitamente pelo usuário na mensagem ATUAL.
+- NUNCA invente, deduza ou complete valores de telefone, email, CPF, CNPJ, endereço, nome ou observações.
+- NUNCA reutilize dados de mensagens anteriores do histórico para preencher campos de um NOVO cadastro ou ação. Cada cadastro é independente.
+- Se um campo necessário não foi informado nesta mensagem, NÃO preencha com suposições: pergunte ao usuário o valor exato.
+- É proibido transportar contexto de um cliente/registro para outro. Não misture informações entre registros distintos.
+- Telefone e email só podem ser salvos exatamente como o usuário os escreveu agora. Se não foram ditos, deixe vazio e pergunte.
 """
 
 
