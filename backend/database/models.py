@@ -1138,7 +1138,6 @@ from sqlalchemy import event as _sa_event
 # Listener registrado abaixo aplica mask_pii() em todas as columns listadas
 # antes de INSERT, e marca pii_masked=True.
 PII_PROTECTED = [
-    ("chat_messages",   ChatMessage,    ["content"]),
     ("clients",         Client,         ["notes"]),
     ("interactions",    Interaction,    ["summary", "details"]),
     ("opportunities",   Opportunity,    ["notes"]),
