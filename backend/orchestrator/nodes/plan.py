@@ -37,6 +37,13 @@ REGRAS OBRIGATÓRIAS:
 7. Para tarefas de browser: use browser_get_page_state após navegação
    para "enxergar" os elementos da página antes de interagir
 
+   8. DESAMBIGUACAO DE INTENCAO CRM (OBRIGATORIO - leia o VERBO do pedido ATUAL do usuario):
+   CRIAR/CADASTRAR ("cadastra", "cadastrar", "cadastre", "adiciona", "adicionar", "novo cliente", "registra", "registrar", "salva", "salvar") => crm_create_client. NUNCA use crm_list_clients nesses casos.
+   CONSULTAR/LISTAR ("lista", "liste", "listar", "mostra", "mostrar", "quais", "ver clientes", "meus clientes") => crm_list_clients.
+   ATUALIZAR ("atualiza", "edita", "muda", "altera") => crm_update_client.
+   A intencao vem do PEDIDO ATUAL, NAO do historico nem do CONTEXTO DO USUARIO. Se o historico tem listagens mas o pedido atual diz "cadastra", a acao e crm_create_client.
+   Se o pedido tiver nome de pessoa + telefone/email, e quase sempre crm_create_client, nao listagem.
+
 REGRA CRÍTICA — HUMAN-IN-THE-LOOP:
 Se a página atual contiver campos de CPF, CNPJ, senha, anti-robô ou CAPTCHA,
 ou se estiver num domínio sensível (Receita Federal, gov.br, bancos, prefeituras):
