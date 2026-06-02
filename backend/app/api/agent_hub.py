@@ -804,7 +804,8 @@ async def execute_agent_action(
             from app.services.chat_context import load_cross_agent_summary
             _crm_context = load_cross_agent_summary(_user_id or 0, agent_id)
         except Exception:
-            pass
+            logger.warning("[CRM_CONTEXT] Erro cold-start ao carregar contexto.")
+            _crm_context = "[SISTEMA: contexto indisponivel - NAO afirme ausencia de clientes]"
 
         # Chat livre: usuário digitou uma mensagem
         if user_message and action.action in ("smart_chat", "chat"):
