@@ -871,6 +871,1023 @@ async def execute_agent_action(
                             _linhas.append(f"- {_nome}" + (f" ({_extra})" if _extra else ""))
                         _plural = "cliente" if _total == 1 else "clientes"
                         _msg = f"Voce tem {_total} {_plural} cadastrado(s):\n\n" + "\n".join(_linhas)
+                    _save_chat(ACTION_PROMPTS[action.action], _msg, _user_id)
+                    return {
+                        "status": "success",
+                        "agent_id": agent_id,
+                        "action": action.action,
+                        "message": _msg,
+                    }
+                except Exception as _e_list:
+                    logger.error(f"[LIST_CLIENTS] leitura direta falhou: {_e_list}", exc_info=True)
+                    return {
+                        "status": "success",
+                        "agent_id": agent_id,
+                        "action": action.action,
+                        "message": "Tive um problema momentaneo ao ler seus clientes. Tente novamente em instantes.",
+                    }
+            # ── fim leitura deterministica ─────────────────────────────────────
+            prompt = ACTION_PROMPTS[action.action]
+            try:
+                llm_response = get_llm_response(agent_id, prompt, crm_context=_crm_context, conversation_history=chat_history, user_id=_user_id, confirmed_actions=[_confirmed_action] if _confirmed_action else None)
+            except SensitiveActionRequired as sar:
+                _n_actions = len(sar.pending_actions)
+                _plural = f"{_n_actions} ações" if _n_actions > 1 else "a ação"
+                return {
+                    "status": "requires_confirmation",
+                    "agent_id": agent_id,
+                    "action": action.action,
+                    "message": f"🔒 **Confirmação Necessária**\n\nPara Executar {_plural}: **{sar.description}**\n\nDigite sua senha para confirmar.",
+                    "confirmation": {
+                        "tool_name": sar.tool_name,
+                        "arguments": sar.arguments,
+                        "description": sar.description,
+                        "original_message": prompt,
+                        "pending_actions": sar.pending_actions,
+                    },
+                }
+            if llm_response:
+                _save_chat(prompt, llm_response, _user_id)
+                hub = get_hub()
+                hub.shared_context["estatisticas"]["eventos_processados"] += 1
+                return {
+                    "status": "success",
+                    "agent_id": agent_id,
+                    "action": action.action,
+                    "message": llm_response
+                }
+            else:
+                return {
+                    "status": "success",
+                    "agent_id": agent_id,
+                    "action": action.action,
+                    "message": "⚠️ Não consegui processar esta ação agora. Tente novamente ou envie uma mensagem de texto.",
+                }
+    except ImportError:
+        logger.debug("agent_chat module não disponível, usando fallback local")
+    except Exception as e:
+        logger.warning(f"LLM indisponível ({e}), usando fallback local", exc_info=True)
+
+    # ── Fallback: execução local do agente ───────────────────────
+    params = {"action": action.action, **action.parameters}
+
+    try:
+        result = instance.execute(params)
+
+        hub = get_hub()
+        hub.shared_context["estatisticas"]["eventos_processados"] += 1
+
+        # Extrair mensagem do resultado para manter contrato com frontend
+        fallback_message = ""
+        if isinstance(result, dict):
+            fallback_message = result.get("message") or result.get("response") or result.get("resultado", "")
+        elif isinstance(result, str):
+            fallback_message = result
+
+        return {
+            "status": "success",
+            "agent_id": agent_id,
+            "action": action.action,
+            "message": fallback_message or "Operação realizada, mas sem resposta detalhada.",
+            "result": result
+        }
+    except Exception as e:
+        logger.exception(f"Erro ao executar {agent_id}.{action.action}")
+        raise HTTPException(status_code=500, detail="Erro interno ao executar agente. Tente novamente.")
+
+
+@router.get("/{agent_id}/status")
+async def get_agent_status(agent_id: str, user: dict = Depends(get_current_user)):
+    """Retorna status detalhado de um agente"""
+    agent_id = _resolve_agent_id(agent_id)
+    hub = get_hub()
+    
+    try:
+        agent_type = resolve_agent_type(agent_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Agente não encontrado: {agent_id}")
+    
+    status = hub.agent_status.get(agent_type, {
+        "online": agent_id in agents_instances,
+        "registered_at": None,
+        "last_activity": None,
+        "messages_sent": 0,
+        "messages_received": 0
+    })
+    
+    return {
+        "agent_id": agent_id,
+        "status": status,
+        "config": agent_configs.get(agent_id, AgentConfig()).model_dump()
+    }
+
+
+# ============================================
+# ENDPOINTS DE DADOS COMPARTILHADOS
+# ============================================
+
+@router.get("/hub/context")
+async def get_shared_context(user: dict = Depends(get_current_user)):
+    """Retorna o contexto compartilhado entre agentes"""
+    hub = get_hub()
+    return {
+        "context": {
+            "clientes_count": len(hub.shared_context.get("clientes", {})),
+            "compromissos_hoje": hub.shared_context.get("compromissos_hoje", []),
+            "alertas_ativos": hub.shared_context.get("alertas_ativos", []),
+            "ultimo_sync": hub.shared_context.get("ultimo_sync"),
+            "estatisticas": hub.shared_context.get("estatisticas", {})
+        }
+    }
+
+
+@router.post("/hub/sync")
+async def sync_agents(user: dict = Depends(get_current_user)):
+    """Sincroniza dados entre todos os agentes"""
+    hub = get_hub()
+    hub.shared_context["ultimo_sync"] = datetime.now().isoformat()
+    
+    # Inicializar agentes se necessário
+    init_agents()
+    
+    return {
+        "message": "Sincronização concluída",
+        "timestamp": hub.shared_context["ultimo_sync"],
+        "agents_online": len([s for s in hub.agent_status.values() if s.get("online")])
+    }
+"""
+API do Agent Hub - Endpoints para Comunicação entre Agentes
+============================================================
+
+Endpoints:
+- GET /api/agents/hub/status - Status do hub e agentes
+- GET /api/agents/hub/messages - Mensagens recentes
+- POST /api/agents/hub/message - Enviar mensagem
+- POST /api/agents/hub/workflow - Executar workflow
+
+- GET /api/agents/{agent}/config - Configuração de um agente
+- PUT /api/agents/{agent}/config - Atualizar configuração
+- POST /api/agents/{agent}/execute - Executar ação de um agente
+"""
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+import logging
+
+# Importar dependência de autenticação
+from app.api.auth import get_current_user, increment_request_count  # type: ignore[import]
+
+# Importar agentes existentes (paths relativos ao backend/)
+from agents.agenda_agent import AgendaAgent
+from agents.clients_agent import ClientsAgent
+from agents.contabilidade_agent import ContabilidadeAgent
+# Collections é módulo de funções, não classe - criar wrapper
+from agents import collections_agent as collections_module
+
+# Importar o hub
+from agents.agent_hub import (
+    AgentHub, AgentType, EventType, AgentMessage, get_hub, resolve_agent_type
+)
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================
+# WRAPPERS PARA MÓDULOS SEM CLASSE
+# ============================================
+
+class CollectionsAgent:
+    """Wrapper para cobranças — usa CRMService em vez de JSON."""
+    def __init__(self):
+        self.name = "collections_agent"
+        self.display_name = "🔔 Cobrança Automatizada"
+    
+    def execute(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        action = parameters.get("action", "list_overdue")
+        user_id = parameters.get("user_id")
+        try:
+            if action == "list_overdue":
+                try:
+                    from database.crm_service import CRMService
+                    overdue = CRMService.get_overdue_invoices(user_id=user_id)
+                    return {"status": "ok", "overdue_count": len(overdue), "items": overdue}
+                except Exception:
+                    # Fallback para JSON legado
+                    path = parameters.get("path", "data/collections.json")
+                    overdue = collections_module.find_overdue(path)
+                    return {"status": "ok", "overdue_count": len(overdue), "items": overdue}
+            elif action == "list_upcoming":
+                try:
+                    from database.crm_service import CRMService
+                    upcoming = CRMService.get_upcoming_invoices(days=7, user_id=user_id)
+                    return {"status": "ok", "upcoming_count": len(upcoming), "items": upcoming}
+                except Exception:
+                    return {"status": "ok", "upcoming_count": 0, "items": []}
+            elif action == "generate_message":
+                invoice = parameters.get("invoice", {})
+                message = collections_module.generate_collection_message(invoice)
+                return {"status": "ok", "message": message}
+            else:
+                return {"status": "error", "message": f"Ação desconhecida: {action}"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+
+class AssistenteAgent:
+    """Agente Assistente Geral - Chat de IA"""
+    def __init__(self):
+        self.name = "assistente_agent"
+        self.display_name = "🤖 Assistente Geral"
+    
+    def execute(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        action = parameters.get("action", "chat")
+        try:
+            if action == "chat":
+                message = parameters.get("message", "")
+                # Aqui seria integrado com LLM
+                return {
+                    "status": "ok",
+                    "response": f"Recebi sua mensagem: {message}. Como posso ajudar?"
+                }
+            elif action == "suggest":
+                context = parameters.get("context", {})
+                return {
+                    "status": "ok",
+                    "suggestions": [
+                        "Verificar compromissos do dia",
+                        "Analisar financeiro do mês",
+                        "Ver clientes pendentes de follow-up"
+                    ]
+                }
+            else:
+                return {"status": "error", "message": f"Ação desconhecida: {action}"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+router = APIRouter(prefix="/api/agents", tags=["agents"])
+
+# ============================================
+# MODELOS PYDANTIC
+# ============================================
+
+class AgentConfig(BaseModel):
+    enabled: bool = True
+    auto_notify: bool = True
+    notification_channels: List[str] = ["email"]
+    settings: Dict[str, Any] = {}
+
+
+class MessageRequest(BaseModel):
+    from_agent: str
+    to_agent: Optional[str] = None  # None = broadcast
+    event_type: str
+    payload: Dict[str, Any]
+    priority: int = 5
+
+
+class WorkflowRequest(BaseModel):
+    workflow: str  # "novo_cliente", "cobranca", etc.
+    data: Dict[str, Any]
+
+
+class AgentAction(BaseModel):
+    action: str
+    parameters: Dict[str, Any] = {}
+
+
+# ============================================
+# CONFIGURAÇÕES DOS AGENTES (em memória por enquanto)
+# ============================================
+
+agent_configs: Dict[str, AgentConfig] = {
+    "agenda": AgentConfig(
+        enabled=True,
+        auto_notify=True,
+        notification_channels=["email", "telegram"],
+        settings={
+            "reminder_hours_before": 24,
+            "daily_summary": True,
+            "weekly_report": True
+        }
+    ),
+    "clientes": AgentConfig(
+        enabled=True,
+        auto_notify=True,
+        notification_channels=["email"],
+        settings={
+            "auto_follow_up_days": 7,
+            "birthday_reminder": True,
+            "lead_scoring": True
+        }
+    ),
+    "contabilidade": AgentConfig(
+        enabled=True,
+        auto_notify=True,
+        notification_channels=["email", "telegram"],
+        settings={
+            "alert_das_days_before": 5,
+            "alert_dasn_days_before": 30,
+            "alert_mei_limit_percent": 80,
+            "monthly_report": True,
+            "auto_backup": True,
+            "nf_auto_send": True,
+            "contract_templates": ["servico", "produto", "consultoria"],
+            "tipo_atividade": "servicos",
+        }
+    ),
+    "cobranca": AgentConfig(
+        enabled=True,
+        auto_notify=True,
+        notification_channels=["telegram", "email"],
+        settings={
+            "auto_reminder_days": [3, 7, 15, 30],
+            "friendly_tone": True,
+            "escalation_enabled": False
+        }
+    ),
+    "assistente": AgentConfig(
+        enabled=True,
+        auto_notify=True,
+        notification_channels=["app"],
+        settings={
+            "proactive_suggestions": True,
+            "learn_patterns": True,
+            "voice_enabled": False
+        }
+    )
+}
+
+# ============================================
+# INSTÂNCIAS DOS AGENTES
+# ============================================
+
+agents_instances: Dict[str, Any] = {}
+
+
+# Mapa de aliases legados (financeiro + documentos → contabilidade)
+from app.core.agent_aliases import AGENT_ID_ALIASES as _AGENT_ID_ALIAS, resolve_agent_id as _resolve_agent_id
+
+
+def get_agent_instance(agent_name: str):
+    """Retorna ou cria instância do agente"""
+    agent_name = _resolve_agent_id(agent_name)
+    if agent_name not in agents_instances:
+        if agent_name == "agenda":
+            agents_instances[agent_name] = AgendaAgent()
+        elif agent_name == "clientes":
+            agents_instances[agent_name] = ClientsAgent()
+        elif agent_name == "contabilidade":
+            agents_instances[agent_name] = ContabilidadeAgent()
+        elif agent_name == "cobranca":
+            agents_instances[agent_name] = CollectionsAgent()
+        elif agent_name == "assistente":
+            agents_instances[agent_name] = AssistenteAgent()
+        else:
+            return None
+    return agents_instances.get(agent_name)
+
+
+def init_agents():
+    """Inicializa todos os agentes e registra no hub"""
+    hub = get_hub()
+    
+    # Registrar agentes
+    for agent_type in AgentType:
+        instance = get_agent_instance(agent_type.value)
+        if instance:
+            hub.register_agent(agent_type, instance)
+    
+    # Configurar handlers de eventos
+    _setup_event_handlers(hub)
+    
+    logger.info("✅ Todos os agentes inicializados e conectados ao Hub")
+
+
+def _setup_event_handlers(hub: AgentHub):
+    """Configura handlers de eventos entre agentes"""
+    
+    # Quando cliente é criado, agenda primeiro contato
+    def on_cliente_criado(message: AgentMessage):
+        cliente = message.payload
+        logger.info(f"📆 Agendando primeiro contato para {cliente.get('nome')}")
+        return {"acao": "primeiro_contato_agendado"}
+    
+    hub.subscribe(AgentType.AGENDA, EventType.CLIENTE_CRIADO, on_cliente_criado)
+    
+    # Quando pagamento atrasado, cobrança cria lembrete + envia email
+    def on_pagamento_atrasado(message: AgentMessage):
+        dados = message.payload
+        logger.info(f"⚠️ Cobrança ativada: {dados.get('valor')} - {dados.get('dias_atraso')} dias")
+        # Enviar lembrete por email ao cliente (Lacuna #6)
+        try:
+            from app.api.email_service import send_invoice_reminder
+            email = dados.get("email") or dados.get("client_email", "")
+            nome = dados.get("nome") or dados.get("client_name", "Cliente")
+            valor = float(dados.get("valor", 0))
+            venc = dados.get("vencimento") or dados.get("due_date", "")
+            inv_id = dados.get("invoice_id")
+            if email and valor:
+                send_invoice_reminder(email, nome, valor, venc, inv_id)
+        except Exception as e:
+            logger.debug(f"Email de cobrança não enviado: {e}")
+        return {"acao": "cobranca_iniciada", "canal": "email+telegram"}
+    
+    hub.subscribe(AgentType.COBRANCA, EventType.PAGAMENTO_ATRASADO, on_pagamento_atrasado)
+    
+    # Contabilidade recebe notificação de NF emitida
+    def on_nf_emitida(message: AgentMessage):
+        nf = message.payload
+        logger.info(f"📄 NF registrada na contabilidade: {nf.get('numero')}")
+        return {"acao": "nf_registrada"}
+    
+    hub.subscribe(AgentType.CONTABILIDADE, EventType.NF_EMITIDA, on_nf_emitida)
+
+    # DAS próximo do vencimento — envia email ao MEI (Lacuna #6)
+    def on_das_vencendo(message: AgentMessage):
+        dados = message.payload
+        logger.info(f"📊 DAS vencendo: {dados.get('vencimento') or dados.get('due_date')}")
+        try:
+            from app.api.email_service import send_das_reminder
+            email = dados.get("email") or dados.get("user_email", "")
+            nome = dados.get("nome") or dados.get("user_name", "Empreendedor")
+            venc = dados.get("vencimento") or dados.get("due_date", "")
+            valor = dados.get("valor") or dados.get("estimated_amount")
+            if email:
+                send_das_reminder(email, nome, venc, float(valor) if valor else None)
+        except Exception as e:
+            logger.debug(f"Email DAS não enviado: {e}")
+        return {"acao": "lembrete_das_enviado", "canal": "email"}
+
+    hub.subscribe(AgentType.CONTABILIDADE, EventType.DAS_VENCENDO, on_das_vencendo)
+
+
+# ============================================
+# ENDPOINTS DO HUB
+# ============================================
+
+@router.get("/hub/status")
+async def get_hub_status(user: dict = Depends(get_current_user)):
+    """Retorna status completo do hub e todos os agentes"""
+    hub = get_hub()
+    return hub.get_status()
+
+
+@router.get("/hub/messages")
+async def get_hub_messages(limit: int = 50, user: dict = Depends(get_current_user)):
+    """Retorna mensagens recentes do hub"""
+    hub = get_hub()
+    return {
+        "messages": hub.get_recent_messages(limit),
+        "total": len(hub.message_history)
+    }
+
+
+@router.post("/hub/message")
+async def send_message(request: MessageRequest, user: dict = Depends(get_current_user)):
+    """Envia uma mensagem entre agentes (inter-agente, não conta como uso do usuário)"""
+    hub = get_hub()
+    
+    try:
+        from_type = resolve_agent_type(request.from_agent)
+        to_type = resolve_agent_type(request.to_agent) if request.to_agent else None
+        event_type = EventType(request.event_type)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Tipo inválido: {e}")
+    
+    message = AgentMessage(
+        from_agent=from_type,
+        to_agent=to_type,
+        event_type=event_type,
+        payload=request.payload,
+        priority=request.priority
+    )
+    
+    result = await hub.publish(message)
+    return result
+
+
+@router.post("/hub/workflow")
+async def execute_workflow(request: WorkflowRequest, user: dict = Depends(get_current_user)):
+    """Executa um workflow orquestrado"""
+    hub = get_hub()
+    
+    if request.workflow == "novo_cliente":
+        return await hub.workflow_novo_cliente(request.data)
+    elif request.workflow == "cobranca":
+        return await hub.workflow_cobranca(
+            request.data.get("cliente_id"),
+            request.data.get("valor", 0)
+        )
+    else:
+        raise HTTPException(status_code=400, detail=f"Workflow desconhecido: {request.workflow}")
+
+
+# ============================================
+# ENDPOINTS DE CONFIGURAÇÃO DOS AGENTES
+# ============================================
+
+@router.get("/list")
+async def list_agents(current_user: dict[str, Any] = Depends(get_current_user)):
+    """Lista todos os agentes disponíveis"""
+    return {
+        "agents": [
+            {
+                "id": "agenda",
+                "name": "Agente de Agenda",
+                "description": "Gerencia agendamentos, compromissos e lembretes automáticos",
+                "icon": "📅",
+                "status": "online",
+                "enabled": agent_configs["agenda"].enabled
+            },
+            {
+                "id": "clientes",
+                "name": "Agente de Clientes",
+                "description": "CRM completo com histórico, follow-up e segmentação",
+                "icon": "👥",
+                "status": "online",
+                "enabled": agent_configs["clientes"].enabled
+            },
+            {
+                "id": "contabilidade",
+                "name": "Contabilidade MEI",
+                "description": "DAS, NFs, DASN, IRPF, limites, calendário fiscal e todas as obrigações MEI",
+                "icon": "📊",
+                "status": "online",
+                "enabled": agent_configs["contabilidade"].enabled
+            },
+            {
+                "id": "cobranca",
+                "name": "Agente de Cobrança",
+                "description": "Lembretes de pagamento e gestão de inadimplência",
+                "icon": "🔔",
+                "status": "online",
+                "enabled": agent_configs["cobranca"].enabled
+            },
+            {
+                "id": "assistente",
+                "name": "Assistente Geral",
+                "description": "Chat de IA para dúvidas e automações personalizadas",
+                "icon": "🤖",
+                "status": "online",
+                "enabled": agent_configs["assistente"].enabled
+            }
+        ]
+    }
+
+
+@router.get("/{agent_id}/config")
+async def get_agent_config(
+    agent_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Retorna configuração de um agente"""
+    agent_id = _resolve_agent_id(agent_id)
+    if agent_id not in agent_configs:
+        raise HTTPException(status_code=404, detail=f"Agente não encontrado: {agent_id}")
+    
+    config = agent_configs[agent_id]
+    return {
+        "agent_id": agent_id,
+        "config": config.model_dump()
+    }
+
+
+@router.put("/{agent_id}/config")
+async def update_agent_config(
+    agent_id: str,
+    config: AgentConfig,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Atualiza configuração de um agente"""
+    agent_id = _resolve_agent_id(agent_id)
+    if agent_id not in agent_configs:
+        raise HTTPException(status_code=404, detail=f"Agente não encontrado: {agent_id}")
+    
+    agent_configs[agent_id] = config
+    
+    return {
+        "message": f"Configuração do agente {agent_id} atualizada",
+        "config": config.model_dump()
+    }
+
+
+class ConfirmActionRequest(BaseModel):
+    """Request para confirmar ação sensível com senha.
+    Suporta batch: se 'actions' estiver presente, executa todas.
+    Caso contrário, usa tool_name/arguments (single — retrocompatível).
+    """
+    password: str
+    tool_name: str = ""
+    arguments: Dict[str, Any] = {}
+    original_message: str = ""
+    actions: List[Dict[str, Any]] = []  # Batch: [{tool_name, arguments}]
+
+    def get_actions_to_run(self) -> List[Dict[str, Any]]:
+        """Retorna lista de ações a executar (batch ou single).
+        Valida que ao menos uma ação foi fornecida."""
+        if self.actions and len(self.actions) > 0:
+            return self.actions
+        if self.tool_name:
+            return [{"tool_name": self.tool_name, "arguments": self.arguments}]
+        return []
+
+
+@router.post("/{agent_id}/confirm-action")
+async def confirm_sensitive_action(
+    agent_id: str,
+    req: ConfirmActionRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Confirma uma ação sensível (delete, etc.) verificando a senha do usuário.
+    Verifica primeiro o PIN de confirmação (se configurado), senão a senha de login.
+    Após verificação, re-executa a mensagem original com a ação pré-aprovada."""
+    from app.api.auth import verify_password
+    from database.models import User, SessionLocal
+
+    _user_id: int | None = current_user.get("user_id")
+
+    # Verificar senha/PIN do usuário
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == _user_id).first()
+        if not user:
+            raise HTTPException(status_code=403, detail="Usuário não encontrado.")
+
+        # Se o usuário tem PIN de confirmação, verificar PIN; senão, verificar senha de login
+        password_valid = False
+        if user.confirmation_pin_hash:
+            password_valid = verify_password(req.password, str(user.confirmation_pin_hash))
+        if not password_valid:
+            password_valid = verify_password(req.password, str(user.password_hash))
+
+        if not password_valid:
+            detail_msg = "PIN de confirmação incorreto." if user.confirmation_pin_hash else "Senha incorreta."
+            raise HTTPException(status_code=403, detail=f"{detail_msg} Ação não autorizada.")
+    finally:
+        db.close()
+
+    # Senha/PIN correto — executar a ferramenta diretamente com os argumentos capturados
+    # (não re-invocar a LLM, pois ela pode gerar tool calls diferentes na segunda vez)
+    agent_id = _resolve_agent_id(agent_id)
+
+    # ── Incrementar contador de uso (ação confirmada = interação real) ──
+    increment_request_count(_user_id or 0)
+
+    try:
+        from app.api.agent_chat import _execute_crm_tool
+
+        # Montar lista de ações a executar (batch ou single) com validação
+        actions_to_run = req.get_actions_to_run()
+        if not actions_to_run:
+            raise HTTPException(status_code=400, detail="Nenhuma ação fornecida para confirmar.")
+
+        results_msgs: list[str] = []
+        for act in actions_to_run:
+            _tool = act.get("tool_name", "")
+            _args = act.get("arguments", {})
+
+            result = _execute_crm_tool(_tool, _args, _user_id)
+            logger.info(f"✅ confirm-action executou {_tool} diretamente → {result.get('status', '?')}")
+
+            # Gerar mensagem amigável baseada no resultado
+            if _tool == "delete_client":
+                client_name = _args.get("client_name", f"#{_args.get('client_id', '?')}")
+                if result.get("status") in ("deactivated", "deleted"):
+                    action_word = "removido permanentemente" if result.get("status") == "deleted" else "desativado"
+                    results_msgs.append(f"✅ Cliente {client_name} foi {action_word} com sucesso.")
+                elif result.get("status") == "not_found":
+                    results_msgs.append(f"⚠️ Cliente {client_name} não foi encontrado. Pode já ter sido removido.")
+                else:
+                    results_msgs.append(f"❌ Não foi possível excluir o cliente {client_name}: {result.get('message', 'erro desconhecido')}.")
+            elif _tool == "update_client":
+                client_name = _args.get("name", f"#{_args.get('client_id', '?')}")
+                if result.get("status") == "updated":
+                    results_msgs.append(f"✅ Cliente {client_name} foi atualizado com sucesso.")
+                elif result.get("status") == "not_found":
+                    results_msgs.append(f"⚠️ Cliente {client_name} não foi encontrado.")
+                else:
+                    results_msgs.append(f"❌ Não foi possível atualizar o cliente: {result.get('message', 'erro desconhecido')}.")
+            else:
+                ok = result.get("status") not in ("error", "not_found")
+                results_msgs.append(f"✅ Ação '{_tool}' executada com sucesso." if ok else f"❌ Erro: {result.get('message', 'desconhecido')}")
+
+        friendly_msg = "\n".join(results_msgs)
+
+        # Salvar no histórico
+        try:
+            from app.services.chat_context import save_turn
+            save_turn(_user_id or 0, agent_id, req.original_message, friendly_msg)
+        except Exception:
+            pass
+
+        return {
+            "status": "success",
+            "agent_id": agent_id,
+            "action": "confirmed_action",
+            "message": friendly_msg,
+        }
+    except Exception as e:
+        logger.error(f"Erro ao executar ação confirmada: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Erro ao executar ação. Tente novamente.")
+
+
+@router.post("/{agent_id}/execute")
+async def execute_agent_action(
+    agent_id: str,
+    action: AgentAction,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Executa uma ação específica de um agente.
+    Usa OpenAI GPT-4.1 para ações de chat e quick actions.
+    Salva histórico no banco automaticamente.
+    Fallback para execução local se LLM indisponível.
+    """
+    agent_id = _resolve_agent_id(agent_id)
+    instance = get_agent_instance(agent_id)
+
+    if not instance:
+        raise HTTPException(status_code=404, detail=f"Agente não encontrado: {agent_id}")
+
+    if not agent_configs.get(agent_id, AgentConfig()).enabled:
+        raise HTTPException(status_code=400, detail=f"Agente {agent_id} está desabilitado")
+
+    # ── Freemium: verificar acesso ao agente e limite diário ───────
+    from app.services.limit_service import check_agent_access, check_agent_message_limit
+    check_agent_access(current_user, agent_id)
+    check_agent_message_limit(current_user)
+
+    # ── Incrementar contador de uso (apenas interações reais) ────
+    increment_request_count(current_user.get("user_id", 0))
+
+    # ── user_id extraído do JWT (autenticado) ────────────────────
+    _user_id: int | None = current_user.get("user_id")
+
+    # ── Persistir chat (Redis + SQLite dual-write) ───────────────
+    def _save_chat(user_msg: str, assistant_msg: str, uid: int | None = None) -> None:
+        """Salva par de mensagens via chat_context (Redis cache + SQLite permanente)"""
+        _uid = uid or _user_id or 0
+        try:
+            from app.services.chat_context import save_turn
+            save_turn(_uid, agent_id, user_msg, assistant_msg)
+        except Exception as ex:
+            # Fallback direto ao SQLite se chat_context falhar
+            try:
+                from database.models import ChatMessage, SessionLocal as _SL  # type: ignore[import]
+                db = _SL()
+                try:
+                    if user_msg:
+                        db.add(ChatMessage(user_id=_uid, agent_id=agent_id, role="user", content=user_msg))
+                    if assistant_msg:
+                        db.add(ChatMessage(user_id=_uid, agent_id=agent_id, role="assistant", content=assistant_msg))
+                    db.commit()
+                finally:
+                    db.close()
+            except Exception as e2:
+                logger.debug(f"Chat não persistido: {e2}")
+
+    # ── Auto-Approve: se ha automacao pendente, "sim/ok/pode" executa direto ───
+    # NEXUS DNA: execucao imediata. NUNCA criar lembrete quando ha plano pendente.
+    user_message_raw = action.parameters.get("message", "") or ""
+    _automation_agents_aa = {"assistente", "contabilidade", "agenda", "clientes", "cobranca"}
+    if user_message_raw and action.action in ("smart_chat", "chat") and agent_id in _automation_agents_aa:
+        try:
+            _msg_lower = user_message_raw.strip().lower()
+            _approve_words = (
+                "sim", "ok", "okay", "pode", "pode prosseguir", "prossiga", "prosseguir",
+                "vai", "manda", "manda bala", "executa", "executar", "aprovo", "aprovado",
+                "confirma", "confirmo", "confirmado", "tudo certo", "beleza", "blz",
+                "concordo", "autorizo", "autorizado", "faz", "faca", "faça", "segue",
+                "yes", "go", "do it",
+                "bora", "bora la", "bora lá", "vai sim", "ta ok", "tá ok", "ta bom",
+                "tá bom", "deboa", "de boa", "demorou", "isso", "certo", "claro",
+                "com certeza", "pode sim", "manda ver", "pode ir", "vamo", "vamos",
+                "vamo la", "vamo lá", "show", "show de bola", "perfeito", "excelente",
+                "ótimo", "otimo", "boa", "fechou", "combinado", "aceitei", "aceito",
+            )
+            _reject_words = (
+                "nao", "não", "cancela", "cancelar", "cancelado", "rejeita", "rejeitar",
+                "para", "pare", "stop", "no", "negativo",
+                "espera", "aguarda", "calma", "espere", "perai", "pera",
+                "nao quero", "não quero", "desiste", "desistir", "esquece",
+                "aborta", "abortar", "suspende", "suspender",
+            )
+            _is_approve = _msg_lower in _approve_words or any(
+                _msg_lower.startswith(w + " ") or _msg_lower.startswith(w + ",") or _msg_lower.startswith(w + "!")
+                for w in _approve_words
+            )
+            _is_reject = _msg_lower in _reject_words or any(
+                _msg_lower.startswith(w + " ") or _msg_lower.startswith(w + ",") or _msg_lower.startswith(w + "!")
+                for w in _reject_words
+            )
+            if (_is_approve or _is_reject) and _user_id:
+                try:
+                    from database.models import SessionLocal as _SL_AA, AutomationTask as _AT_AA
+                    _db_aa = _SL_AA()
+                    try:
+                        _pending = (
+                            _db_aa.query(_AT_AA)
+                            .filter(_AT_AA.user_id == _user_id)
+                            .filter(_AT_AA.agent_id == agent_id)
+                            .filter(_AT_AA.status == "awaiting_approval")
+                            .order_by(_AT_AA.created_at.desc())
+                            .first()
+                        )
+                        _pending_task_id = _pending.task_id if _pending else None
+                    finally:
+                        _db_aa.close()
+                except Exception as _ex_aa_db:
+                    logger.debug(f"Auto-approve DB lookup falhou: {_ex_aa_db}")
+                    _pending_task_id = None
+                if _pending_task_id:
+                    from app.api.agent_automation import approve_automation, AutomationApproveRequest
+                    _appr_req = AutomationApproveRequest(
+                        task_id=_pending_task_id,
+                        approved=_is_approve,
+                        reason="" if _is_approve else "Usuario cancelou via chat",
+                    )
+                    _appr_result = await approve_automation(_appr_req, current_user=current_user)
+                    _save_chat(user_message_raw, _appr_result.message, _user_id)
+                    return {
+                        "status": "success",
+                        "agent_id": agent_id,
+                        "action": "automation_approved" if _is_approve else "automation_rejected",
+                        "message": _appr_result.message,
+                        "automation": {
+                            "task_id": _appr_result.task_id,
+                            "status": _appr_result.status,
+                        },
+                    }
+        except Exception as _ex_aa:
+            logger.error(f"Auto-approve falhou: {_ex_aa}", exc_info=True)
+
+    # ── Detectar intenção de automação web ────────────────────────
+    user_message = action.parameters.get("message", "")
+    # Automação disponível para assistente e contabilidade (DAS, NF, Receita)
+    _automation_agents = {"assistente", "contabilidade", "agenda", "clientes", "cobranca"}
+    if user_message and action.action in ("smart_chat", "chat") and agent_id in _automation_agents:
+        try:
+            from app.api.agent_automation import _detect_automation_intent
+            intent = _detect_automation_intent(user_message)
+            if intent:
+                # Redirecionar para o fluxo de automação
+                from app.api.agent_automation import _start_automation_core, AutomationStartRequest
+                auto_req = AutomationStartRequest(
+                    agent_id=agent_id,
+                    goal=user_message,
+                    message=user_message,
+                    user_id=_user_id or 1,
+                )
+                auto_result = await _start_automation_core(auto_req, user_id=_user_id or 1, current_user=current_user)
+                _save_chat(user_message, auto_result.message, _user_id)
+                # ── AUTOMATION_MSG_WEIGHT: debitar peso extra no contador diário ──
+                # 1 automação custa AUTOMATION_MSG_WEIGHT msgs equivalentes (custo real ~5x chat).
+                # Já foi salvo 1 ChatMessage(role="user") pelo _save_chat acima.
+                # Inserimos AUTOMATION_MSG_WEIGHT - 1 registros extras de débito.
+                try:
+                    from app.core.plan_limits import AUTOMATION_MSG_WEIGHT
+                    from database.models import ChatMessage as _CM, SessionLocal as _SL2
+                    _extra = AUTOMATION_MSG_WEIGHT - 1  # = 4 débitos extras (total: 5)
+                    if _extra > 0 and _user_id:
+                        _db2 = _SL2()
+                        try:
+                            for _ in range(_extra):
+                                _db2.add(_CM(
+                                    user_id=_user_id,
+                                    agent_id=agent_id,
+                                    role="user",
+                                    content="[automation_weight_debit]",
+                                ))
+                            _db2.commit()
+                        finally:
+                            _db2.close()
+                except Exception as _we:
+                    logger.warning(f"automation weight debit falhou (nao critico): {_we}")
+                return {
+                    "status": "success",
+                    "agent_id": agent_id,
+                    "action": "automation_plan",
+                    "message": auto_result.message,
+                    "automation": {
+                        "task_id": auto_result.task_id,
+                        "requires_approval": True,
+                        "status": "awaiting_approval",
+                        "plan_summary": auto_result.plan_summary,
+                        "steps": auto_result.steps,
+                        "risk_level": auto_result.risk_level,
+                    },
+                }
+        except Exception as e:
+            logger.error(f"Automação detection falhou: {e}", exc_info=True)
+            # Falha na detecção → continuar para o LLM normalmente (não bloquear o chat)
+
+    # ── Inteligência via OpenAI GPT-4.1 ──────────────────────────
+    try:
+        from app.api.agent_chat import get_llm_response, ACTION_PROMPTS, SensitiveActionRequired, _execute_crm_tool
+
+        # Carregar histórico persistente para contexto (Redis → fallback SQLite)
+        chat_history: list[dict] = []
+        try:
+            from app.services.chat_context import load_chat_history
+            _uid_for_history = _user_id or 0
+            chat_history = load_chat_history(_uid_for_history, agent_id, limit=20)
+        except Exception:
+            # Fallback direto ao SQLite se chat_context falhar
+            try:
+                from database.models import ChatMessage as _CM, SessionLocal as _SL2  # type: ignore[import]
+                _db = _SL2()
+                try:
+                    _query = _db.query(_CM).filter(_CM.agent_id == agent_id)
+                    if _user_id:
+                        _query = _query.filter(_CM.user_id == _user_id)
+                    recent = (
+                        _query
+                        .order_by(_CM.created_at.desc())
+                        .limit(20)
+                        .all()
+                    )
+                    chat_history = [{"role": m.role, "content": m.content} for m in reversed(recent)]
+                finally:
+                    _db.close()
+            except Exception:
+                pass
+
+        # Extrair confirmed_action (se o usuário já confirmou com senha)
+        _confirmed_action: str | None = action.parameters.get("_confirmed_action")
+
+        # Construir contexto cross-agent para enriquecer o prompt do LLM
+        _crm_context = ""
+        try:
+            from app.services.chat_context import load_cross_agent_summary
+            _crm_context = load_cross_agent_summary(_user_id or 0, agent_id)
+        except Exception:
+            logger.warning("[CRM_CONTEXT] Erro cold-start ao carregar contexto.")
+            _crm_context = "[SISTEMA: contexto indisponivel - NAO afirme ausencia de clientes]"
+
+        # Chat livre: usuário digitou uma mensagem
+        if user_message and action.action in ("smart_chat", "chat"):
+            try:
+                llm_response = get_llm_response(agent_id, user_message, crm_context=_crm_context, conversation_history=chat_history, user_id=_user_id, confirmed_actions=[_confirmed_action] if _confirmed_action else None)
+            except SensitiveActionRequired as sar:
+                # Ação requer confirmação com senha — retornar ao frontend
+                _n_actions = len(sar.pending_actions)
+                _plural = f"{_n_actions} ações" if _n_actions > 1 else "a ação"
+                return {
+                    "status": "requires_confirmation",
+                    "agent_id": agent_id,
+                    "action": action.action,
+                    "message": f"🔒 **Confirmação Necessária**\n\nPara Executar {_plural}: **{sar.description}**\n\nDigite sua senha para confirmar.",
+                    "confirmation": {
+                        "tool_name": sar.tool_name,
+                        "arguments": sar.arguments,
+                        "description": sar.description,
+                        "original_message": user_message,
+                        "pending_actions": sar.pending_actions,
+                    },
+                }
+            if llm_response:
+                _save_chat(user_message, llm_response, _user_id)
+                hub = get_hub()
+                hub.shared_context["estatisticas"]["eventos_processados"] += 1
+                return {
+                    "status": "success",
+                    "agent_id": agent_id,
+                    "action": action.action,
+                    "message": llm_response
+                }
+            else:
+                logger.warning(f"LLM retornou vazio para agent={agent_id} msg={user_message[:50]}")
+                return {
+                    "status": "success",
+                    "agent_id": agent_id,
+                    "action": action.action,
+                    "message": "⚠️ Não consegui processar sua solicitação agora. Tente usar os botões de **Ações Rápidas** no menu lateral, ou reformule sua mensagem.",
+                }
+
+        # Quick action (botão): converte ação em prompt natural
+        if action.action in ACTION_PROMPTS:
+            # ── LEITURA DETERMINISTICA (anti-fantasma) ─────────────────────────
+            # Para acoes de LISTAGEM, NAO delegamos a decisao ao LLM (tool_choice=auto),
+            # que pode alucinar "voce nao tem clientes". Consultamos o banco DIRETO via
+            # _execute_crm_tool e formatamos a resposta a partir do resultado real.
+            # Garante: so dizemos "0 clientes" quando o banco realmente retorna 0.
+            if action.action == "list_clients":
+                try:
+                    _res = _execute_crm_tool("search_clients", {"query": "", "limit": 50}, _user_id or 0)
+                    _clients = (_res or {}).get("clients", []) if isinstance(_res, dict) else []
+                    _total = (_res or {}).get("total", len(_clients)) if isinstance(_res, dict) else len(_clients)
+                    if not _clients:
+                        _msg = "Voce ainda nao tem nenhum cliente cadastrado. Quer cadastrar o primeiro? E so me dizer o nome e o telefone."
+                    else:
+                        _linhas = []
+                        for _c in _clients:
+                            _nome = _c.get("name") or "(sem nome)"
+                            _tel = _c.get("phone")
+                            _seg = _c.get("segment")
+                            _extra = " - ".join([p for p in [_tel, _seg] if p])
+                            _linhas.append(f"- {_nome}" + (f" ({_extra})" if _extra else ""))
+                        _plural = "cliente" if _total == 1 else "clientes"
+                        _msg = f"Voce tem {_total} {_plural} cadastrado(s):\n\n" + "\n".join(_linhas)
                     _save_chat(prompt, _msg, _user_id)
                     return {
                         "status": "success",
