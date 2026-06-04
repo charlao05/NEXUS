@@ -766,7 +766,7 @@ async def execute_agent_action(
 
     # ── Inteligência via OpenAI GPT-4.1 ──────────────────────────
     try:
-        from app.api.agent_chat import get_llm_response, ACTION_PROMPTS, SensitiveActionRequired
+        from app.api.agent_chat import get_llm_response, ACTION_PROMPTS, SensitiveActionRequired, _execute_crm_tool
 
         # Carregar histórico persistente para contexto (Redis → fallback SQLite)
         chat_history: list[dict] = []
@@ -849,6 +849,44 @@ async def execute_agent_action(
 
         # Quick action (botão): converte ação em prompt natural
         if action.action in ACTION_PROMPTS:
+            # ── LEITURA DETERMINISTICA (anti-fantasma) ─────────────────────────
+            # Para acoes de LISTAGEM, NAO delegamos a decisao ao LLM (tool_choice=auto),
+            # que pode alucinar "voce nao tem clientes". Consultamos o banco DIRETO via
+            # _execute_crm_tool e formatamos a resposta a partir do resultado real.
+            # Garante: so dizemos "0 clientes" quando o banco realmente retorna 0.
+            if action.action == "list_clients":
+                try:
+                    _res = _execute_crm_tool("search_clients", {"query": "", "limit": 50}, _user_id or 0)
+                    _clients = (_res or {}).get("clients", []) if isinstance(_res, dict) else []
+                    _total = (_res or {}).get("total", len(_clients)) if isinstance(_res, dict) else len(_clients)
+                    if not _clients:
+                        _msg = "Voce ainda nao tem nenhum cliente cadastrado. Quer cadastrar o primeiro? E so me dizer o nome e o telefone."
+                    else:
+                        _linhas = []
+                        for _c in _clients:
+                            _nome = _c.get("name") or "(sem nome)"
+                            _tel = _c.get("phone")
+                            _seg = _c.get("segment")
+                            _extra = " - ".join([p for p in [_tel, _seg] if p])
+                            _linhas.append(f"- {_nome}" + (f" ({_extra})" if _extra else ""))
+                        _plural = "cliente" if _total == 1 else "clientes"
+                        _msg = f"Voce tem {_total} {_plural} cadastrado(s):\n\n" + "\n".join(_linhas)
+                    _save_chat(prompt, _msg, _user_id)
+                    return {
+                        "status": "success",
+                        "agent_id": agent_id,
+                        "action": action.action,
+                        "message": _msg,
+                    }
+                except Exception as _e_list:
+                    logger.error(f"[LIST_CLIENTS] leitura direta falhou: {_e_list}", exc_info=True)
+                    return {
+                        "status": "success",
+                        "agent_id": agent_id,
+                        "action": action.action,
+                        "message": "Tive um problema momentaneo ao ler seus clientes. Tente novamente em instantes.",
+                    }
+            # ── fim leitura deterministica ─────────────────────────────────────
             prompt = ACTION_PROMPTS[action.action]
             try:
                 llm_response = get_llm_response(agent_id, prompt, crm_context=_crm_context, conversation_history=chat_history, user_id=_user_id, confirmed_actions=[_confirmed_action] if _confirmed_action else None)
