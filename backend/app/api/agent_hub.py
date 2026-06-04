@@ -1888,7 +1888,7 @@ async def execute_agent_action(
                             _linhas.append(f"- {_nome}" + (f" ({_extra})" if _extra else ""))
                         _plural = "cliente" if _total == 1 else "clientes"
                         _msg = f"Voce tem {_total} {_plural} cadastrado(s):\n\n" + "\n".join(_linhas)
-                    _save_chat(prompt, _msg, _user_id)
+                    _save_chat(ACTION_PROMPTS[action.action], _msg, _user_id)
                     return {
                         "status": "success",
                         "agent_id": agent_id,
