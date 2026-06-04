@@ -42,6 +42,7 @@ REGRAS OBRIGATÓRIAS:
    CONSULTAR/LISTAR ("lista", "liste", "listar", "mostra", "mostrar", "quais", "ver clientes", "meus clientes") => crm_list_clients.
    ATUALIZAR ("atualiza", "edita", "muda", "altera") => crm_update_client.
    A intencao vem do PEDIDO ATUAL, NAO do historico nem do CONTEXTO DO USUARIO. Se o historico tem listagens mas o pedido atual diz "cadastra", a acao e crm_create_client.
+   PROIBIDO afirmar quantidade, total ou ausencia de clientes ("voce nao tem clientes", "0 clientes", "nenhum cliente") sem ter executado crm_list_clients ANTES, no MESMO plano. Em consultas, a leitura SEMPRE precede o respond_to_user.
    Se o pedido tiver nome de pessoa + telefone/email, e quase sempre crm_create_client, nao listagem.
 
 REGRA CRÍTICA — HUMAN-IN-THE-LOOP:
@@ -246,6 +247,34 @@ def plan_node(state: AgentState) -> dict[str, Any]:
         
         # Chamar LLM
         actions = _call_llm_planner(system, goal, state.get("messages", []))
+
+        # ── TRAVA ANTI-FANTASMA (CRM) ────────────────────────────
+        # O LLM (planner nao confiavel) as vezes responde "voce nao tem
+        # clientes" SEM consultar o banco. Se o pedido e de consulta e o
+        # plano nao tem leitura real, injetamos crm_list_clients no inicio
+        # para impedir alucinacao de dados (mesmo padrao do browser agent).
+        if agent_type in ("clientes", "financeiro"):
+            _goal_low = (goal or "").lower()
+            _read_verbs = (
+                "lista", "liste", "listar", "mostra", "mostrar", "quais",
+                "quantos", "quantas", "meus clientes", "ver clientes",
+                "tenho cliente", "algum cliente", "total de cliente",
+            )
+            _is_read = any(v in _goal_low for v in _read_verbs)
+            _has_read_tool = any(
+                a.tool in ("crm_list_clients", "crm_get_client") for a in actions
+            )
+            if _is_read and not _has_read_tool:
+                logger.info(
+                    "🛡️ Trava anti-fantasma: injetando crm_list_clients "
+                    "(consulta sem leitura real no plano do LLM)"
+                )
+                actions.insert(0, PlannedAction(
+                    tool="crm_list_clients",
+                    params={"limit": 50},
+                    reason="Consulta exige leitura real do banco (anti-alucinacao)",
+                    risk=ActionRisk.LOW,
+                ))
         
         # ── Validação pós-LLM para browser agent ────────────────
         # Se é browser agent na iteração 0 e o LLM só gerou respond_to_user
