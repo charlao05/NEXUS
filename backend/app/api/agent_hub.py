@@ -807,6 +807,32 @@ async def execute_agent_action(
             logger.warning("[CRM_CONTEXT] Erro cold-start ao carregar contexto.")
             _crm_context = "[SISTEMA: contexto indisponivel - NAO afirme ausencia de clientes]"
 
+        # ── INJECAO DETERMINISTICA DE CLIENTES (anti-fantasma no chat livre) ──
+        # O load_cross_agent_summary traz apenas historico de conversa, NAO os
+        # clientes do banco. Sem isso o LLM recebe "DADOS REAIS" vazios e alucina
+        # "voce nao tem clientes". Buscamos os clientes reais e injetamos aqui.
+        if agent_id in ("clientes", "cobranca", "financeiro"):
+            try:
+                _cli_res = _execute_crm_tool("search_clients", {"query": "", "limit": 50}, _user_id or 0)
+                _cli_list = (_cli_res or {}).get("clients", []) if isinstance(_cli_res, dict) else []
+                _cli_total = (_cli_res or {}).get("total", len(_cli_list)) if isinstance(_cli_res, dict) else 0
+                if _cli_list:
+                    _cli_linhas = []
+                    for _c in _cli_list:
+                        _n = _c.get("name") or "(sem nome)"
+                        _t = _c.get("phone") or ""
+                        _s = _c.get("segment") or ""
+                        _extra = " - ".join([p for p in [_t, _s] if p])
+                        _cli_linhas.append(f"- {_n}" + (f" ({_extra})" if _extra else ""))
+                    _crm_context = (
+                        f"CLIENTES CADASTRADOS ({_cli_total}):\n" + "\n".join(_cli_linhas)
+                        + ("\n\n" + _crm_context if _crm_context else "")
+                    )
+                else:
+                    _crm_context = "CLIENTES CADASTRADOS (0): nenhum cliente no banco." + ("\n\n" + _crm_context if _crm_context else "")
+            except Exception as _e_cli:
+                logger.error(f"[CRM_INJECT] falha ao injetar clientes reais: {_e_cli}", exc_info=True)
+
         # Chat livre: usuário digitou uma mensagem
         if user_message and action.action in ("smart_chat", "chat"):
             try:
@@ -1823,6 +1849,32 @@ async def execute_agent_action(
         except Exception:
             logger.warning("[CRM_CONTEXT] Erro cold-start ao carregar contexto.")
             _crm_context = "[SISTEMA: contexto indisponivel - NAO afirme ausencia de clientes]"
+
+        # ── INJECAO DETERMINISTICA DE CLIENTES (anti-fantasma no chat livre) ──
+        # O load_cross_agent_summary traz apenas historico de conversa, NAO os
+        # clientes do banco. Sem isso o LLM recebe "DADOS REAIS" vazios e alucina
+        # "voce nao tem clientes". Buscamos os clientes reais e injetamos aqui.
+        if agent_id in ("clientes", "cobranca", "financeiro"):
+            try:
+                _cli_res = _execute_crm_tool("search_clients", {"query": "", "limit": 50}, _user_id or 0)
+                _cli_list = (_cli_res or {}).get("clients", []) if isinstance(_cli_res, dict) else []
+                _cli_total = (_cli_res or {}).get("total", len(_cli_list)) if isinstance(_cli_res, dict) else 0
+                if _cli_list:
+                    _cli_linhas = []
+                    for _c in _cli_list:
+                        _n = _c.get("name") or "(sem nome)"
+                        _t = _c.get("phone") or ""
+                        _s = _c.get("segment") or ""
+                        _extra = " - ".join([p for p in [_t, _s] if p])
+                        _cli_linhas.append(f"- {_n}" + (f" ({_extra})" if _extra else ""))
+                    _crm_context = (
+                        f"CLIENTES CADASTRADOS ({_cli_total}):\n" + "\n".join(_cli_linhas)
+                        + ("\n\n" + _crm_context if _crm_context else "")
+                    )
+                else:
+                    _crm_context = "CLIENTES CADASTRADOS (0): nenhum cliente no banco." + ("\n\n" + _crm_context if _crm_context else "")
+            except Exception as _e_cli:
+                logger.error(f"[CRM_INJECT] falha ao injetar clientes reais: {_e_cli}", exc_info=True)
 
         # Chat livre: usuário digitou uma mensagem
         if user_message and action.action in ("smart_chat", "chat"):
