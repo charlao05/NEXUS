@@ -200,7 +200,7 @@ class ContabilidadeAgent:
         tipo_atividade = parameters.get("tipo_atividade", "servicos")
 
         # Tentar dados do banco CRM
-        receitas, despesas = self._get_financial_data_from_db(month)
+        receitas, despesas = self._get_financial_data_from_db(month, parameters.get("user_id"))
 
         # Fallback: arquivo JSON
         if receitas == 0 and despesas == 0:
@@ -525,7 +525,7 @@ class ContabilidadeAgent:
         """Gera relatório mensal de receitas brutas (obrigatório MEI)."""
         month = parameters.get("month", datetime.now().strftime("%Y-%m"))
 
-        receitas, _ = self._get_financial_data_from_db(month)
+        receitas, _ = self._get_financial_data_from_db(month, parameters.get("user_id"))
 
         return {
             "status": "ok",
@@ -546,7 +546,7 @@ class ContabilidadeAgent:
     def _mei_status(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """Status completo do limite MEI."""
         month = parameters.get("month", datetime.now().strftime("%Y-%m"))
-        receita_mensal, _ = self._get_financial_data_from_db(month)
+        receita_mensal, _ = self._get_financial_data_from_db(month, parameters.get("user_id"))
 
         return self._check_limite_mei(receita_mensal, month)
 
@@ -1031,15 +1031,16 @@ class ContabilidadeAgent:
     # HELPERS
     # ================================================================
 
-    def _get_financial_data_from_db(self, month: str) -> tuple[float, float]:
+    def _get_financial_data_from_db(self, month: str, user_id: int = None) -> tuple[float, float]:
         """Busca receitas e despesas do CRM/banco de dados."""
         try:
             from database.crm_service import CRMService  # type: ignore[import-unresolved]
             parts = month.split("-")
             m, y = int(parts[1]), int(parts[0])
-            summary = CRMService.get_financial_summary(month=m, year=y)
+            summary = CRMService.get_financial_summary(month=m, year=y, user_id=user_id)
             return summary.get("receitas", 0), summary.get("despesas", 0)
-        except Exception:
+        except Exception as e:
+            logger.error("Erro ao buscar dados financeiros do DB (month=%s, user_id=%s): %s", month, user_id, e, exc_info=True)
             return 0, 0
 
     def _calcular_saude_financeira(self, receitas: float, despesas: float, lucro: float, margem: float) -> str:
