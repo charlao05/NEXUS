@@ -955,7 +955,7 @@ async def execute_agent_action(
         logger.warning(f"LLM indisponível ({e}), usando fallback local", exc_info=True)
 
     # ── Fallback: execução local do agente ───────────────────────
-    params = {"action": action.action, **action.parameters}
+    params = {"action": action.action, "user_id": _user_id, **action.parameters}
 
     try:
         result = instance.execute(params)
@@ -1998,7 +1998,7 @@ async def execute_agent_action(
         logger.warning(f"LLM indisponível ({e}), usando fallback local", exc_info=True)
 
     # ── Fallback: execução local do agente ───────────────────────
-    params = {"action": action.action, **action.parameters}
+    params = {"action": action.action, "user_id": _user_id, **action.parameters}
 
     try:
         result = instance.execute(params)
