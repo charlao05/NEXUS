@@ -7,7 +7,9 @@ services:
     region: ohio
     rootDir: backend
     runtime: python
-    buildCommand: pip install -r requirements.txt && playwright install chromium --with-deps && python -c "from database.models import Base, engine; Base.metadata.create_all(engine)"
+    # Schema criado no startup (runtime), não no build — ver main.py on_startup.
+    # playwright é não-fatal: se falhar (Módulo B/browser), o build segue.
+    buildCommand: pip install -r requirements.txt && (playwright install chromium || true)
     startCommand: gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers 1 --timeout 300
     healthCheckPath: /health
     numInstances: 1

@@ -190,6 +190,16 @@ async def health_check():
 async def on_startup():
     logger.info(f"NEXUS API iniciando — ambiente: {_env}")
     logger.info(f"CORS origins: {_origins}")
+    # Garante o schema no RUNTIME (idempotente). DATABASE_URL está sempre
+    # disponível aqui — diferente do build, onde o Postgres do Render pode
+    # não estar acessível. create_all só cria tabelas ausentes.
+    try:
+        from database.models import Base, engine
+        Base.metadata.create_all(engine)
+        logger.info("Schema do banco verificado/criado no startup (create_all).")
+    except Exception as e:
+        logger.error(f"Falha ao verificar/criar schema no startup: {e}",
+                     exc_info=True)
 
 
 @app.on_event("shutdown")
