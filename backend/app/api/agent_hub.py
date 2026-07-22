@@ -198,6 +198,17 @@ agent_configs: Dict[str, AgentConfig] = {
             "learn_patterns": True,
             "voice_enabled": False
         }
+    ),
+    "vendas": AgentConfig(
+        enabled=True,
+        auto_notify=False,
+        notification_channels=["app"],
+        settings={
+            "moeda": "BRL",
+            "urgency_multiplier": 1.5,
+            "complexity_multiplier": 1.3,
+            "maintenance_rate": 0.1,
+        }
     )
 }
 
@@ -417,6 +428,14 @@ async def list_agents(current_user: dict[str, Any] = Depends(get_current_user)):
                 "icon": "🤖",
                 "status": "online",
                 "enabled": agent_configs["assistente"].enabled
+            },
+            {
+                "id": "vendas",
+                "name": "Agente de Vendas",
+                "description": "Qualifica leads, precifica serviços e gera propostas comerciais",
+                "icon": "💼",
+                "status": "online",
+                "enabled": agent_configs["vendas"].enabled
             }
         ]
     }
@@ -1244,6 +1263,17 @@ agent_configs: Dict[str, AgentConfig] = {
             "learn_patterns": True,
             "voice_enabled": False
         }
+    ),
+    "vendas": AgentConfig(
+        enabled=True,
+        auto_notify=False,
+        notification_channels=["app"],
+        settings={
+            "moeda": "BRL",
+            "urgency_multiplier": 1.5,
+            "complexity_multiplier": 1.3,
+            "maintenance_rate": 0.1,
+        }
     )
 }
 
@@ -1463,6 +1493,14 @@ async def list_agents(current_user: dict[str, Any] = Depends(get_current_user)):
                 "icon": "🤖",
                 "status": "online",
                 "enabled": agent_configs["assistente"].enabled
+            },
+            {
+                "id": "vendas",
+                "name": "Agente de Vendas",
+                "description": "Qualifica leads, precifica serviços e gera propostas comerciais",
+                "icon": "💼",
+                "status": "online",
+                "enabled": agent_configs["vendas"].enabled
             }
         ]
     }

@@ -5,7 +5,7 @@
  */
 
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Users, DollarSign, Bot, Lock, Sparkles, Bell } from 'lucide-react';
+import { ArrowLeft, Users, DollarSign, Bot, Lock, Sparkles, Bell, Briefcase } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePlanLimits } from '../hooks/usePlanLimits';
@@ -52,6 +52,14 @@ const agents: Agent[] = [
     icon: Bot,
     color: 'from-blue-500 to-indigo-500',
     backendId: 'assistente'
+  },
+  {
+    id: 'vendas',
+    name: 'Vendas e Propostas',
+    description: 'Qualifique Leads, Calcule o Preço do Serviço e Gere Propostas Comerciais Prontas',
+    icon: Briefcase,
+    color: 'from-purple-500 to-fuchsia-500',
+    backendId: 'vendas'
   }
 ];
 

@@ -115,7 +115,7 @@ PLAN_LIMITS: dict[Plan, dict[str, Any]] = {
         "crm_suppliers": 500,
         "invoices_per_month": -1,
         "available_agents": ["contabilidade", "clientes", "cobranca",
-                             "agenda", "assistente"],
+                             "agenda", "assistente", "vendas"],
         "notifications": "full",
         "data_export": True,
         "display_name": "Profissional",
