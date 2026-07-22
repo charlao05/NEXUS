@@ -31,6 +31,7 @@ class AgentType(Enum):
     CONTABILIDADE = "contabilidade"
     COBRANCA = "cobranca"
     ASSISTENTE = "assistente"
+    VENDAS = "vendas"
 
 
 # Mapeamento legado → novo (financeiro e documentos foram unificados em contabilidade)

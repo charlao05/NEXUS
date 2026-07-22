@@ -226,6 +226,9 @@ def get_agent_instance(agent_name: str):
             agents_instances[agent_name] = CollectionsAgent()
         elif agent_name == "assistente":
             agents_instances[agent_name] = AssistenteAgent()
+        elif agent_name == "vendas":
+            from agents.vendas_agent import VendasAgent
+            agents_instances[agent_name] = VendasAgent()
         else:
             return None
     return agents_instances.get(agent_name)
@@ -1269,6 +1272,9 @@ def get_agent_instance(agent_name: str):
             agents_instances[agent_name] = CollectionsAgent()
         elif agent_name == "assistente":
             agents_instances[agent_name] = AssistenteAgent()
+        elif agent_name == "vendas":
+            from agents.vendas_agent import VendasAgent
+            agents_instances[agent_name] = VendasAgent()
         else:
             return None
     return agents_instances.get(agent_name)
