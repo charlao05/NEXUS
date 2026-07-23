@@ -92,8 +92,11 @@ class VendasAgent:
 
     # ------------------------------------------------------------------ ações
     def _listar_servicos(self, _p: Dict[str, Any]) -> Dict[str, Any]:
+        linhas = [f"• {s['name']}: a partir de {_brl(s['base_price'])}"
+                  for s in SERVICOS]
         return {
             "status": "ok",
+            "message": "💼 **Serviços disponíveis**\n" + "\n".join(linhas),
             "moeda": MOEDA,
             "servicos": [
                 {"id": s["id"], "nome": s["name"],
@@ -150,7 +153,15 @@ class VendasAgent:
         }
 
     def _calcular_orcamento(self, p: Dict[str, Any]) -> Dict[str, Any]:
-        return {"status": "ok", **self._preco(p)}
+        preco = self._preco(p)
+        mult = ", ".join(preco["multiplicadores_aplicados"])
+        msg = (
+            f"💼 **Orçamento — {preco['servico']}**\n"
+            f"Valor: **{preco['valor_total_formatado']}** "
+            f"(base {_brl(preco['valor_base'])}; multiplicadores: {mult})\n"
+            f"Manutenção mensal: {preco['manutencao_mensal_formatada']}"
+        )
+        return {"status": "ok", "message": msg, **preco}
 
     def _qualificar_lead(self, p: Dict[str, Any]) -> Dict[str, Any]:
         """Score simples de qualificação (0-100) a partir das respostas."""
@@ -175,15 +186,17 @@ class VendasAgent:
 
         faixa = ("quente" if score >= 70 else
                  "morno" if score >= 40 else "frio")
+        recomendacao = {
+            "quente": "Priorizar: enviar proposta hoje.",
+            "morno": "Nutrir: enviar demo + case, follow-up em 3 dias.",
+            "frio": "Baixa prioridade: material educativo, sem esforço de venda.",
+        }[faixa]
         return {
             "status": "ok",
+            "message": f"🎯 Lead **{faixa}** — score {score}/100. {recomendacao}",
             "score": score,
             "faixa": faixa,
-            "recomendacao": {
-                "quente": "Priorizar: enviar proposta hoje.",
-                "morno": "Nutrir: enviar demo + case, follow-up em 3 dias.",
-                "frio": "Baixa prioridade: material educativo, sem esforço de venda.",
-            }[faixa],
+            "recomendacao": recomendacao,
         }
 
     def _gerar_proposta(self, p: Dict[str, Any]) -> Dict[str, Any]:
@@ -220,6 +233,7 @@ class VendasAgent:
 
         return {
             "status": "ok",
+            "message": texto_ia or proposta_template,
             "cliente": cliente,
             "precificacao": preco,
             "proposta": texto_ia or proposta_template,
