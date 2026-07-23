@@ -207,27 +207,25 @@ class VendasAgent:
 
         proposta_template = self._proposta_template(cliente, escopo, preco)
 
-        # Tentativa opcional de enriquecer com IA (graceful se sem chave)
+        # Enriquecer com IA usando o helper padrão do hub (mesma interface que os
+        # demais agentes). Antes chamava client.chat.completions.create() no
+        # wrapper OpenAIClient, que só expõe chat_completion() → sempre falhava e
+        # caía no template. Graceful: sem chave/erro, mantém o template.
         texto_ia = None
         try:
-            from helpers.openai_client import get_openai_client  # type: ignore
-            client = get_openai_client()
-            if client is not None:
-                prompt = (
-                    "Você é um redator comercial. Gere uma proposta de serviço "
-                    f"(SOW) profissional e objetiva em português para o cliente "
-                    f"'{cliente}'. Serviço: {preco['servico']}. Escopo: {escopo}. "
-                    f"Investimento: {preco['valor_total_formatado']} "
-                    f"(+ manutenção {preco['manutencao_mensal_formatada']}/mês). "
-                    "Estruture em: Contexto, Escopo, Entregáveis, Investimento, "
-                    "Prazo, Próximos passos."
-                )
-                resp = client.chat.completions.create(
-                    model=p.get("model", "gpt-4o-mini"),
-                    messages=[{"role": "user", "content": prompt}],
-                    timeout=30,
-                )
-                texto_ia = resp.choices[0].message.content
+            from utils.llm_client import gerar_texto_simples  # type: ignore
+            prompt = (
+                "Você é um redator comercial. Gere uma proposta de serviço "
+                f"(SOW) profissional e objetiva em português para o cliente "
+                f"'{cliente}'. Serviço: {preco['servico']}. Escopo: {escopo}. "
+                f"Investimento: {preco['valor_total_formatado']} "
+                f"(+ manutenção {preco['manutencao_mensal_formatada']}/mês). "
+                "Estruture em: Contexto, Escopo, Entregáveis, Investimento, "
+                "Prazo, Próximos passos."
+            )
+            texto = gerar_texto_simples(prompt, max_tokens=800, temperature=0.4)
+            if texto and texto.strip():
+                texto_ia = texto.strip()
         except Exception as e:  # noqa: BLE001
             logger.info("Proposta sem IA (fallback template): %s", e)
 
