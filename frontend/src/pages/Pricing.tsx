@@ -33,7 +33,10 @@ const plans: Plan[] = [
     description: 'CRM gratuito + 3 dias de IA para experimentar',
     icon: <Gift className="w-7 h-7" />,
     free: true,
-    buttonText: 'Plano Atual',
+    // NÃO usar 'Plano Atual' aqui: o card do plano ATIVO já renderiza
+    // "✓ Plano Atual" dinamicamente (ver render). Com o texto fixo, um usuário
+    // em plano pago via DOIS cards dizendo "Plano Atual".
+    buttonText: 'Plano Gratuito',
     features: [
       '✅ CRM: até 10 clientes e 10 fornecedores',
       '✅ Cadastro de produtos e serviços',
@@ -114,10 +117,12 @@ export default function Pricing() {
   const handleSelectPlan = async (planId: string) => {
     console.log('🎯 Plano selecionado:', planId);
     
-    // Se for plano free, já é o plano atual — ir para dashboard
+    // Card do plano gratuito: apenas navega. NÃO escrever 'free' no
+    // localStorage — um usuário PAGANTE que clicasse aqui era rebaixado na UI
+    // (agentes bloqueados) até o próximo refresh. O plano é do backend
+    // (AuthContext), como diz o comentário do currentPlan acima.
     if (planId === 'free') {
       console.log('✅ Plano gratuito — redirecionando para dashboard');
-      localStorage.setItem('user_plan', 'free');
       navigate('/dashboard');
       return;
     }
