@@ -597,6 +597,76 @@ async def confirm_sensitive_action(
         raise HTTPException(status_code=500, detail="Erro ao executar ação. Tente novamente.")
 
 
+_CHAVES_OCULTAS = {"status", "user_id", "success", "ok", "raw", "debug", "erro"}
+# Casamento por TOKEN (não por substring): "quantidade_vendas" contém "das",
+# e viraria "R$" indevidamente se comparássemos por substring.
+_TOKENS_MONETARIOS = {
+    "valor", "preco", "total", "das", "multa", "juros", "receita", "despesa",
+    "saldo", "manutencao", "salario", "lucro", "faturamento", "renda",
+    "inss", "icms", "iss",
+}
+
+
+def _fmt_valor_legivel(chave: str, valor: Any) -> Optional[str]:
+    """Converte um valor escalar em texto de exibição. None = ignorar."""
+    if valor is None or isinstance(valor, (dict, list, tuple)):
+        return None
+    if isinstance(valor, bool):
+        return "sim" if valor else "não"
+    if isinstance(valor, (int, float)) and (set(chave.split("_")) & _TOKENS_MONETARIOS):
+        return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    texto = str(valor).strip()
+    return texto or None
+
+
+def _formatar_resultado(result: Dict[str, Any]) -> str:
+    """Resumo legível de um resultado estruturado de agente.
+
+    REDE DE SEGURANÇA: agentes que devolvem só dados (sem chave `message`)
+    faziam o frontend exibir "Operação realizada, mas sem resposta detalhada"
+    apesar do cálculo correto — foi o caso do agente contábil (MEI). Aqui
+    montamos um texto a partir do próprio `result`, para que NENHUM agente,
+    atual ou futuro, caia naquela frase genérica.
+    """
+    linhas: list[str] = []
+
+    def _adicionar(chave: Any, valor: Any, prefixo: str = "", nivel: int = 0) -> None:
+        if len(linhas) >= 12:  # não despejar dicionários enormes no chat
+            return
+        chave_txt = str(chave)
+        chave_l = chave_txt.lower()
+        if chave_txt.startswith("_") or chave_l in _CHAVES_OCULTAS:
+            return
+        # Se existe uma versão já formatada da mesma chave, usa só ela.
+        if f"{chave_txt}_formatado" in result or f"{chave_txt}_formatada" in result:
+            return
+        rotulo = chave_txt.replace("_", " ").strip().capitalize()
+
+        # Muitos agentes aninham o payload (ex.: {"irpf": {...}}, "composicao").
+        # Sem descer, o resumo sairia vazio e voltaríamos à frase genérica.
+        if isinstance(valor, dict):
+            if nivel >= 2:
+                return
+            for k2, v2 in valor.items():
+                _adicionar(k2, v2, prefixo=f"{rotulo} · ", nivel=nivel + 1)
+            return
+
+        if isinstance(valor, (list, tuple)):
+            escalares = [str(v) for v in valor
+                         if not isinstance(v, (dict, list, tuple))]
+            if escalares:
+                linhas.append(f"• {prefixo}{rotulo}: {', '.join(escalares[:5])}")
+            return
+
+        texto = _fmt_valor_legivel(chave_l, valor)
+        if texto:
+            linhas.append(f"• {prefixo}{rotulo}: {texto}")
+
+    for chave, valor in result.items():
+        _adicionar(chave, valor)
+    return "\n".join(linhas)
+
+
 @router.post("/{agent_id}/execute")
 async def execute_agent_action(
     agent_id: str,
@@ -989,6 +1059,9 @@ async def execute_agent_action(
         fallback_message = ""
         if isinstance(result, dict):
             fallback_message = result.get("message") or result.get("response") or result.get("resultado", "")
+            if not fallback_message:
+                # Sem chave de texto: monta um resumo a partir dos dados.
+                fallback_message = _formatar_resultado(result)
         elif isinstance(result, str):
             fallback_message = result
 

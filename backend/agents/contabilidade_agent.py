@@ -53,6 +53,13 @@ DAS_VALORES_2026 = {
     "comercio_servicos": round(INSS_MEI_2026 + 1.00 + 5.00, 2),  # R$ 87.05 (ICMS+ISS)
 }
 
+
+def _brl(v: float) -> str:
+    """Formata em Real no padrão pt-BR (1.234,56). Apenas apresentação —
+    nenhum cálculo fiscal usa esta função."""
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 # MEI Caminhoneiro (INSS 12%)
 INSS_CAMINHONEIRO_2026 = round(SALARIO_MINIMO_2026 * 0.12, 2)  # R$ 194.52
 DAS_CAMINHONEIRO_2026 = {
@@ -396,27 +403,48 @@ class ContabilidadeAgent:
         if is_caminhoneiro:
             subtipo = parameters.get("subtipo_caminhoneiro", "interestadual_intermunicipal")
             valor = DAS_CAMINHONEIRO_2026.get(subtipo, DAS_CAMINHONEIRO_2026["interestadual_intermunicipal"])
+            _icms_iss = round(valor - INSS_CAMINHONEIRO_2026, 2)
             return {
                 "status": "ok",
+                "message": (
+                    f"📋 **DAS-MEI Caminhoneiro: {_brl(valor)}/mês**\n"
+                    f"Composição: INSS 12% {_brl(INSS_CAMINHONEIRO_2026)} + "
+                    f"ICMS/ISS {_brl(_icms_iss)}\n"
+                    f"Base: salário mínimo {_brl(SALARIO_MINIMO_2026)} (2026). "
+                    f"Vencimento todo dia 20."
+                ),
                 "tipo": "MEI Caminhoneiro",
                 "subtipo": subtipo,
                 "valor_das": valor,
                 "composicao": {
                     "inss_12_percent": INSS_CAMINHONEIRO_2026,
-                    "icms_iss": round(valor - INSS_CAMINHONEIRO_2026, 2),
+                    "icms_iss": _icms_iss,
                 },
                 "salario_minimo_base": SALARIO_MINIMO_2026,
             }
 
         valor = self.DAS_VALORES.get(tipo, self.DAS_VALORES["servicos"])
+        _icms = 1.00 if tipo in ("comercio", "industria", "comercio_servicos") else 0
+        _iss = 5.00 if tipo in ("servicos", "comercio_servicos") else 0
+        _partes = [f"INSS 5% {_brl(INSS_MEI_2026)}"]
+        if _icms:
+            _partes.append(f"ICMS {_brl(_icms)}")
+        if _iss:
+            _partes.append(f"ISS {_brl(_iss)}")
         return {
             "status": "ok",
+            "message": (
+                f"📋 **DAS-MEI ({tipo}): {_brl(valor)}/mês**\n"
+                f"Composição: {' + '.join(_partes)}\n"
+                f"Base: salário mínimo {_brl(SALARIO_MINIMO_2026)} (2026). "
+                f"Vencimento todo dia 20."
+            ),
             "tipo": tipo,
             "valor_das": valor,
             "composicao": {
                 "inss_5_percent": INSS_MEI_2026,
-                "icms": 1.00 if tipo in ("comercio", "industria", "comercio_servicos") else 0,
-                "iss": 5.00 if tipo in ("servicos", "comercio_servicos") else 0,
+                "icms": _icms,
+                "iss": _iss,
             },
             "salario_minimo_base": SALARIO_MINIMO_2026,
         }
