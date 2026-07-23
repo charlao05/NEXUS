@@ -21,11 +21,26 @@ logger = get_logger(__name__)
 
 # flake8: noqa: E501
 
-api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    raise RuntimeError("OPENAI_API_KEY não encontrado no ambiente (.env).")
+# Inicialização LAZY do cliente OpenAI.
+# Antes isto rodava no import e dava `raise` se OPENAI_API_KEY faltasse — como
+# collections_agent importa este módulo e agent_hub importa collections_agent,
+# uma chave ausente/errada derrubava o router de agentes INTEIRO (todas as rotas
+# /api/agents/* viravam 404). Agora o import nunca levanta; o cliente só é
+# criado na 1ª chamada real ao modelo, e os callers (ex.: VendasAgent) já tratam
+# a falha com fallback.
+_client: OpenAI | None = None
 
-client = OpenAI(api_key=api_key)
+
+def _get_client() -> OpenAI:
+    """Retorna o cliente OpenAI, criando-o sob demanda. Levanta RuntimeError só
+    quando o modelo é de fato chamado sem OPENAI_API_KEY configurado."""
+    global _client
+    if _client is None:
+        key = os.getenv("OPENAI_API_KEY")
+        if not key:
+            raise RuntimeError("OPENAI_API_KEY não configurado no ambiente.")
+        _client = OpenAI(api_key=key)
+    return _client
 
 
 def _extrair_json(texto: str) -> str:
@@ -124,7 +139,7 @@ REGRAS OBRIGATÓRIAS:
     import time as _t
     _track_t0 = _t.time()
     _model = "gpt-4o-mini"
-    resposta = client.chat.completions.create(
+    resposta = _get_client().chat.completions.create(
         model=_model,  # pode trocar para outro modelo compatível se quiser
         messages=[
             {"role": "system", "content": system_msg},
@@ -172,7 +187,7 @@ def gerar_texto_simples(
     import time as _t
     _track_t0 = _t.time()
     _model = "gpt-4o-mini"
-    resposta = client.chat.completions.create(
+    resposta = _get_client().chat.completions.create(
         model=_model,
         messages=[
             {

@@ -10,7 +10,13 @@ except ImportError:
     from services.llm_service import get_llm_service, LLMService  # type: ignore
 
 router = APIRouter(prefix="/api/llm", tags=["LLM"])
-llm_service: LLMService = get_llm_service()  # type: ignore[assignment]
+
+
+def _svc() -> LLMService:
+    """Serviço LLM sob demanda (singleton). Init LAZY: não construir no import,
+    senão uma OPENAI_API_KEY ausente/errada derrubaria o router inteiro (as
+    rotas /api/llm/* virariam 404). get_llm_service() cria/cacheia sob demanda."""
+    return get_llm_service()
 
 class ChatRequest(BaseModel):
     mensagem: str
@@ -26,7 +32,7 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
     try:
         # Garantir que historico seja convertido para o tipo correto
         historico = request.historico if request.historico else []
-        resposta = llm_service.gerar_resposta_chat(request.mensagem, historico)  # type: ignore
+        resposta = _svc().gerar_resposta_chat(request.mensagem, historico)  # type: ignore
         return {"resposta": resposta, "sucesso": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -35,7 +41,7 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
 async def agendar(request: AgendamentoRequest) -> Dict[str, Any]:
     """Endpoint para processar agendamentos"""
     try:
-        resultado = llm_service.processar_agendamento(request.texto, request.contexto)
+        resultado = _svc().processar_agendamento(request.texto, request.contexto)
         return {"dados": resultado, "sucesso": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -44,7 +50,7 @@ async def agendar(request: AgendamentoRequest) -> Dict[str, Any]:
 async def sentimento(texto: str = Body(..., embed=True)) -> Dict[str, Any]:
     """Endpoint para análise de sentimento"""
     try:
-        resultado = llm_service.analisar_sentimento(texto)
+        resultado = _svc().analisar_sentimento(texto)
         return {"sentimento": resultado, "sucesso": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
