@@ -201,6 +201,47 @@ async def on_startup():
         logger.error(f"Falha ao verificar/criar schema no startup: {e}",
                      exc_info=True)
 
+    # Owner bootstrap (idempotente): garante que qualquer conta cujo email
+    # esteja em ADMIN_EMAILS seja admin + plano completo. Cobre o caso de a
+    # conta já existir antes de a env ser definida. Sem ADMIN_EMAILS, no-op.
+    try:
+        _admins = [
+            e.strip().lower()
+            for e in os.getenv("ADMIN_EMAILS", "").split(",")
+            if e.strip()
+        ]
+        if _admins:
+            from database.models import SessionLocal, User
+            from sqlalchemy import func as _func
+            _db = SessionLocal()
+            try:
+                _promoted = 0
+                rows = (
+                    _db.query(User)
+                    .filter(_func.lower(User.email).in_(_admins))
+                    .all()
+                )
+                for _u in rows:
+                    changed = False
+                    if _u.plan != "completo":
+                        _u.plan = "completo"
+                        changed = True
+                    if _u.role != "admin":
+                        _u.role = "admin"
+                        changed = True
+                    if changed:
+                        _promoted += 1
+                if _promoted:
+                    _db.commit()
+                    logger.info(
+                        f"Owner bootstrap: {_promoted} conta(s) promovida(s) "
+                        f"a admin+completo."
+                    )
+            finally:
+                _db.close()
+    except Exception as e:
+        logger.error(f"Owner bootstrap falhou (não-fatal): {e}", exc_info=True)
+
 
 @app.on_event("shutdown")
 async def on_shutdown():

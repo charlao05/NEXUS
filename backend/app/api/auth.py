@@ -431,11 +431,26 @@ async def signup(user_data: UserSignup):
         if comm_pref not in ("email", "telegram", "sms"):
             comm_pref = "email"
 
+        # Owner bootstrap: emails em ADMIN_EMAILS (mesma lista de confiança do
+        # guard de /api/admin) já entram como admin + plano completo, sem SQL
+        # manual. Se ADMIN_EMAILS não estiver setada, ninguém é promovido
+        # (comportamento idêntico ao anterior: plan="free").
+        import os as _os
+        _admin_emails = {
+            e.strip().lower()
+            for e in _os.getenv("ADMIN_EMAILS", "").split(",")
+            if e.strip()
+        }
+        _is_owner = user_data.email.strip().lower() in _admin_emails
+        _plan = "completo" if _is_owner else "free"
+        _role = "admin" if _is_owner else "user"
+
         new_user = User(
             email=user_data.email,
             password_hash=hashed,
             full_name=user_data.full_name,
-            plan="free",
+            plan=_plan,
+            role=_role,
             status="active",
             last_login=datetime.now(timezone.utc),
             communication_preference=comm_pref,
@@ -445,9 +460,12 @@ async def signup(user_data: UserSignup):
         db.refresh(new_user)
 
         user_id = new_user.id  # type: ignore[union-attr]
-        logger.info(f"Novo usuário cadastrado: {user_data.email} (ID: {user_id})")
+        logger.info(
+            f"Novo usuário cadastrado: {user_data.email} (ID: {user_id}) "
+            f"plan={_plan} role={_role}"
+        )
 
-        token = create_jwt_token(user_id, user_data.email, "free")
+        token = create_jwt_token(user_id, user_data.email, _plan)
         refresh = create_refresh_token(user_id, user_data.email)
 
         return TokenResponse(
@@ -455,7 +473,7 @@ async def signup(user_data: UserSignup):
             token_type="bearer",
             user_id=str(user_id),
             email=user_data.email,
-            plan="free",
+            plan=_plan,
             refresh_token=refresh,
         )
     except HTTPException:
