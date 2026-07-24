@@ -18,6 +18,10 @@ interface AuthState {
   userEmail: string | null
   userPlan: string | null
   userRole: string | null
+  /** Perfil de atendimento (mei | pequeno_negocio | profissional_liberal |
+   *  agencia_cooperativa | cliente_servico). Ambientes se adaptam a ele:
+   *  cliente_servico e agencia_cooperativa NÃO veem plano/upsell. */
+  userProfile: string | null
   isAuthenticated: boolean
   login: (newToken: string, email?: string, plan?: string) => void
   logout: () => void
@@ -51,6 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch { /* ignore */ }
     return null
   })
+  const [userProfile, setUserProfile] = useState<string | null>(() => localStorage.getItem('profile_type'))
   // isLoading só bloqueia se NÃO temos token salvo (primeiro acesso real)
   const [isLoading, setIsLoading] = useState(() => !localStorage.getItem('access_token'))
 
@@ -73,6 +78,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (res.full_name) {
             localStorage.setItem('user_name', res.full_name)
           }
+          if (res.profile_type) {
+            setUserProfile(res.profile_type)
+            localStorage.setItem('profile_type', res.profile_type)
+          }
         })
         .catch((err) => {
           const status = err.response?.status
@@ -85,11 +94,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             localStorage.removeItem('user_plan')
             localStorage.removeItem('user_name')
             localStorage.removeItem('user_role')
+            localStorage.removeItem('profile_type')
             localStorage.removeItem('onboarding_completed')
             setToken(null)
             setUserEmail(null)
             setUserPlan(null)
             setUserRole(null)
+            setUserProfile(null)
           } else {
             // Erro de rede/timeout — manter token mas logar aviso
             console.warn('[AuthContext] Erro ao validar token (mantendo sessão):', err.message || err)
@@ -125,12 +136,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('user_plan')
     localStorage.removeItem('user_name')
     localStorage.removeItem('user_role')
+    localStorage.removeItem('profile_type')
     localStorage.removeItem('onboarding_completed')
     localStorage.removeItem('nexus_plan_limits')
     setToken(null)
     setUserEmail(null)
     setUserPlan(null)
     setUserRole(null)
+    setUserProfile(null)
   }, [])
 
   return (
@@ -141,6 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         userEmail,
         userPlan,
         userRole,
+        userProfile,
         isAuthenticated: !!token,
         login,
         logout,

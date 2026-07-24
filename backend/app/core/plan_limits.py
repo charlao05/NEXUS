@@ -175,25 +175,39 @@ def is_unlimited(value: int) -> bool:
 
 
 # ── Perfil de ATENDIMENTO sobrepondo os limites do plano ────────────────────
-# O perfil (User.profile_type) é ORTOGONAL ao plano de COBRANÇA:
-#   - cliente_servico: paga pelo CONTRATO, não por assinatura. Não pode esbarrar
-#     em limite de mensagens — o custo é absorvido no preço do serviço. O consumo
-#     continua registrado em LLMUsageRecord, que é a base do rateio.
-#   - agencia_relatorios: restrição por ESCOPO, não por preço — o NEXUS não atua
-#     como contador nem executa procedimentos além do escopo do MEI, então esse
-#     perfil fica em consulta/relatório.
+# O perfil (User.profile_type) é ORTOGONAL ao plano de COBRANÇA. O sistema
+# adapta o ambiente sozinho — o usuário não escolhe a própria limitação, nem vê
+# oferta comercial no cadastro:
+#   - cliente_servico: cliente final de uma empresa/profissional. Vê SÓ o que se
+#     relaciona ao serviço contratado (assistente, agenda, clientes) — nunca o
+#     VENDAS, que é ferramenta de quem vende, não de quem contrata. Sem bloqueio
+#     por limite: quem paga o consumo é a empresa contratante (rateio via
+#     LLMUsageRecord).
+#   - agencia_cooperativa: parceira que usa a infra do NEXUS para atender os
+#     clientes DELA (modelo WhatsApp Business Platform). Ambiente de gestão:
+#     CRM, agenda, cobrança, assistente, automações e o contábil em modo padrão
+#     (relatórios/demonstrativos — nada ali executa ato de contador; quando a
+#     demanda exigir, o sistema informa a limitação no momento do pedido). Sem
+#     bloqueio técnico: o limite é critério COMERCIAL do contrato, medido pelo
+#     consumo registrado (LLMUsageRecord/AutomationUsageRecord).
 # Só as chaves declaradas aqui sobrepõem; as demais seguem vindo do plano.
 PROFILE_LIMIT_OVERRIDES: dict[str, dict[str, Any]] = {
     "cliente_servico": {
         "agent_messages_per_day": -1,
         "automations_per_day": -1,
-        "available_agents": "__all__",
+        "available_agents": ["assistente", "agenda", "clientes"],
         "crm_clients": -1,
         "crm_suppliers": -1,
         "invoices_per_month": -1,
     },
-    "agencia_relatorios": {
-        "available_agents": ["contabilidade"],
+    "agencia_cooperativa": {
+        "agent_messages_per_day": -1,
+        "automations_per_day": -1,
+        "available_agents": ["contabilidade", "clientes", "agenda",
+                             "cobranca", "assistente"],
+        "crm_clients": -1,
+        "crm_suppliers": -1,
+        "invoices_per_month": -1,
     },
 }
 

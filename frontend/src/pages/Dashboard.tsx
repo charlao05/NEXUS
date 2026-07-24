@@ -7,6 +7,7 @@ import NotificationBell from '../components/NotificationBell'
 import PlanSwitcher from '../components/PlanSwitcher'
 import apiClient from '../services/apiClient'
 import { apiUrl } from '../config/api'
+import { isBillingExempt } from '../utils/profile'
 
 const PLAN_DETAILS: Record<string, { displayName: string; color: string; gradient: string }> = {
   free: { displayName: 'Gratuito', color: 'text-slate-400', gradient: 'from-slate-500 to-slate-600' },
@@ -76,7 +77,11 @@ const toTitleCase = (name: string): string =>
   name.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
 
 function Dashboard() {
-  const { logout, token, userRole: authRole } = useAuth()
+  const { logout, token, userRole: authRole, userProfile } = useAuth()
+  // Perfis fora do modelo de assinatura (cliente de serviço / agência) não
+  // veem NENHUMA superfície de cobrança: CTA de planos, banner de trial,
+  // upgrade, PlanSwitcher. Ver utils/profile.ts.
+  const billingExempt = isBillingExempt(userProfile)
   const navigate = useNavigate()
   const { isDark, toggleTheme } = useTheme()
   const { notifications, unreadCount, markRead, clearAll } = useNotifications(token)
@@ -231,29 +236,33 @@ function Dashboard() {
           </div>
 
           <div className="flex items-center gap-4">
-            {/* Plan Switcher */}
-            <PlanSwitcher
-              currentPlan={userPlan}
-              isAdmin={userRole === 'admin' || userRole === 'superadmin'}
-              token={token}
-              isDark={isDark}
-              onPlanChanged={(plan, newToken) => {
-                setUserPlan(plan)
-                localStorage.setItem('user_plan', plan)
-                if (newToken) {
-                  localStorage.setItem('access_token', newToken)
-                  window.location.reload()
-                }
-              }}
-            />
+            {/* Plan Switcher + CTA de planos — ocultos para perfis fora do
+                modelo de assinatura (cliente de serviço / agência) */}
+            {!billingExempt && (
+              <>
+                <PlanSwitcher
+                  currentPlan={userPlan}
+                  isAdmin={userRole === 'admin' || userRole === 'superadmin'}
+                  token={token}
+                  isDark={isDark}
+                  onPlanChanged={(plan, newToken) => {
+                    setUserPlan(plan)
+                    localStorage.setItem('user_plan', plan)
+                    if (newToken) {
+                      localStorage.setItem('access_token', newToken)
+                      window.location.reload()
+                    }
+                  }}
+                />
 
-            {/* CTA Planos permanente */}
-            <button
-              onClick={() => navigate('/pricing')}
-              className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${isDark ? 'text-slate-300 hover:text-green-400 border-slate-700 hover:border-green-500' : 'text-slate-600 hover:text-green-600 border-slate-300 hover:border-green-500'}`}
-            >
-              Planos & Addons
-            </button>
+                <button
+                  onClick={() => navigate('/pricing')}
+                  className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${isDark ? 'text-slate-300 hover:text-green-400 border-slate-700 hover:border-green-500' : 'text-slate-600 hover:text-green-600 border-slate-300 hover:border-green-500'}`}
+                >
+                  Planos & Addons
+                </button>
+              </>
+            )}
 
             {/* Theme Toggle */}
             <button
@@ -312,8 +321,9 @@ function Dashboard() {
           </p>
         </div>
 
-        {/* Trial Banner — visível apenas para free com trial ativo */}
-        {userPlan === 'free' && trialDaysRemaining !== null && (
+        {/* Trial Banner — visível apenas para free com trial ativo (nunca
+            para perfis isentos de cobrança) */}
+        {!billingExempt && userPlan === 'free' && trialDaysRemaining !== null && (
           <div className={`mb-2 px-4 py-3 rounded-xl flex items-center justify-between gap-3 ${isDark ? 'bg-yellow-900/30 border border-yellow-700/50 text-yellow-300' : 'bg-yellow-50 border border-yellow-300 text-yellow-800'}`}>
             <span className="text-sm font-medium">
               {trialDaysRemaining === 0
@@ -362,7 +372,7 @@ function Dashboard() {
             <div className={`text-3xl font-bold ${planInfo.color} mb-2`}>
               {planInfo.displayName}
             </div>
-            {userPlan === 'free' && (
+            {!billingExempt && userPlan === 'free' && (
               <button
                 onClick={() => navigate('/pricing')}
                 className="text-sm text-green-400 hover:text-green-300 transition"
@@ -664,7 +674,7 @@ function Dashboard() {
                   </button>
                 ))}
               </div>
-              {upgradeMsg[_plan] && (
+              {!billingExempt && upgradeMsg[_plan] && (
                 <div className={`mt-4 flex items-center justify-between p-3 rounded-lg border ${isDark ? 'bg-slate-700/30 border-slate-600/30' : 'bg-slate-50 border-slate-200'}`}>
                   <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                     {upgradeMsg[_plan]}

@@ -318,7 +318,7 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict[
             "plan": plan,
             # Perfil de atendimento: os gates de limite o usam para sobrepor o
             # plano (ver plan_limits.resolve_user_limit).
-            "profile_type": str(getattr(user, 'profile_type', None) or 'mei'),
+            "profile_type": _normalize_profile(getattr(user, 'profile_type', None)),
             "full_name": user.full_name,
             "role": role,
             "communication_preference": str(getattr(user, 'communication_preference', None) or 'email'),
@@ -610,21 +610,25 @@ async def get_profile(current_user: dict[str, Any] = Depends(get_current_user)):
         address_zip=getattr(user, "address_zip", None) if user else None,
         birth_date=str(user.birth_date) if user and getattr(user, "birth_date", None) else None,
         business_type=getattr(user, "business_type", None) if user else None,
-        # `or "mei"` cobre linhas antigas com NULL (coluna adicionada depois).
-        profile_type=(getattr(user, "profile_type", None) or "mei") if user else "mei",
+        # Normaliza aliases antigos e cobre linhas com NULL (coluna nova).
+        profile_type=_normalize_profile(getattr(user, "profile_type", None)) if user else "mei",
         trial_days_remaining=_trial_days_remaining,
     )
 
 
 @router.get("/my-limits")
 async def get_my_limits(current_user: dict[str, Any] = Depends(get_current_user)):
-    """Retorna limites do plano e uso atual do usuário."""
-    from app.core.plan_limits import PLAN_LIMITS, resolve_plan
+    """Retorna limites EFETIVOS (plano + perfil de atendimento) e uso atual."""
+    from app.core.plan_limits import PLAN_LIMITS, PROFILE_LIMIT_OVERRIDES, resolve_plan
     from sqlalchemy import or_
 
     plan_raw = str(current_user.get("plan", "free"))
     plan_enum = resolve_plan(plan_raw)
-    limits = PLAN_LIMITS[plan_enum]
+    # Cópia + overlay do perfil — mesma regra dos gates (resolve_user_limit).
+    # Sem isso a UI mostraria cadeados/banners que o backend não aplica.
+    limits = dict(PLAN_LIMITS[plan_enum])
+    _prof = str(current_user.get("profile_type") or "mei")
+    limits.update(PROFILE_LIMIT_OVERRIDES.get(_prof, {}))
     uid = current_user["user_id"]
 
     db = _get_db_session()
@@ -678,6 +682,7 @@ async def get_my_limits(current_user: dict[str, Any] = Depends(get_current_user)
 
     return {
         "plan": plan_enum.value,
+        "profile_type": _prof,
         "display_name": limits["display_name"],
         "addon_clients_purchased": addon_purchased,
         "limits": {
@@ -752,20 +757,36 @@ async def update_preferences(
 # ============================================================================
 
 # Perfis de ATENDIMENTO do NEXUS (multi-segmento). Não confundir com
-# `business_type`, que é o SETOR do negócio. O perfil define limites e escopo:
-#   - agencia_relatorios: agência/cooperativa em modo SOMENTE RELATÓRIO. O NEXUS
-#     não possui perfil de contador e não executa procedimentos além do escopo
-#     do MEI — por isso este perfil é restrito a consulta/relatório.
-#   - cliente_servico: cliente de serviço (Alinha); o uso não deve ser bloqueado
-#     por limite de plano — o custo é absorvido no preço do contrato.
+# `business_type`, que é o SETOR do negócio. O perfil define o AMBIENTE:
+#   - mei / pequeno_negocio / profissional_liberal: público pagante do produto;
+#     freemium + planos + addon seguem normais.
+#   - agencia_cooperativa: usa a infraestrutura do NEXUS para atender os
+#     clientes DELA. Ambiente de gestão de clientes, relatórios, análises e
+#     automações. Quando a demanda exigir ato privativo de contador ou acesso a
+#     portal do governo, o sistema informa a limitação NO MOMENTO do pedido —
+#     não como pergunta no cadastro. Remuneração é contrato, não plano.
+#   - cliente_servico: cliente final de uma empresa/profissional. Vê apenas o
+#     que se relaciona ao serviço contratado; quem paga o consumo é a empresa
+#     contratante, então não sofre bloqueio por limite de plano.
 PROFILE_TYPES = (
     "mei",
     "pequeno_negocio",
     "profissional_liberal",
-    "agencia_relatorios",
-    "agencia_servicos",
+    "agencia_cooperativa",
     "cliente_servico",
 )
+
+# Perfis antigos (v1, expostos por poucas horas) → perfil atual.
+_PROFILE_ALIASES = {
+    "agencia_relatorios": "agencia_cooperativa",
+    "agencia_servicos": "agencia_cooperativa",
+}
+
+
+def _normalize_profile(raw: Any) -> str:
+    """Normaliza o perfil de atendimento (aliases antigos → atual; vazio → mei)."""
+    p = str(raw or "mei").strip().lower()
+    return _PROFILE_ALIASES.get(p, p)
 
 
 class UpdateProfileRequest(BaseModel):
@@ -809,7 +830,7 @@ async def update_profile(
             raise HTTPException(400, "address_state deve ter 2 caracteres (UF)")
         if data.communication_preference and data.communication_preference not in ("email", "telegram", "sms"):
             raise HTTPException(400, "communication_preference deve ser 'email', 'telegram' ou 'sms'")
-        if data.profile_type and data.profile_type not in PROFILE_TYPES:
+        if data.profile_type and _normalize_profile(data.profile_type) not in PROFILE_TYPES:
             raise HTTPException(
                 400, f"profile_type inválido. Use um de: {', '.join(PROFILE_TYPES)}"
             )
@@ -833,6 +854,9 @@ async def update_profile(
                         value = _date_type.fromisoformat(value)
                     except (ValueError, TypeError):
                         raise HTTPException(400, "birth_date deve estar no formato YYYY-MM-DD")
+                elif field == "profile_type":
+                    # Grava sempre o valor canônico (aliases v1 → atual).
+                    value = _normalize_profile(value)
                 setattr(user, field, value)
                 updated_fields.append(field)
 

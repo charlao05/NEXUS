@@ -9,6 +9,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, X } from 'lucide-react'
 import { usePlanLimits } from '../hooks/usePlanLimits'
+import { useAuth } from '../contexts/AuthContext'
+import { isBillingExempt } from '../utils/profile'
 
 interface Props {
   resource: 'crm_clients' | 'invoices_per_month' | 'agent_messages_per_day'
@@ -17,11 +19,14 @@ interface Props {
 
 export function UpgradeBanner({ resource, label }: Props) {
   const { limits, isAtLimit, isFree, getUsagePercent } = usePlanLimits()
+  const { userProfile } = useAuth()
   const navigate = useNavigate()
   const [dismissed, setDismissed] = useState(
     sessionStorage.getItem(`banner_dismissed_${resource}`) === '1',
   )
 
+  // Perfis fora do modelo de assinatura nunca veem convite de upgrade.
+  if (isBillingExempt(userProfile)) return null
   if (!isFree || !limits || dismissed) return null
 
   const info = limits.limits[resource]

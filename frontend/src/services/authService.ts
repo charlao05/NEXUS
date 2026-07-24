@@ -25,6 +25,9 @@ interface UserProfile {
   full_name: string
   plan: string
   role: string
+  /** Perfil de atendimento (mei | pequeno_negocio | profissional_liberal |
+   *  agencia_cooperativa | cliente_servico) — define o ambiente exibido. */
+  profile_type?: string
   created_at: string
   subscription_expires: string | null
   requests_used: number

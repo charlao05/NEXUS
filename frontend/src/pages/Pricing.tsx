@@ -10,6 +10,7 @@ import { usePlanLimits } from '../hooks/usePlanLimits';
 import { createCheckout, createAddonCheckout , createPortalSession} from '../services/authService';
 import { Check, Zap, Crown, Gift, Rocket, ArrowLeft, Star, Users } from 'lucide-react';
 import axios from 'axios';
+import { isBillingExempt } from '../utils/profile';
 
 interface Plan {
   id: string;
@@ -104,11 +105,35 @@ const plans: Plan[] = [
 
 export default function Pricing() {
   const navigate = useNavigate();
-  const { userPlan, userEmail } = useAuth();
+  const { userPlan, userEmail, userProfile } = useAuth();
   const { limits } = usePlanLimits();
   const [isLoading, setIsLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  
+
+  // Perfis fora do modelo de assinatura (cliente de serviço / agência) não
+  // têm o que fazer nesta tela: o acesso deles é definido pelo contrato com a
+  // empresa/plataforma, não por plano. Mostra explicação neutra, sem oferta.
+  if (isBillingExempt(userProfile)) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-slate-800/60 backdrop-blur-xl border border-slate-700/50 rounded-2xl p-8 text-center space-y-4">
+          <div className="text-5xl">🤝</div>
+          <h2 className="text-2xl font-bold text-white">Seu acesso já está incluído</h2>
+          <p className="text-slate-400">
+            O seu perfil não usa planos de assinatura: o acesso é definido pelo
+            contrato do serviço. Você não precisa contratar nada por aqui.
+          </p>
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="px-8 py-3 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-semibold hover:from-green-400 hover:to-emerald-400 transition-all shadow-lg shadow-green-500/25"
+          >
+            Ir para o Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Usar plano do AuthContext (validado pelo backend) em vez de localStorage
   const currentPlan = (userPlan || 'free').toLowerCase();
   // Normalizar aliases legados

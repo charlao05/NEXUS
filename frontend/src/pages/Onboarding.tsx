@@ -7,21 +7,20 @@ export default function Onboarding() {
   const { token } = useAuth()
   const [currentStep, setCurrentStep] = useState(0)
   const [profileType, setProfileType] = useState('')
-  const [showAgencia, setShowAgencia] = useState(false)
   const [businessName, setBusinessName] = useState('')
   const [businessType, setBusinessType] = useState('')
   const [goals, setGoals] = useState<string[]>([])
 
   // PERFIL DE ATENDIMENTO — quem o NEXUS está atendendo. Diferente de
-  // BUSINESS_TYPES (abaixo), que é o SETOR. O perfil define limites e escopo,
-  // e é persistido no backend (User.profile_type) — não só no localStorage.
-  // 'agencia' é só da UI: expande nas duas opções reais de escopo.
+  // BUSINESS_TYPES (abaixo), que é o SETOR. O perfil define o AMBIENTE que o
+  // sistema carrega sozinho (sem perguntar escopo/pacote no cadastro), e é
+  // persistido no backend (User.profile_type) — não só no localStorage.
   const PROFILES = [
     { id: 'mei', label: 'MEI ou autônomo', icon: '🧾', desc: 'Sou MEI ou trabalho por conta própria' },
     { id: 'pequeno_negocio', label: 'Pequeno negócio', icon: '🏪', desc: 'Tenho uma empresa pequena' },
     { id: 'profissional_liberal', label: 'Profissional liberal', icon: '👔', desc: 'Presto serviço com registro próprio' },
     { id: 'cliente_servico', label: 'Cliente de serviço', icon: '🤝', desc: 'Contratei um serviço ou projeto' },
-    { id: 'agencia', label: 'Agência ou cooperativa', icon: '🏢', desc: 'Atendo vários negócios' },
+    { id: 'agencia_cooperativa', label: 'Agência ou cooperativa', icon: '🏢', desc: 'Atendo vários negócios' },
   ]
 
   const BUSINESS_TYPES = [
@@ -45,17 +44,6 @@ export default function Onboarding() {
 
   const toggleGoal = (id: string) => {
     setGoals(prev => prev.includes(id) ? prev.filter(g => g !== id) : [...prev, id])
-  }
-
-  const selectProfile = (id: string) => {
-    if (id === 'agencia') {
-      // Não define o perfil ainda: agência/cooperativa precisa escolher o escopo.
-      setShowAgencia(true)
-      setProfileType('')
-      return
-    }
-    setShowAgencia(false)
-    setProfileType(id)
   }
 
   const handleComplete = async () => {
@@ -116,11 +104,11 @@ export default function Onboarding() {
       </div>
       <div className="space-y-3">
         {PROFILES.map(p => {
-          const active = p.id === 'agencia' ? showAgencia : profileType === p.id
+          const active = profileType === p.id
           return (
             <button
               key={p.id}
-              onClick={() => selectProfile(p.id)}
+              onClick={() => setProfileType(p.id)}
               className={`w-full p-4 rounded-xl border transition-all text-left flex items-start gap-3 ${
                 active
                   ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/10'
@@ -138,39 +126,6 @@ export default function Onboarding() {
           )
         })}
       </div>
-
-      {/* Escopo para agência/cooperativa — fronteira honesta declarada na tela */}
-      {showAgencia && (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4 space-y-3">
-          <p className="text-sm text-amber-200/90">
-            <strong>Importante:</strong> o NEXUS <strong>não atua como contador</strong> e não executa,
-            nos portais do governo, procedimentos além do escopo do MEI. Para agências e cooperativas,
-            o uso recomendado é <strong>somente relatórios</strong>.
-          </p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <button
-              onClick={() => setProfileType('agencia_relatorios')}
-              className={`p-3 rounded-lg border text-sm transition-all ${
-                profileType === 'agencia_relatorios'
-                  ? 'border-green-500 bg-green-500/10 text-green-400'
-                  : 'border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600'
-              }`}
-            >
-              📊 Somente relatórios
-            </button>
-            <button
-              onClick={() => setProfileType('agencia_servicos')}
-              className={`p-3 rounded-lg border text-sm transition-all ${
-                profileType === 'agencia_servicos'
-                  ? 'border-green-500 bg-green-500/10 text-green-400'
-                  : 'border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600'
-              }`}
-            >
-              🤝 Quero contratar pacotes
-            </button>
-          </div>
-        </div>
-      )}
 
       <div className="flex justify-between">
         <button onClick={() => setCurrentStep(0)} className="px-6 py-2 text-slate-400 hover:text-white transition-colors">

@@ -899,6 +899,23 @@ async def execute_agent_action(
             logger.warning("[CRM_CONTEXT] Erro cold-start ao carregar contexto.")
             _crm_context = "[SISTEMA: contexto indisponivel - NAO afirme ausencia de clientes]"
 
+        # Transparência contextual (agência/cooperativa): a limitação de escopo
+        # é informada NO MOMENTO do pedido, não como pergunta no cadastro. O
+        # NEXUS não atua como contador nem executa procedimentos de portal do
+        # governo além do escopo do MEI — se a demanda exigir isso, o agente
+        # avisa e aponta o caminho oficial.
+        if str(current_user.get("profile_type", "")) == "agencia_cooperativa":
+            _crm_context = (
+                "[ESCOPO DA PLATAFORMA — informe SOMENTE quando o pedido tocar "
+                "no tema: o NEXUS não atua como contador e não executa, nos "
+                "portais do governo, procedimentos além do escopo do MEI. Se o "
+                "pedido exigir ato privativo de contador ou acesso "
+                "governamental, diga isso com transparência e indique o portal "
+                "oficial ou um contador. Relatórios, análises, automações e "
+                "gestão de clientes estão dentro do escopo.]\n\n"
+                + (_crm_context or "")
+            )
+
         # ── INJECAO DETERMINISTICA DE CLIENTES (anti-fantasma no chat livre) ──
         # O load_cross_agent_summary traz apenas historico de conversa, NAO os
         # clientes do banco. Sem isso o LLM recebe "DADOS REAIS" vazios e alucina
