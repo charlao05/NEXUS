@@ -6,9 +6,23 @@ import { apiUrl } from '../config/api'
 export default function Onboarding() {
   const { token } = useAuth()
   const [currentStep, setCurrentStep] = useState(0)
+  const [profileType, setProfileType] = useState('')
+  const [showAgencia, setShowAgencia] = useState(false)
   const [businessName, setBusinessName] = useState('')
   const [businessType, setBusinessType] = useState('')
   const [goals, setGoals] = useState<string[]>([])
+
+  // PERFIL DE ATENDIMENTO — quem o NEXUS está atendendo. Diferente de
+  // BUSINESS_TYPES (abaixo), que é o SETOR. O perfil define limites e escopo,
+  // e é persistido no backend (User.profile_type) — não só no localStorage.
+  // 'agencia' é só da UI: expande nas duas opções reais de escopo.
+  const PROFILES = [
+    { id: 'mei', label: 'MEI ou autônomo', icon: '🧾', desc: 'Sou MEI ou trabalho por conta própria' },
+    { id: 'pequeno_negocio', label: 'Pequeno negócio', icon: '🏪', desc: 'Tenho uma empresa pequena' },
+    { id: 'profissional_liberal', label: 'Profissional liberal', icon: '👔', desc: 'Presto serviço com registro próprio' },
+    { id: 'cliente_servico', label: 'Cliente de serviço', icon: '🤝', desc: 'Contratei um serviço ou projeto' },
+    { id: 'agencia', label: 'Agência ou cooperativa', icon: '🏢', desc: 'Atendo vários negócios' },
+  ]
 
   const BUSINESS_TYPES = [
     { id: 'servicos', label: 'Prestação de Serviços', icon: '🔧' },
@@ -33,24 +47,44 @@ export default function Onboarding() {
     setGoals(prev => prev.includes(id) ? prev.filter(g => g !== id) : [...prev, id])
   }
 
+  const selectProfile = (id: string) => {
+    if (id === 'agencia') {
+      // Não define o perfil ainda: agência/cooperativa precisa escolher o escopo.
+      setShowAgencia(true)
+      setProfileType('')
+      return
+    }
+    setShowAgencia(false)
+    setProfileType(id)
+  }
+
   const handleComplete = async () => {
     try {
-      // Salvar preferências (o backend pode armazenar isso futuramente)
       localStorage.setItem('onboarding_completed', 'true')
       localStorage.setItem('business_name', businessName)
       localStorage.setItem('business_type', businessType)
+      localStorage.setItem('profile_type', profileType)
       localStorage.setItem('user_goals', JSON.stringify(goals))
 
-      // Registrar atividade
       if (token) {
+        const auth = { headers: { Authorization: `Bearer ${token}` } }
+
+        // PERSISTIR NO BACKEND (antes o onboarding só gravava no localStorage,
+        // então o servidor não podia segmentar nada e limpar o navegador
+        // perdia a resposta). PUT /api/auth/me já tem allowlist e validação.
+        await apiClient.put(apiUrl('/api/auth/me'), {
+          profile_type: profileType || 'mei',
+          business_type: businessType,
+          trade_name: businessName,
+        }, auth).catch((err) => console.warn('Falha ao salvar perfil:', err?.message))
+
         await apiClient.post(apiUrl('/api/chat/save'), {
           agent_id: 'system',
           role: 'assistant',
-          content: `Onboarding completo: ${businessName} (${businessType}). Objetivos: ${goals.join(', ')}`,
-        }, { headers: { Authorization: `Bearer ${token}` } }).catch((err) => console.warn('Falha ao salvar onboarding:', err?.message))
+          content: `Onboarding completo: ${businessName} (perfil: ${profileType || 'mei'}, setor: ${businessType}). Objetivos: ${goals.join(', ')}`,
+        }, auth).catch((err) => console.warn('Falha ao salvar onboarding:', err?.message))
       }
 
-      // Navegar direto sem tela intermediária — reload força App a ler localStorage atualizado
       window.location.href = '/dashboard'
     } catch {
       window.location.href = '/dashboard'
@@ -73,7 +107,86 @@ export default function Onboarding() {
       </button>
     </div>,
 
-    // Step 1: Nome do negócio
+    // Step 1: Perfil de atendimento
+    <div key="profile" className="space-y-6">
+      <div className="text-center">
+        <div className="text-4xl mb-2">🎯</div>
+        <h2 className="text-2xl font-bold text-white">Como você vai usar o NEXUS?</h2>
+        <p className="text-slate-400 mt-1">Isso define o que faz sentido mostrar pra você</p>
+      </div>
+      <div className="space-y-3">
+        {PROFILES.map(p => {
+          const active = p.id === 'agencia' ? showAgencia : profileType === p.id
+          return (
+            <button
+              key={p.id}
+              onClick={() => selectProfile(p.id)}
+              className={`w-full p-4 rounded-xl border transition-all text-left flex items-start gap-3 ${
+                active
+                  ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/10'
+                  : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'
+              }`}
+            >
+              <span className="text-2xl leading-none">{p.icon}</span>
+              <span>
+                <span className={`block font-medium ${active ? 'text-green-400' : 'text-slate-300'}`}>
+                  {p.label}
+                </span>
+                <span className="block text-sm text-slate-500">{p.desc}</span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Escopo para agência/cooperativa — fronteira honesta declarada na tela */}
+      {showAgencia && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4 space-y-3">
+          <p className="text-sm text-amber-200/90">
+            <strong>Importante:</strong> o NEXUS <strong>não atua como contador</strong> e não executa,
+            nos portais do governo, procedimentos além do escopo do MEI. Para agências e cooperativas,
+            o uso recomendado é <strong>somente relatórios</strong>.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              onClick={() => setProfileType('agencia_relatorios')}
+              className={`p-3 rounded-lg border text-sm transition-all ${
+                profileType === 'agencia_relatorios'
+                  ? 'border-green-500 bg-green-500/10 text-green-400'
+                  : 'border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600'
+              }`}
+            >
+              📊 Somente relatórios
+            </button>
+            <button
+              onClick={() => setProfileType('agencia_servicos')}
+              className={`p-3 rounded-lg border text-sm transition-all ${
+                profileType === 'agencia_servicos'
+                  ? 'border-green-500 bg-green-500/10 text-green-400'
+                  : 'border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600'
+              }`}
+            >
+              🤝 Quero contratar pacotes
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex justify-between">
+        <button onClick={() => setCurrentStep(0)} className="px-6 py-2 text-slate-400 hover:text-white transition-colors">
+          ← Voltar
+        </button>
+        <button
+          onClick={() => setCurrentStep(2)}
+          disabled={!profileType}
+          className="px-8 py-3 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-semibold hover:from-green-400 hover:to-emerald-400 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-green-500/25"
+        >
+          Continuar →
+        </button>
+      </div>
+    </div>,
+
+    // Step 2: Nome do negócio
     <div key="business" className="space-y-6">
       <div className="text-center">
         <div className="text-4xl mb-2">🏪</div>
@@ -90,13 +203,13 @@ export default function Onboarding() {
       />
       <div className="flex justify-between">
         <button
-          onClick={() => setCurrentStep(0)}
+          onClick={() => setCurrentStep(1)}
           className="px-6 py-2 text-slate-400 hover:text-white transition-colors"
         >
           ← Voltar
         </button>
         <button
-          onClick={() => setCurrentStep(2)}
+          onClick={() => setCurrentStep(3)}
           disabled={!businessName.trim()}
           className="px-8 py-3 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-semibold hover:from-green-400 hover:to-emerald-400 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-green-500/25"
         >
@@ -105,7 +218,7 @@ export default function Onboarding() {
       </div>
     </div>,
 
-    // Step 2: Tipo de negócio
+    // Step 3: Tipo (setor) do negócio
     <div key="type" className="space-y-6">
       <div className="text-center">
         <h2 className="text-2xl font-bold text-white">Qual o tipo do seu negócio?</h2>
@@ -130,11 +243,11 @@ export default function Onboarding() {
         ))}
       </div>
       <div className="flex justify-between">
-        <button onClick={() => setCurrentStep(1)} className="px-6 py-2 text-slate-400 hover:text-white transition-colors">
+        <button onClick={() => setCurrentStep(2)} className="px-6 py-2 text-slate-400 hover:text-white transition-colors">
           ← Voltar
         </button>
         <button
-          onClick={() => setCurrentStep(3)}
+          onClick={() => setCurrentStep(4)}
           disabled={!businessType}
           className="px-8 py-3 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-semibold hover:from-green-400 hover:to-emerald-400 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-green-500/25"
         >
@@ -143,7 +256,7 @@ export default function Onboarding() {
       </div>
     </div>,
 
-    // Step 3: Objetivos
+    // Step 4: Objetivos
     <div key="goals" className="space-y-6">
       <div className="text-center">
         <h2 className="text-2xl font-bold text-white">O que você precisa resolver?</h2>
@@ -168,7 +281,7 @@ export default function Onboarding() {
         ))}
       </div>
       <div className="flex justify-between">
-        <button onClick={() => setCurrentStep(2)} className="px-6 py-2 text-slate-400 hover:text-white transition-colors">
+        <button onClick={() => setCurrentStep(3)} className="px-6 py-2 text-slate-400 hover:text-white transition-colors">
           ← Voltar
         </button>
         <button
@@ -187,7 +300,7 @@ export default function Onboarding() {
       <div className="w-full max-w-lg">
         {/* Progress bar */}
         <div className="flex gap-2 mb-8">
-          {[0, 1, 2, 3].map(i => (
+          {[0, 1, 2, 3, 4].map(i => (
             <div
               key={i}
               className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${
