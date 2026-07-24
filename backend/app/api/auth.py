@@ -316,6 +316,9 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict[
             "user_id": user.id,
             "email": user.email,
             "plan": plan,
+            # Perfil de atendimento: os gates de limite o usam para sobrepor o
+            # plano (ver plan_limits.resolve_user_limit).
+            "profile_type": str(getattr(user, 'profile_type', None) or 'mei'),
             "full_name": user.full_name,
             "role": role,
             "communication_preference": str(getattr(user, 'communication_preference', None) or 'email'),

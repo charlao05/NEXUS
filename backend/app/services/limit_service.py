@@ -32,13 +32,13 @@ def check_crm_limit(user: dict, contact_type: str | None = None) -> None:
     if role in ("admin", "superadmin") and not user.get("preview_mode"):
         return
 
-    from app.core.plan_limits import get_limit, is_unlimited
+    from app.core.plan_limits import resolve_user_limit, is_unlimited
     from database.models import Client, User
     from sqlalchemy import or_
 
     plan = user.get("plan", "free")
     limit_key = "crm_suppliers" if contact_type == "supplier" else "crm_clients"
-    limit = get_limit(plan, limit_key)
+    limit = resolve_user_limit(user,limit_key)
     if is_unlimited(limit):
         return
 
@@ -87,11 +87,11 @@ def check_invoice_limit(user: dict) -> None:
     if role in ("admin", "superadmin") and not user.get("preview_mode"):
         return
 
-    from app.core.plan_limits import get_limit, is_unlimited
+    from app.core.plan_limits import resolve_user_limit, is_unlimited
     from database.models import Invoice
 
     plan = user.get("plan", "free")
-    limit = get_limit(plan, "invoices_per_month")
+    limit = resolve_user_limit(user, "invoices_per_month")
     if is_unlimited(limit):
         return
 
@@ -123,7 +123,7 @@ def check_invoice_limit(user: dict) -> None:
 
 def check_agent_access(user: dict, agent_id: str) -> None:
     """Verifica se o agente está disponível no plano do usuário."""
-    from app.core.plan_limits import get_limit
+    from app.core.plan_limits import resolve_user_limit
 
     # Admins são isentos
     role = user.get("role", "user")
@@ -131,7 +131,7 @@ def check_agent_access(user: dict, agent_id: str) -> None:
         return
 
     plan = user.get("plan", "free")
-    available = get_limit(plan, "available_agents")
+    available = resolve_user_limit(user, "available_agents")
     if available == "__all__":
         return
 
@@ -162,7 +162,7 @@ def check_agent_message_limit(user: dict) -> None:
     - Planos pagos: usa agent_messages_per_day normalmente.
     - Addon R$12,90: expande CRM apenas, NÃO adiciona mensagens ao free.
     """
-    from app.core.plan_limits import get_limit, is_unlimited, is_in_ai_trial
+    from app.core.plan_limits import resolve_user_limit, is_unlimited, is_in_ai_trial
     from database.models import ChatMessage, User
 
     # Admins são isentos
@@ -172,6 +172,13 @@ def check_agent_message_limit(user: dict) -> None:
 
     plan = user.get("plan", "free")
     uid = user.get("user_id", 0)
+
+    # Perfil sem limite (ex.: cliente_servico) sai ANTES do ramo do free — senão
+    # cairia na lógica de trial e levaria TRIAL_EXPIRED, justamente o que não
+    # pode acontecer com quem paga pelo CONTRATO. O consumo segue registrado em
+    # LLMUsageRecord para o rateio.
+    if is_unlimited(resolve_user_limit(user, "agent_messages_per_day")):
+        return
 
     # --- Determinar limite efetivo ---
     if plan == "free":
@@ -187,7 +194,7 @@ def check_agent_message_limit(user: dict) -> None:
                 session.close()
 
         if is_in_ai_trial(created_at):
-            effective_limit = get_limit(plan, "trial_ai_messages_per_day")
+            effective_limit = resolve_user_limit(user, "trial_ai_messages_per_day")
             trial_active = True
         else:
             effective_limit = 0  # Fora do trial: zero acesso a IA
@@ -212,7 +219,7 @@ def check_agent_message_limit(user: dict) -> None:
             )
     else:
         # Planos pagos: limite do plano, sem bônus por addon de clientes
-        effective_limit = get_limit(plan, "agent_messages_per_day")
+        effective_limit = resolve_user_limit(user, "agent_messages_per_day")
         if is_unlimited(effective_limit):
             return
 
@@ -252,7 +259,7 @@ def check_automation_limit(user: dict) -> None:
     - CUSTO: 1 automação ≈ R$0,0092 (gpt-4o-mini + Playwright).
       trial_automations_per_day=1 → custo máximo R$0,028/3 dias = R$0,028 total.
     """
-    from app.core.plan_limits import get_limit, is_unlimited, is_in_ai_trial, AUTOMATION_MSG_WEIGHT
+    from app.core.plan_limits import resolve_user_limit, is_unlimited, is_in_ai_trial, AUTOMATION_MSG_WEIGHT
     from database.models import AutomationLog, User
 
     # Admins são isentos
@@ -262,6 +269,10 @@ def check_automation_limit(user: dict) -> None:
 
     plan = user.get("plan", "free")
     uid = user.get("user_id", 0)
+
+    # Mesma isenção por perfil das mensagens (ver check_agent_message_limit).
+    if is_unlimited(resolve_user_limit(user, "automations_per_day")):
+        return
 
     # --- Determinar limite efetivo ---
     if plan == "free":
@@ -275,7 +286,7 @@ def check_automation_limit(user: dict) -> None:
                 session.close()
 
         if is_in_ai_trial(created_at):
-            effective_limit = get_limit(plan, "trial_automations_per_day")
+            effective_limit = resolve_user_limit(user, "trial_automations_per_day")
             trial_active = True
         else:
             effective_limit = 0
@@ -299,7 +310,7 @@ def check_automation_limit(user: dict) -> None:
                 },
             )
     else:
-        effective_limit = get_limit(plan, "automations_per_day")
+        effective_limit = resolve_user_limit(user, "automations_per_day")
         if is_unlimited(effective_limit):
             return
 

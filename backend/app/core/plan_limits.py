@@ -173,6 +173,44 @@ def is_unlimited(value: int) -> bool:
     """Retorna True se o valor indica sem limite (-1)."""
     return value == -1
 
+
+# ── Perfil de ATENDIMENTO sobrepondo os limites do plano ────────────────────
+# O perfil (User.profile_type) é ORTOGONAL ao plano de COBRANÇA:
+#   - cliente_servico: paga pelo CONTRATO, não por assinatura. Não pode esbarrar
+#     em limite de mensagens — o custo é absorvido no preço do serviço. O consumo
+#     continua registrado em LLMUsageRecord, que é a base do rateio.
+#   - agencia_relatorios: restrição por ESCOPO, não por preço — o NEXUS não atua
+#     como contador nem executa procedimentos além do escopo do MEI, então esse
+#     perfil fica em consulta/relatório.
+# Só as chaves declaradas aqui sobrepõem; as demais seguem vindo do plano.
+PROFILE_LIMIT_OVERRIDES: dict[str, dict[str, Any]] = {
+    "cliente_servico": {
+        "agent_messages_per_day": -1,
+        "automations_per_day": -1,
+        "available_agents": "__all__",
+        "crm_clients": -1,
+        "crm_suppliers": -1,
+        "invoices_per_month": -1,
+    },
+    "agencia_relatorios": {
+        "available_agents": ["contabilidade"],
+    },
+}
+
+
+def resolve_user_limit(user: dict[str, Any] | None, key: str) -> Any:
+    """Limite EFETIVO do usuário: o perfil de atendimento sobrepõe o plano.
+
+    Usar nos gates em vez de get_limit(): o perfil passa a ser respeitado sem
+    alterar nenhum ponto de chamada fora do limit_service.
+    """
+    u = user or {}
+    perfil = str(u.get("profile_type") or "mei")
+    override = PROFILE_LIMIT_OVERRIDES.get(perfil)
+    if override is not None and key in override:
+        return override[key]
+    return get_limit(u.get("plan"), key)
+
 def is_in_ai_trial(user_created_at: Any) -> bool:
     """Retorna True se o usuário free ainda está no trial de IA
     (dentro dos primeiros FREE_AI_TRIAL_DAYS dias após o cadastro).
