@@ -620,11 +620,22 @@ function Dashboard() {
               icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />,
               locked: !_pro,
             },
+            // VENDAS é ferramenta de QUEM VENDE (qualifica lead, precifica,
+            // gera proposta para ENVIAR ao cliente). Por isso: aparece para
+            // prestador/MEI/pequeno negócio, e nunca para cliente_servico —
+            // ele recebe a proposta, não a emite. Gate espelha plan_limits
+            // (Profissional+); abaixo disso aparece com selo "Upgrade".
+            ...(isBillingExempt(userProfile) ? [] : [{
+              id: 'vendas', label: 'Vendas e Propostas', desc: 'Qualifique leads, precifique e gere propostas',
+              gradient: 'from-purple-500 to-fuchsia-500',
+              icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v1m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />,
+              locked: !_pro,
+            } as AgentCard]),
           ];
 
           const upgradeMsg: Record<string, string> = {
-            free: 'Desbloqueie Cobranças e o Assistente — a partir de R$ 29,90/mês',
-            essencial: 'Desbloqueie o Assistente Pessoal com o plano Profissional (R$ 59,90/mês)',
+            free: 'Desbloqueie Cobranças, Vendas e o Assistente — a partir de R$ 29,90/mês',
+            essencial: 'Desbloqueie Vendas e Propostas e o Assistente Pessoal com o plano Profissional (R$ 59,90/mês)',
           };
 
           return (
@@ -635,14 +646,16 @@ function Dashboard() {
                 </svg>
                 Seus Agentes
               </h2>
+              {/* 5 agentes: 3 col no lg, 5 no xl — evita o 5º card sozinho na
+                  segunda linha (o grid era fixo em 4). */}
               {!planReady ? (
-                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {[...Array(4)].map((_, i) => (
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+                  {[...Array(allAgents.length)].map((_, i) => (
                     <div key={i} className={`h-32 rounded-xl animate-pulse ${isDark ? 'bg-slate-700/40' : 'bg-slate-200/60'}`} />
                   ))}
                 </div>
               ) : null}
-              <div className={`grid md:grid-cols-2 lg:grid-cols-4 gap-3 ${!planReady ? 'hidden' : ''}`}>
+              <div className={`grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 ${!planReady ? 'hidden' : ''}`}>
                 {allAgents.map(ag => (
                   <button
                     key={ag.id}
