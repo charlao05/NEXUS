@@ -2910,3 +2910,156 @@ async def admin_infra_cost_distribution(
     except Exception as e:
         logger.error(f"admin_infra_cost_distribution erro: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# MEDIDOR DE CONSUMO — base do modelo comercial por contrato
+# ============================================================================
+# Agrega o que o sistema JÁ grava (LLMUsageRecord por chamada, com cost_usd, e
+# AutomationUsageRecord por ação Playwright) em custo por usuário / perfil /
+# agente / período. É o número que precifica contrato de agência e o rateio de
+# cliente de serviço: "quanto custou este parceiro no período?".
+# Honestidade do número: cost_usd cobre SÓ tokens de LLM (tabela em
+# openai_tracking). Automação entra como contagem/duração — sem preço em R$.
+
+
+@router.get("/usage-report")
+async def admin_usage_report(
+    days: int = Query(30, ge=1, le=365),
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Consumo por usuário/perfil/agente no período (base p/ contrato medido)."""
+    from database.models import LLMUsageRecord, AutomationUsageRecord
+    from app.api.auth import _normalize_profile
+
+    start = datetime.now(timezone.utc) - timedelta(days=days)
+    db = SessionLocal()
+    try:
+        # LLM por usuário
+        llm_rows = (
+            db.query(
+                LLMUsageRecord.user_id,
+                func.count(LLMUsageRecord.id).label("calls"),
+                func.coalesce(func.sum(LLMUsageRecord.total_tokens), 0).label("tokens"),
+                func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0.0).label("cost"),
+            )
+            .filter(LLMUsageRecord.ts >= start)
+            .group_by(LLMUsageRecord.user_id)
+            .all()
+        )
+        # Automação por usuário (contagem/duração — sem preço)
+        auto_rows = (
+            db.query(
+                AutomationUsageRecord.user_id,
+                func.count(AutomationUsageRecord.id).label("actions"),
+                func.coalesce(func.sum(AutomationUsageRecord.duration_ms), 0).label("ms"),
+            )
+            .filter(AutomationUsageRecord.ts >= start)
+            .group_by(AutomationUsageRecord.user_id)
+            .all()
+        )
+        # LLM por agente
+        agent_rows = (
+            db.query(
+                LLMUsageRecord.agent_type,
+                func.count(LLMUsageRecord.id).label("calls"),
+                func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0.0).label("cost"),
+            )
+            .filter(LLMUsageRecord.ts >= start)
+            .group_by(LLMUsageRecord.agent_type)
+            .all()
+        )
+
+        # Metadados dos usuários envolvidos (email/perfil/plano)
+        uids = {r.user_id for r in llm_rows} | {r.user_id for r in auto_rows}
+        users = {
+            u.id: u
+            for u in db.query(User).filter(User.id.in_(uids)).all()
+        } if uids else {}
+
+        auto_by_uid = {r.user_id: r for r in auto_rows}
+        by_user = []
+        for r in llm_rows:
+            u = users.get(r.user_id)
+            a = auto_by_uid.pop(r.user_id, None)
+            by_user.append({
+                "user_id": r.user_id,
+                "email": getattr(u, "email", None),
+                "profile_type": _normalize_profile(getattr(u, "profile_type", None)),
+                "plan": getattr(u, "plan", None),
+                "llm_calls": int(r.calls),
+                "total_tokens": int(r.tokens),
+                "llm_cost_usd": round(float(r.cost), 6),
+                "automation_actions": int(a.actions) if a else 0,
+                "automation_ms": int(a.ms) if a else 0,
+            })
+        # Usuários só com automação (sem LLM no período)
+        for uid, a in auto_by_uid.items():
+            u = users.get(uid)
+            by_user.append({
+                "user_id": uid,
+                "email": getattr(u, "email", None),
+                "profile_type": _normalize_profile(getattr(u, "profile_type", None)),
+                "plan": getattr(u, "plan", None),
+                "llm_calls": 0,
+                "total_tokens": 0,
+                "llm_cost_usd": 0.0,
+                "automation_actions": int(a.actions),
+                "automation_ms": int(a.ms),
+            })
+        by_user.sort(key=lambda x: x["llm_cost_usd"], reverse=True)
+
+        # Agregado por PERFIL (derivado de by_user — perfil mora no User)
+        by_profile: dict[str, dict[str, Any]] = {}
+        for row in by_user:
+            p = row["profile_type"] or "mei"
+            agg = by_profile.setdefault(
+                p, {"profile_type": p, "users": 0, "llm_calls": 0,
+                    "llm_cost_usd": 0.0, "automation_actions": 0},
+            )
+            agg["users"] += 1
+            agg["llm_calls"] += row["llm_calls"]
+            agg["llm_cost_usd"] = round(agg["llm_cost_usd"] + row["llm_cost_usd"], 6)
+            agg["automation_actions"] += row["automation_actions"]
+
+        total_cost = round(sum(x["llm_cost_usd"] for x in by_user), 6)
+        return {
+            "period": {
+                "start": start.isoformat(),
+                "end": datetime.now(timezone.utc).isoformat(),
+                "days": days,
+            },
+            "totals": {
+                "llm_calls": sum(x["llm_calls"] for x in by_user),
+                "total_tokens": sum(x["total_tokens"] for x in by_user),
+                "llm_cost_usd": total_cost,
+                "automation_actions": sum(x["automation_actions"] for x in by_user),
+            },
+            "by_user": by_user,
+            "by_profile": sorted(
+                by_profile.values(), key=lambda x: x["llm_cost_usd"], reverse=True,
+            ),
+            "by_agent": sorted(
+                (
+                    {
+                        "agent_type": r.agent_type or "desconhecido",
+                        "llm_calls": int(r.calls),
+                        "llm_cost_usd": round(float(r.cost), 6),
+                    }
+                    for r in agent_rows
+                ),
+                key=lambda x: x["llm_cost_usd"], reverse=True,
+            ),
+            "note": (
+                "llm_cost_usd cobre apenas tokens de LLM (tabela de preços em "
+                "openai_tracking). Automação é reportada em contagem/duração, "
+                "sem preço."
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"admin_usage_report erro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
