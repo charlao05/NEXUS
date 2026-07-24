@@ -41,6 +41,8 @@ class ProductCreate(BaseModel):
     cost_price: float = Field(0.0, ge=0)
     sale_price: float = Field(0.0, ge=0)
     min_stock: float = Field(0.0, ge=0)
+    # 'produto' (estocável) | 'servico' (catálogo do agente VENDAS)
+    item_type: str = Field("produto", pattern="^(produto|servico)$")
 
 
 class ProductUpdate(BaseModel):
@@ -85,6 +87,7 @@ async def create_product(
         cost_price=body.cost_price,
         sale_price=body.sale_price,
         min_stock=body.min_stock,
+        item_type=body.item_type,
     )
     if result["status"] == "error":
         raise HTTPException(status_code=500, detail=result["message"])
@@ -99,11 +102,12 @@ async def list_products(
     low_stock: bool = False,
     search: Optional[str] = None,
     is_active: bool = True,
+    item_type: Optional[str] = Query(None, pattern="^(produto|servico)$"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     current_user: dict = Depends(_get_current_user_dep()),
 ):
-    """Listar produtos com filtros."""
+    """Listar produtos/serviços com filtros (item_type=servico → catálogo)."""
     from database.inventory_service import InventoryService
 
     uid = _user_id_from(current_user)
@@ -113,6 +117,7 @@ async def list_products(
         low_stock_only=low_stock,
         search=search,
         is_active=is_active,
+        item_type=item_type,
         limit=limit,
         offset=offset,
     )

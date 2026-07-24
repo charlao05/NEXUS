@@ -37,8 +37,14 @@ class InventoryService:
         cost_price: float = 0.0,
         sale_price: float = 0.0,
         min_stock: float = 0.0,
+        item_type: str = "produto",
     ) -> dict:
-        """Cria um produto no estoque do usuário."""
+        """Cria um produto OU serviço do usuário.
+
+        item_type='servico' é o catálogo que o agente VENDAS usa para
+        precificar — cada cliente do NEXUS cadastra os próprios serviços.
+        Serviço não tem estoque (min_stock/current_stock ficam em 0).
+        """
         session = get_session()
         try:
             # Deduplicação por SKU dentro do mesmo tenant
@@ -55,6 +61,7 @@ class InventoryService:
                         "product": existing.to_dict(),
                     }
 
+            _tipo = "servico" if str(item_type).lower() == "servico" else "produto"
             product = Product(
                 user_id=user_id,
                 name=name,
@@ -63,8 +70,11 @@ class InventoryService:
                 unit=unit,
                 cost_price=cost_price,
                 sale_price=sale_price,
-                min_stock=min_stock,
+                # Serviço não tem estoque: ignora min_stock para não gerar
+                # alerta de "repor estoque" de algo que não é estocável.
+                min_stock=0.0 if _tipo == "servico" else min_stock,
                 current_stock=0.0,
+                item_type=_tipo,
             )
             session.add(product)
             session.commit()
@@ -88,14 +98,29 @@ class InventoryService:
         is_active: bool = True,
         limit: int = 100,
         offset: int = 0,
+        item_type: str = None,
     ) -> list:
-        """Lista produtos do usuário com filtros."""
+        """Lista produtos/serviços do usuário com filtros.
+
+        item_type=None traz tudo; 'servico' traz só o catálogo de serviços
+        (usado pelo agente VENDAS); 'produto' só o estoque.
+        """
         session = get_session()
         try:
             q = session.query(Product).filter(Product.user_id == user_id)
 
             if is_active is not None:
                 q = q.filter(Product.is_active == is_active)
+            if item_type:
+                if item_type == "produto":
+                    # Linhas antigas (anteriores à coluna) são produto por
+                    # definição — NULL precisa entrar no filtro.
+                    q = q.filter(
+                        or_(Product.item_type == "produto",
+                            Product.item_type.is_(None))
+                    )
+                else:
+                    q = q.filter(Product.item_type == item_type)
             if category:
                 q = q.filter(Product.category == category)
             if low_stock_only:
@@ -354,12 +379,22 @@ class InventoryService:
 
     @staticmethod
     def get_stock_summary(user_id: int) -> dict:
-        """Resumo geral do estoque do usuário."""
+        """Resumo geral do ESTOQUE do usuário.
+
+        Exclui item_type='servico': serviço não é estocável e inflaria a
+        contagem/valor do estoque. Linhas antigas têm item_type NULL e são
+        produto por definição.
+        """
         session = get_session()
         try:
             products = (
                 session.query(Product)
-                .filter(Product.user_id == user_id, Product.is_active == True)
+                .filter(
+                    Product.user_id == user_id,
+                    Product.is_active == True,  # noqa: E712
+                    or_(Product.item_type == "produto",
+                        Product.item_type.is_(None)),
+                )
                 .all()
             )
 

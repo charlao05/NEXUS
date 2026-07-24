@@ -166,7 +166,8 @@ const agentMeta: Record<string, {
     gradient: 'from-purple-500 to-fuchsia-500',
     endpoint: apiUrl('/api/agents/vendas/execute'),
     quickActions: [
-      { id: 'servicos', label: 'Ver Serviços e Preços', icon: Search, action: 'listar_servicos' },
+      { id: 'servicos', label: 'Meus Serviços', icon: Search, action: 'listar_servicos' },
+      { id: 'novoservico', label: 'Cadastrar Serviço', icon: Plus, action: 'cadastrar_servico', form: true },
       { id: 'orcamento', label: 'Calcular Orçamento', icon: Calculator, action: 'calcular_orcamento', form: true },
       { id: 'lead', label: 'Qualificar Lead', icon: Target, action: 'qualificar_lead', form: true },
       { id: 'proposta', label: 'Gerar Proposta', icon: FileText, action: 'gerar_proposta', form: true },
@@ -200,19 +201,15 @@ interface VendasFormField {
   label: string;
   type: 'select' | 'text' | 'number' | 'checkbox';
   options?: { value: string; label: string }[];
+  /** true = opções vêm do catálogo do usuário, carregado ao abrir o form */
+  dynamicOptions?: boolean;
   placeholder?: string;
   required?: boolean;
 }
 
-const SERVICOS_OPTIONS = [
-  { value: 'landing_page', label: 'Landing Page de Conversão (base R$ 2.500)' },
-  { value: 'ecommerce_basic', label: 'E-commerce Básico (base R$ 8.000)' },
-  { value: 'api_integration', label: 'Integração de API (base R$ 3.500)' },
-  { value: 'saas_mvp', label: 'MVP de Software SaaS (base R$ 25.000)' },
-  { value: 'automation_audit', label: 'Auditoria de Automação (base R$ 1.500)' },
-  { value: 'ai_agent_custom', label: 'Agente de IA Customizado (base R$ 12.000)' },
-];
-
+// Campos com `dynamicOptions` têm as opções carregadas do catálogo do PRÓPRIO
+// usuário (products com item_type='servico'). Antes havia aqui uma lista fixa
+// que era o catálogo do Alinha — uma cabeleireira via "MVP de SaaS R$ 25.000".
 const URGENCIA_OPTIONS = [
   { value: 'medium', label: 'Prazo normal' },
   { value: 'high', label: 'Urgente (+50%)' },
@@ -223,7 +220,7 @@ const VENDAS_FORMS: Record<string, { title: string; subtitle: string; fields: Ve
     title: 'Calcular Orçamento',
     subtitle: 'Preço com multiplicadores de urgência e complexidade',
     fields: [
-      { name: 'service_type', label: 'Serviço', type: 'select', options: SERVICOS_OPTIONS },
+      { name: 'servico', label: 'Serviço', type: 'select', dynamicOptions: true, required: true },
       { name: 'urgency', label: 'Urgência', type: 'select', options: URGENCIA_OPTIONS },
       { name: 'technical_details', label: 'Detalhes técnicos (opcional)', type: 'text',
         placeholder: 'ex.: integração com ERP, API, segurança… (complexidade +30%)' },
@@ -244,9 +241,21 @@ const VENDAS_FORMS: Record<string, { title: string; subtitle: string; fields: Ve
     subtitle: 'Proposta comercial pronta para enviar ao cliente',
     fields: [
       { name: 'cliente', label: 'Nome do cliente', type: 'text', placeholder: 'ex.: Padaria do Zé', required: true },
-      { name: 'service_type', label: 'Serviço', type: 'select', options: SERVICOS_OPTIONS },
+      { name: 'servico', label: 'Serviço', type: 'select', dynamicOptions: true, required: true },
       { name: 'escopo', label: 'Escopo (opcional)', type: 'text', placeholder: 'ex.: site com agendamento e pagamento' },
       { name: 'urgency', label: 'Urgência', type: 'select', options: URGENCIA_OPTIONS },
+    ],
+  },
+  cadastrar_servico: {
+    title: 'Cadastrar Serviço',
+    subtitle: 'O que você faz e quanto cobra — o NEXUS precifica a partir daqui',
+    fields: [
+      { name: 'nome', label: 'Nome do serviço', type: 'text',
+        placeholder: 'ex.: Corte de cabelo, Consultoria, Instalação', required: true },
+      { name: 'preco_base', label: 'Preço-base (R$)', type: 'number',
+        placeholder: 'ex.: 45', required: true },
+      { name: 'categoria', label: 'Categoria (opcional)', type: 'text',
+        placeholder: 'ex.: Cabelo, Manutenção' },
     ],
   },
 };
@@ -281,6 +290,9 @@ function AgentConfig() {
   const [vendasForm, setVendasForm] = useState<string | null>(null);
   const [vendasValues, setVendasValues] = useState<Record<string, unknown>>({});
   const [vendasFormError, setVendasFormError] = useState('');
+  // Catálogo do PRÓPRIO usuário (products item_type='servico'), alimenta os
+  // selects de serviço. null = ainda não carregado.
+  const [meusServicos, setMeusServicos] = useState<{ value: string; label: string }[] | null>(null);
 
   // Password confirmation state (for sensitive actions like delete)
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -389,7 +401,7 @@ function AgentConfig() {
       contabilidade: 'Olá! Sou seu assistente **Financeiro**.\n\nCuido de tudo sobre seu dinheiro:\n• Boleto mensal e contas do MEI\n• Notas fiscais\n• Limite de faturamento\n\nÉ só perguntar!',
       cobranca: 'Olá! Cuido das suas **Cobranças**.\n\nPosso te ajudar a:\n• Ver quem tá devendo\n• Mandar lembretes de pagamento\n• Controlar valores em aberto\n\nMe diga como posso ajudar!',
       documentos: 'Olá! Sou o assistente de **Documentos**.\n\nPosso te ajudar com:\n• Notas fiscais\n• Contratos\n• Relatórios\n\nVocê também pode enviar uma foto de um documento para eu analisar!',
-      vendas: 'Olá! Sou seu agente de **Vendas e Propostas**.\n\nPosso te ajudar a fechar negócio:\n• 💰 Calcular o preço de um serviço (com urgência e complexidade)\n• 🎯 Qualificar um lead (score 0-100 e próximo passo)\n• 📄 Gerar uma proposta comercial pronta para enviar\n\nUse as **Ações Rápidas** ao lado ou me conte sobre o cliente!',
+      vendas: 'Olá! Sou seu agente de **Vendas e Propostas**.\n\nComece por **Cadastrar Serviço** — registre o que você faz e quanto cobra (ex.: "Corte de cabelo" · R$ 45). A partir daí eu:\n• 💰 Calculo o orçamento com urgência e complexidade\n• 🎯 Qualifico o lead (score 0-100 e próximo passo)\n• 📄 Gero a proposta pronta para enviar\n\nOs preços são **os seus** — nada de tabela genérica.',
       assistente: 'Olá! Sou seu **Assistente Pessoal**.\n\nPosso te ajudar com qualquer coisa:\n• Resumo do seu dia\n• Sugestões do que fazer primeiro\n• Alertas importantes\n\nPode falar comigo por texto, foto ou áudio!'
     };
 
@@ -1131,11 +1143,46 @@ function AgentConfig() {
     await runAction(action.label, action.action, action.params || {});
   };
 
-  const openVendasForm = (actionName: string) => {
+  /** Lê o catálogo de serviços DO USUÁRIO (item_type=servico). */
+  const carregarMeusServicos = async (): Promise<{ value: string; label: string }[]> => {
+    try {
+      const resp = await apiClient.get(apiUrl('/api/inventory/products?item_type=servico&limit=200'), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const itens = (resp.data?.products || []) as { id: number; name: string; sale_price?: number }[];
+      const opts = itens.map(p => ({
+        value: String(p.name),
+        label: `${p.name} — ${(p.sale_price || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+      }));
+      setMeusServicos(opts);
+      return opts;
+    } catch {
+      setMeusServicos([]);
+      return [];
+    }
+  };
+
+  const openVendasForm = async (actionName: string) => {
     const spec = VENDAS_FORMS[actionName];
+    // Formulários que dependem do catálogo carregam antes de abrir, para o
+    // select já vir preenchido com os serviços do próprio usuário.
+    const precisaCatalogo = spec.fields.some(f => f.dynamicOptions);
+    const opts = precisaCatalogo ? await carregarMeusServicos() : [];
+
+    if (precisaCatalogo && opts.length === 0) {
+      // Sem catálogo, não faz sentido abrir o form: leva direto ao cadastro.
+      await runAction(
+        'Meus Serviços',
+        'listar_servicos',
+        {},
+      );
+      return;
+    }
+
     const defaults: Record<string, unknown> = {};
     spec.fields.forEach(f => {
-      if (f.type === 'select' && f.options?.length) defaults[f.name] = f.options[0].value;
+      const options = f.dynamicOptions ? opts : f.options;
+      if (f.type === 'select' && options?.length) defaults[f.name] = options[0].value;
       else if (f.type === 'checkbox') defaults[f.name] = false;
       else defaults[f.name] = '';
     });
@@ -1184,9 +1231,13 @@ function AgentConfig() {
     }
 
     const label = `${spec.title}${resumo.length ? ' — ' + resumo.slice(0, 3).join(', ') : ''}`;
+    const acao = vendasForm;
     setVendasForm(null);
     setVendasFormError('');
-    await runAction(label, vendasForm, params);
+    await runAction(label, acao, params);
+    // Cadastrou serviço → catálogo mudou; invalida para o próximo form
+    // recarregar (senão o select abriria sem o item recém-criado).
+    if (acao === 'cadastrar_servico') setMeusServicos(null);
   };
 
   // Aguardar validação de acesso antes de renderizar o chat (evita flash)
@@ -1722,7 +1773,7 @@ function AgentConfig() {
                           onChange={e => setVendasValues(v => ({ ...v, [f.name]: e.target.value }))}
                           className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-green-500"
                         >
-                          {f.options?.map(o => (
+                          {(f.dynamicOptions ? (meusServicos || []) : (f.options || [])).map(o => (
                             <option key={o.value} value={o.value}>{o.label}</option>
                           ))}
                         </select>

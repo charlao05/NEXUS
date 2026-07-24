@@ -733,6 +733,14 @@ class Product(Base):
     sku = Column(String(50), nullable=True)           # código do produto
     category = Column(String(100), nullable=True)     # categoria livre
     unit = Column(String(20), default="un")           # un, kg, lt, m, cx
+    # produto (tem estoque) | servico (não tem — é o que o negócio EXECUTA).
+    # O catálogo do agente VENDAS lê os itens 'servico' DESTE usuário: cada
+    # cliente do NEXUS cadastra os próprios serviços e preços.
+    # SEM index=True de propósito: a migração idempotente do startup só faz
+    # ALTER ADD COLUMN (não cria índice), então um índice aqui deixaria bancos
+    # migrados diferentes de instalações novas. Toda query filtra user_id
+    # antes, que já é indexado.
+    item_type = Column(String(20), default="produto")
     cost_price = Column(Float, default=0.0)           # preço de custo
     sale_price = Column(Float, default=0.0)           # preço de venda
     current_stock = Column(Float, default=0.0)        # saldo atual
@@ -757,6 +765,7 @@ class Product(Base):
             "sku": self.sku,
             "category": self.category,
             "unit": self.unit,
+            "item_type": self.item_type or "produto",
             "cost_price": self.cost_price,
             "sale_price": self.sale_price,
             "current_stock": self.current_stock,

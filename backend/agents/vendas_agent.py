@@ -26,25 +26,19 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Catálogo de serviços (embutido — auto-contido, sem depender de JSON externo)
-# Migrado de Alinha/data/alinha/price_table.json
+# Catálogo de serviços — DE CADA CLIENTE DO NEXUS, não da plataforma.
+#
+# Antes havia aqui uma lista fixa (Landing Page, MVP de SaaS…) que era o
+# catálogo do PRÓPRIO Alinha. Isso quebrava o agente para o público-alvo: uma
+# cabeleireira MEI abria o VENDAS e via "MVP de Software SaaS — R$ 25.000".
+# Agora os serviços vêm da tabela `products` com item_type='servico', SEMPRE
+# filtrados pelo user_id de quem chamou (InventoryService já é multi-tenant).
+#
+# ATENÇÃO multi-tenant: VendasAgent é instanciado como SINGLETON compartilhado
+# no agent_hub. NUNCA guardar user_id/serviços no self — o user_id vem em
+# `parameters` a cada chamada (a rota injeta) e é usado apenas localmente.
 # ---------------------------------------------------------------------------
 MOEDA = "BRL"
-
-SERVICOS: List[Dict[str, Any]] = [
-    {"id": "landing_page", "name": "Landing Page de Conversão",
-     "base_price": 2500.0, "hourly_rate": 150.0, "estimated_hours": 20},
-    {"id": "ecommerce_basic", "name": "E-commerce Básico (Shopify/WooCommerce)",
-     "base_price": 8000.0, "hourly_rate": 180.0, "estimated_hours": 60},
-    {"id": "api_integration", "name": "Integração de API Customizada",
-     "base_price": 3500.0, "hourly_rate": 200.0, "estimated_hours": 24},
-    {"id": "saas_mvp", "name": "MVP de Software SaaS",
-     "base_price": 25000.0, "hourly_rate": 250.0, "estimated_hours": 160},
-    {"id": "automation_audit", "name": "Auditoria de Processos e Automação",
-     "base_price": 1500.0, "hourly_rate": 150.0, "estimated_hours": 10},
-    {"id": "ai_agent_custom", "name": "Agente de IA Customizado",
-     "base_price": 12000.0, "hourly_rate": 220.0, "estimated_hours": 50},
-]
 
 MODIFICADORES = {
     "urgency_multiplier": 1.5,
@@ -64,6 +58,39 @@ def _brl(v: float) -> str:
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _servicos_do_usuario(user_id: Any) -> List[Dict[str, Any]]:
+    """Catálogo de serviços DESTE usuário (item_type='servico').
+
+    Sempre filtrado por user_id pelo InventoryService — nunca retorna serviço
+    de outro tenant. Sem user_id válido, devolve lista vazia (fail-closed).
+    """
+    try:
+        uid = int(user_id or 0)
+    except (TypeError, ValueError):
+        return []
+    if uid <= 0:
+        return []
+    try:
+        from database.inventory_service import InventoryService
+        res = InventoryService.get_products(
+            user_id=uid, item_type="servico", is_active=True, limit=200,
+        )
+        return list((res or {}).get("products", []))
+    except Exception as e:  # noqa: BLE001
+        logger.error("Falha ao ler serviços do usuário %s: %s", uid, e,
+                     exc_info=True)
+        return []
+
+
+_SEM_SERVICOS = (
+    "📋 **Você ainda não cadastrou seus serviços.**\n\n"
+    "O NEXUS precifica *o seu* serviço — não um catálogo genérico. "
+    "Use a ação **Cadastrar Serviço** para registrar o que você faz e o "
+    "preço-base (ex.: \"Corte de cabelo\" · R$ 45).\n"
+    "Depois disso, o orçamento e a proposta saem prontos."
+)
+
+
 class VendasAgent:
     """Agente de vendas: catálogo, precificação, qualificação e proposta."""
 
@@ -71,6 +98,7 @@ class VendasAgent:
         action = parameters.get("action", "listar_servicos")
         dispatch = {
             "listar_servicos": self._listar_servicos,
+            "cadastrar_servico": self._cadastrar_servico,
             "calcular_orcamento": self._calcular_orcamento,
             "qualificar_lead": self._qualificar_lead,
             "gerar_proposta": self._gerar_proposta,
@@ -91,37 +119,103 @@ class VendasAgent:
                     "message": f"Erro ao executar '{action}': {e}"}
 
     # ------------------------------------------------------------------ ações
-    def _listar_servicos(self, _p: Dict[str, Any]) -> Dict[str, Any]:
-        linhas = [f"• {s['name']}: a partir de {_brl(s['base_price'])}"
-                  for s in SERVICOS]
+    def _listar_servicos(self, p: Dict[str, Any]) -> Dict[str, Any]:
+        servicos = _servicos_do_usuario(p.get("user_id"))
+        if not servicos:
+            return {"status": "ok", "message": _SEM_SERVICOS,
+                    "servicos": [], "moeda": MOEDA}
+
+        linhas = [f"• {s['name']}: {_brl(s.get('sale_price') or 0)}"
+                  for s in servicos]
         return {
             "status": "ok",
-            "message": "💼 **Serviços disponíveis**\n" + "\n".join(linhas),
+            "message": ("💼 **Seus serviços**\n" + "\n".join(linhas)
+                        + "\n\n_Use \"Calcular Orçamento\" para aplicar "
+                          "urgência e complexidade sobre esses preços._"),
             "moeda": MOEDA,
             "servicos": [
                 {"id": s["id"], "nome": s["name"],
-                 "preco_base": s["base_price"],
-                 "preco_base_formatado": _brl(s["base_price"]),
-                 "horas_estimadas": s["estimated_hours"]}
-                for s in SERVICOS
+                 "preco_base": s.get("sale_price") or 0,
+                 "preco_base_formatado": _brl(s.get("sale_price") or 0)}
+                for s in servicos
             ],
             "modificadores": MODIFICADORES,
         }
 
+    def _cadastrar_servico(self, p: Dict[str, Any]) -> Dict[str, Any]:
+        """Registra um serviço no catálogo DO USUÁRIO."""
+        try:
+            uid = int(p.get("user_id") or 0)
+        except (TypeError, ValueError):
+            uid = 0
+        if uid <= 0:
+            return {"status": "error",
+                    "message": "⚠️ Não identifiquei sua conta. Recarregue a página e tente de novo."}
+
+        nome = str(p.get("nome") or p.get("name") or "").strip()
+        if not nome:
+            return {"status": "error",
+                    "message": "⚠️ Informe o nome do serviço (ex.: \"Corte de cabelo\")."}
+        try:
+            preco = float(p.get("preco_base") or p.get("sale_price") or 0)
+        except (TypeError, ValueError):
+            preco = 0.0
+        if preco <= 0:
+            return {"status": "error",
+                    "message": "⚠️ Informe um preço-base maior que zero para o serviço."}
+
+        from database.inventory_service import InventoryService
+        res = InventoryService.create_product(
+            user_id=uid,
+            name=nome,
+            sale_price=preco,
+            unit="serviço",
+            category=str(p.get("categoria") or "").strip() or None,
+            item_type="servico",
+        )
+        if res.get("status") != "created":
+            return {"status": "error",
+                    "message": f"⚠️ Não consegui cadastrar: {res.get('message', 'erro desconhecido')}"}
+
+        return {
+            "status": "ok",
+            "message": (f"✅ Serviço cadastrado: **{nome}** — {_brl(preco)}\n\n"
+                        "Agora ele aparece em \"Calcular Orçamento\" e "
+                        "\"Gerar Proposta\"."),
+            "servico": res.get("product"),
+        }
+
     def _preco(self, requisitos: Dict[str, Any]) -> Dict[str, Any]:
-        """Núcleo de precificação (porte fiel do pricing_engine do Alinha)."""
+        """Núcleo de precificação (multiplicadores do pricing_engine do Alinha,
+        aplicados sobre o preço-base do serviço DO USUÁRIO)."""
         service_id = requisitos.get("service_type") or requisitos.get("servico")
         urgency = (requisitos.get("urgency") or requisitos.get("urgencia")
                    or "medium")
         tech = (requisitos.get("technical_details")
                 or requisitos.get("detalhes_tecnicos") or "").lower()
 
-        servico = next((s for s in SERVICOS if s["id"] == service_id), None)
+        # Busca no catálogo DO USUÁRIO: por id numérico ou por nome.
+        servicos = _servicos_do_usuario(requisitos.get("user_id"))
+        servico = None
+        if service_id is not None and str(service_id).strip():
+            alvo = str(service_id).strip().lower()
+            servico = next(
+                (s for s in servicos if str(s["id"]) == alvo), None
+            ) or next(
+                (s for s in servicos if str(s["name"]).strip().lower() == alvo), None
+            )
+
         if servico is None:
-            base = _PRECO_CUSTOM_PADRAO
-            nome = "Projeto Customizado"
+            # Sem serviço identificado: usa preço avulso informado, se houver.
+            try:
+                base = float(requisitos.get("preco_base") or 0)
+            except (TypeError, ValueError):
+                base = 0.0
+            nome = str(requisitos.get("nome_servico") or "").strip() or "Serviço avulso"
+            if base <= 0:
+                base = _PRECO_CUSTOM_PADRAO
         else:
-            base = servico["base_price"]
+            base = float(servico.get("sale_price") or 0)
             nome = servico["name"]
 
         total = base
@@ -153,6 +247,15 @@ class VendasAgent:
         }
 
     def _calcular_orcamento(self, p: Dict[str, Any]) -> Dict[str, Any]:
+        # Sem catálogo e sem preço avulso, orientar em vez de inventar valor.
+        if not _servicos_do_usuario(p.get("user_id")):
+            try:
+                _avulso = float(p.get("preco_base") or 0)
+            except (TypeError, ValueError):
+                _avulso = 0.0
+            if _avulso <= 0:
+                return {"status": "ok", "message": _SEM_SERVICOS, "servicos": []}
+
         preco = self._preco(p)
         mult = ", ".join(preco["multiplicadores_aplicados"])
         msg = (

@@ -213,6 +213,7 @@ async def on_startup():
         _colunas_novas = [
             # (tabela, coluna, DDL) — compatível com Postgres e SQLite
             ("users", "profile_type", "VARCHAR(20) DEFAULT 'mei'"),
+            ("products", "item_type", "VARCHAR(20) DEFAULT 'produto'"),
         ]
         _insp = _inspect(_eng)
         _tabelas = set(_insp.get_table_names())
