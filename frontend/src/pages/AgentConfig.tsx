@@ -11,12 +11,14 @@ import {
   Plus, Search, TrendingUp, AlertTriangle, Globe, BarChart3,
   Paperclip, Camera, Mic, MicOff, X, ShieldCheck, ShieldX, Lock, RotateCw, Trash2,
   Eye, EyeOff, Package, Truck, Filter, CreditCard, Banknote,
+  Briefcase, Calculator, Target,
 } from 'lucide-react';
 import axios from 'axios';
 import apiClient from '../services/apiClient';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiUrl } from '../config/api';
+import { isBillingExempt } from '../utils/profile';
 
 interface Message {
   id: string;
@@ -51,6 +53,8 @@ interface QuickAction {
   icon: LucideIcon;
   action: string;
   params?: Record<string, unknown>;
+  /** true = abre painel de formulário (VENDAS_FORMS) em vez de disparar direto */
+  form?: boolean;
 }
 
 const agentMeta: Record<string, {
@@ -152,6 +156,22 @@ const agentMeta: Record<string, {
       { id: 'contract', label: 'Gerar Contrato', icon: FileText, action: 'generate_contract' },
     ]
   },
+  vendas: {
+    // SEM esta entrada, /agents/vendas caía no fallback e abria o ASSISTENTE
+    // (endpoint errado). O card VENDAS existia no Dashboard desde 707e872,
+    // mas a página de detalhe nunca foi dele.
+    name: 'Vendas e Propostas',
+    description: 'Qualifique Leads, Calcule o Preço do Serviço e Gere Propostas Comerciais Prontas',
+    icon: Briefcase,
+    gradient: 'from-purple-500 to-fuchsia-500',
+    endpoint: apiUrl('/api/agents/vendas/execute'),
+    quickActions: [
+      { id: 'servicos', label: 'Ver Serviços e Preços', icon: Search, action: 'listar_servicos' },
+      { id: 'orcamento', label: 'Calcular Orçamento', icon: Calculator, action: 'calcular_orcamento', form: true },
+      { id: 'lead', label: 'Qualificar Lead', icon: Target, action: 'qualificar_lead', form: true },
+      { id: 'proposta', label: 'Gerar Proposta', icon: FileText, action: 'gerar_proposta', form: true },
+    ]
+  },
   assistente: {
     name: 'Assistente Pessoal',
     description: 'Seu Ajudante de IA — Resumo do Dia, Alertas, Sugestões e Automações',
@@ -167,10 +187,74 @@ const agentMeta: Record<string, {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Painel de ações do VENDAS — formulários de parâmetros
+// As ações do VendasAgent são estruturadas (service_type, urgency, dados do
+// lead…); um botão simples não basta. Cada spec abaixo vira um modal que monta
+// os `parameters` e dispara pelo executeAction normal. Valores/percentuais
+// espelham o backend (backend/agents/vendas_agent.py — SERVICOS/MODIFICADORES).
+// ---------------------------------------------------------------------------
+
+interface VendasFormField {
+  name: string;
+  label: string;
+  type: 'select' | 'text' | 'number' | 'checkbox';
+  options?: { value: string; label: string }[];
+  placeholder?: string;
+  required?: boolean;
+}
+
+const SERVICOS_OPTIONS = [
+  { value: 'landing_page', label: 'Landing Page de Conversão (base R$ 2.500)' },
+  { value: 'ecommerce_basic', label: 'E-commerce Básico (base R$ 8.000)' },
+  { value: 'api_integration', label: 'Integração de API (base R$ 3.500)' },
+  { value: 'saas_mvp', label: 'MVP de Software SaaS (base R$ 25.000)' },
+  { value: 'automation_audit', label: 'Auditoria de Automação (base R$ 1.500)' },
+  { value: 'ai_agent_custom', label: 'Agente de IA Customizado (base R$ 12.000)' },
+];
+
+const URGENCIA_OPTIONS = [
+  { value: 'medium', label: 'Prazo normal' },
+  { value: 'high', label: 'Urgente (+50%)' },
+];
+
+const VENDAS_FORMS: Record<string, { title: string; subtitle: string; fields: VendasFormField[] }> = {
+  calcular_orcamento: {
+    title: 'Calcular Orçamento',
+    subtitle: 'Preço com multiplicadores de urgência e complexidade',
+    fields: [
+      { name: 'service_type', label: 'Serviço', type: 'select', options: SERVICOS_OPTIONS },
+      { name: 'urgency', label: 'Urgência', type: 'select', options: URGENCIA_OPTIONS },
+      { name: 'technical_details', label: 'Detalhes técnicos (opcional)', type: 'text',
+        placeholder: 'ex.: integração com ERP, API, segurança… (complexidade +30%)' },
+    ],
+  },
+  qualificar_lead: {
+    title: 'Qualificar Lead',
+    subtitle: 'Score 0-100 com recomendação de próximo passo',
+    fields: [
+      { name: 'orcamento_declarado', label: 'Orçamento declarado (R$)', type: 'number', placeholder: 'ex.: 8000' },
+      { name: 'prazo_dias', label: 'Prazo desejado (dias)', type: 'number', placeholder: 'ex.: 30' },
+      { name: 'tem_decisor', label: 'Falei direto com quem decide', type: 'checkbox' },
+      { name: 'dor_clara', label: 'O problema (dor) está claro', type: 'checkbox' },
+    ],
+  },
+  gerar_proposta: {
+    title: 'Gerar Proposta',
+    subtitle: 'Proposta comercial pronta para enviar ao cliente',
+    fields: [
+      { name: 'cliente', label: 'Nome do cliente', type: 'text', placeholder: 'ex.: Padaria do Zé', required: true },
+      { name: 'service_type', label: 'Serviço', type: 'select', options: SERVICOS_OPTIONS },
+      { name: 'escopo', label: 'Escopo (opcional)', type: 'text', placeholder: 'ex.: site com agendamento e pagamento' },
+      { name: 'urgency', label: 'Urgência', type: 'select', options: URGENCIA_OPTIONS },
+    ],
+  },
+};
+
 function AgentConfig() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { token, userPlan, userRole } = useAuth();
+  const { token, userPlan, userRole, userProfile } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -192,6 +276,11 @@ function AgentConfig() {
   const [showCamera, setShowCamera] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+
+  // Painel de ações do VENDAS (formulário de parâmetros)
+  const [vendasForm, setVendasForm] = useState<string | null>(null);
+  const [vendasValues, setVendasValues] = useState<Record<string, unknown>>({});
+  const [vendasFormError, setVendasFormError] = useState('');
 
   // Password confirmation state (for sensitive actions like delete)
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -257,9 +346,16 @@ function AgentConfig() {
     } catch { return false; }
   })();
   const _FREE_AGENTS = ['agenda', 'clientes', 'financeiro', 'contabilidade'];
-  const _PROFISSIONAL_AGENTS = ['assistente'];
+  // vendas junto do assistente: backend (plan_limits) gate ambos em
+  // profissional+ — a UI deve espelhar, senão o essencial via a página e
+  // tomava 403 em toda ação.
+  const _PROFISSIONAL_AGENTS = ['assistente', 'vendas'];
   const hasAccess = (isAdmin && !_previewMode)
     || _FREE_AGENTS.includes(id || '')
+    // Perfis isentos de cobrança (cliente de serviço / agência): o conjunto de
+    // agentes deles vem do PERFIL no backend, não do plano — a UI não deve
+    // mandá-los pro /pricing. VENDAS segue fora (não é ambiente deles).
+    || (isBillingExempt(userProfile) && id !== 'vendas')
     || (_PAID_PLANS.includes(realPlan) && !_PROFISSIONAL_AGENTS.includes(id || ''))
     || (_PROFISSIONAL_AGENTS.includes(id || '') && ['profissional', 'completo', 'enterprise'].includes(realPlan));
 
@@ -964,18 +1060,20 @@ function AgentConfig() {
     }
   };
 
-  const handleQuickAction = async (action: QuickAction) => {
+  // Núcleo compartilhado: posta a mensagem do usuário, executa e mostra a
+  // resposta. Usado pelos botões diretos E pelo painel de formulário (VENDAS).
+  const runAction = async (label: string, actionName: string, params: Record<string, unknown> = {}) => {
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: action.label,
+      content: label,
       timestamp: new Date()
     };
     setMessages(prev => [...prev, userMsg]);
     setIsLoading(true);
 
     try {
-      const result = await executeAction(action.action, action.params || {});
+      const result = await executeAction(actionName, params);
       
       // Verificar se ação requer confirmação com senha (ex: excluir cliente via quick action)
       if (result.status === 'requires_confirmation' && result.confirmation) {
@@ -1020,6 +1118,74 @@ function AgentConfig() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleQuickAction = async (action: QuickAction) => {
+    // Ações parametrizadas (VENDAS) abrem o painel de formulário — o agente
+    // precisa de serviço/urgência/dados do lead, e um clique seco não os tem.
+    if (action.form && VENDAS_FORMS[action.action]) {
+      openVendasForm(action.action);
+      return;
+    }
+    await runAction(action.label, action.action, action.params || {});
+  };
+
+  const openVendasForm = (actionName: string) => {
+    const spec = VENDAS_FORMS[actionName];
+    const defaults: Record<string, unknown> = {};
+    spec.fields.forEach(f => {
+      if (f.type === 'select' && f.options?.length) defaults[f.name] = f.options[0].value;
+      else if (f.type === 'checkbox') defaults[f.name] = false;
+      else defaults[f.name] = '';
+    });
+    setVendasValues(defaults);
+    setVendasFormError('');
+    setVendasForm(actionName);
+  };
+
+  const submitVendasForm = async () => {
+    if (!vendasForm) return;
+    const spec = VENDAS_FORMS[vendasForm];
+
+    for (const f of spec.fields) {
+      if (f.required && !String(vendasValues[f.name] ?? '').trim()) {
+        setVendasFormError(`Preencha: ${f.label}`);
+        return;
+      }
+    }
+
+    // Monta parameters (números parseados; vazios omitidos) + resumo legível
+    // que vira a "mensagem do usuário" no chat.
+    const params: Record<string, unknown> = {};
+    const resumo: string[] = [];
+    for (const f of spec.fields) {
+      const raw = vendasValues[f.name];
+      if (f.type === 'checkbox') {
+        params[f.name] = !!raw;
+        if (raw) resumo.push(f.label.toLowerCase());
+        continue;
+      }
+      const txt = String(raw ?? '').trim();
+      if (!txt) continue;
+      if (f.type === 'number') {
+        const n = Number(txt);
+        if (!Number.isNaN(n)) params[f.name] = n;
+      } else {
+        params[f.name] = txt;
+      }
+      if (f.type === 'select') {
+        const opt = f.options?.find(o => o.value === txt);
+        // só o nome do serviço/urgência, sem o "(base R$ …)"
+        resumo.push((opt?.label || txt).replace(/\s*\(.*\)$/, ''));
+      } else {
+        resumo.push(txt);
+      }
+    }
+
+    const label = `${spec.title}${resumo.length ? ' — ' + resumo.slice(0, 3).join(', ') : ''}`;
+    setVendasForm(null);
+    setVendasFormError('');
+    await runAction(label, vendasForm, params);
   };
 
   // Aguardar validação de acesso antes de renderizar o chat (evita flash)
@@ -1514,6 +1680,87 @@ function AgentConfig() {
       )}
 
       {/* Modal de confirmação com senha / PIN */}
+      {/* Painel de ações do VENDAS — formulário de parâmetros */}
+      {vendasForm && VENDAS_FORMS[vendasForm] && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={e => { if (e.target === e.currentTarget) { setVendasForm(null); setVendasFormError(''); } }}
+        >
+          <div className="bg-slate-800 rounded-2xl border border-slate-600 shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                <Briefcase className="w-5 h-5 text-green-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">{VENDAS_FORMS[vendasForm].title}</h3>
+                <p className="text-sm text-slate-400">{VENDAS_FORMS[vendasForm].subtitle}</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 mb-4">
+              {VENDAS_FORMS[vendasForm].fields.map(f => (
+                <div key={f.name}>
+                  {f.type === 'checkbox' ? (
+                    <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={!!vendasValues[f.name]}
+                        onChange={e => setVendasValues(v => ({ ...v, [f.name]: e.target.checked }))}
+                        className="w-4 h-4 rounded accent-green-500"
+                      />
+                      {f.label}
+                    </label>
+                  ) : (
+                    <>
+                      <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                        {f.label}{f.required && <span className="text-red-400"> *</span>}
+                      </label>
+                      {f.type === 'select' ? (
+                        <select
+                          value={String(vendasValues[f.name] ?? '')}
+                          onChange={e => setVendasValues(v => ({ ...v, [f.name]: e.target.value }))}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-green-500"
+                        >
+                          {f.options?.map(o => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type={f.type === 'number' ? 'number' : 'text'}
+                          value={String(vendasValues[f.name] ?? '')}
+                          onChange={e => setVendasValues(v => ({ ...v, [f.name]: e.target.value }))}
+                          placeholder={f.placeholder}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-green-500"
+                        />
+                      )}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {vendasFormError && <p className="text-sm text-red-400 mb-3">{vendasFormError}</p>}
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setVendasForm(null); setVendasFormError(''); }}
+                className="flex-1 px-4 py-2.5 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-700 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={submitVendasForm}
+                disabled={isLoading}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-gradient-to-r from-green-500 to-emerald-500 text-white font-semibold hover:from-green-400 hover:to-emerald-400 transition disabled:opacity-50"
+              >
+                Executar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showPasswordModal && pendingConfirmation && !showPinSetup && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) handlePasswordCancel(); }}>
           <div className="bg-slate-800 rounded-2xl border border-slate-600 shadow-2xl w-full max-w-md p-6 animate-in fade-in zoom-in-95">
