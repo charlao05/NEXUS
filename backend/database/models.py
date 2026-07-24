@@ -207,6 +207,15 @@ class User(Base):
     plan = Column(String(20), default="free")  # free, pro, enterprise
     status = Column(String(20), default="active")  # active, suspended, deleted
     role = Column(String(20), default="user")  # user, admin, superadmin
+
+    # Perfil de ATENDIMENTO (multi-segmento). Diferente de `business_type`, que
+    # é o SETOR (comércio, saúde…): aqui é quem o NEXUS está atendendo, o que
+    # define limites e fronteira de escopo. Valores em PROFILE_TYPES (auth.py):
+    #   mei | pequeno_negocio | profissional_liberal
+    #   agencia_relatorios  → agência/cooperativa em modo SOMENTE RELATÓRIO
+    #   agencia_servicos    → agência/cooperativa que contratou pacotes
+    #   cliente_servico     → cliente de serviço (Alinha), sem bloqueio de uso
+    profile_type = Column(String(20), default="mei")
     
     # Preferência de comunicação
     communication_preference = Column(String(20), default="email")  # email, telegram, sms

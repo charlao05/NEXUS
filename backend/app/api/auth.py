@@ -60,6 +60,7 @@ class UserProfile(BaseModel):
     full_name: str
     plan: str
     role: str = "user"
+    profile_type: str = "mei"  # perfil de atendimento — ver PROFILE_TYPES
     communication_preference: str = "email"
     created_at: datetime
     subscription_expires: Optional[datetime] = None
@@ -606,6 +607,8 @@ async def get_profile(current_user: dict[str, Any] = Depends(get_current_user)):
         address_zip=getattr(user, "address_zip", None) if user else None,
         birth_date=str(user.birth_date) if user and getattr(user, "birth_date", None) else None,
         business_type=getattr(user, "business_type", None) if user else None,
+        # `or "mei"` cobre linhas antigas com NULL (coluna adicionada depois).
+        profile_type=(getattr(user, "profile_type", None) or "mei") if user else "mei",
         trial_days_remaining=_trial_days_remaining,
     )
 
@@ -745,7 +748,25 @@ async def update_preferences(
 # PERFIL DO USUÁRIO — Dados PF/PJ
 # ============================================================================
 
+# Perfis de ATENDIMENTO do NEXUS (multi-segmento). Não confundir com
+# `business_type`, que é o SETOR do negócio. O perfil define limites e escopo:
+#   - agencia_relatorios: agência/cooperativa em modo SOMENTE RELATÓRIO. O NEXUS
+#     não possui perfil de contador e não executa procedimentos além do escopo
+#     do MEI — por isso este perfil é restrito a consulta/relatório.
+#   - cliente_servico: cliente de serviço (Alinha); o uso não deve ser bloqueado
+#     por limite de plano — o custo é absorvido no preço do contrato.
+PROFILE_TYPES = (
+    "mei",
+    "pequeno_negocio",
+    "profissional_liberal",
+    "agencia_relatorios",
+    "agencia_servicos",
+    "cliente_servico",
+)
+
+
 class UpdateProfileRequest(BaseModel):
+    profile_type: Optional[str] = None
     full_name: Optional[str] = None
     person_type: Optional[str] = None
     cpf: Optional[str] = None
@@ -785,8 +806,13 @@ async def update_profile(
             raise HTTPException(400, "address_state deve ter 2 caracteres (UF)")
         if data.communication_preference and data.communication_preference not in ("email", "telegram", "sms"):
             raise HTTPException(400, "communication_preference deve ser 'email', 'telegram' ou 'sms'")
+        if data.profile_type and data.profile_type not in PROFILE_TYPES:
+            raise HTTPException(
+                400, f"profile_type inválido. Use um de: {', '.join(PROFILE_TYPES)}"
+            )
 
         _ALLOWED_FIELDS = {
+            "profile_type",
             "full_name", "person_type", "cpf", "cnpj", "phone",
             "company_name", "trade_name", "state_registration", "municipal_registration",
             "address_street", "address_number", "address_complement",

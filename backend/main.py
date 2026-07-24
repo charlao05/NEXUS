@@ -201,6 +201,32 @@ async def on_startup():
         logger.error(f"Falha ao verificar/criar schema no startup: {e}",
                      exc_info=True)
 
+    # Migração idempotente de COLUNAS novas.
+    # create_all() cria TABELAS ausentes, mas NÃO adiciona coluna em tabela que
+    # já existe — e este deploy NÃO executa alembic (render.yaml não chama
+    # `alembic upgrade`; o schema de produção veio todo do create_all). Precisa
+    # rodar ANTES de qualquer query em User: o SELECT do SQLAlchemy já inclui a
+    # coluna nova e falharia se ela não existisse no banco.
+    try:
+        from database.models import engine as _eng
+        from sqlalchemy import inspect as _inspect, text as _text
+        _colunas_novas = [
+            # (tabela, coluna, DDL) — compatível com Postgres e SQLite
+            ("users", "profile_type", "VARCHAR(20) DEFAULT 'mei'"),
+        ]
+        _insp = _inspect(_eng)
+        _tabelas = set(_insp.get_table_names())
+        for _tab, _col, _ddl in _colunas_novas:
+            if _tab not in _tabelas:
+                continue  # create_all já criou com a coluna
+            if _col in {c["name"] for c in _insp.get_columns(_tab)}:
+                continue  # já migrado
+            with _eng.begin() as _conn:
+                _conn.execute(_text(f"ALTER TABLE {_tab} ADD COLUMN {_col} {_ddl}"))
+            logger.info(f"Migração: coluna {_tab}.{_col} adicionada.")
+    except Exception as e:
+        logger.error(f"Falha na migração de colunas no startup: {e}", exc_info=True)
+
     # Owner bootstrap (idempotente): garante que qualquer conta cujo email
     # esteja em ADMIN_EMAILS seja admin + plano completo. Cobre o caso de a
     # conta já existir antes de a env ser definida. Sem ADMIN_EMAILS, no-op.
