@@ -389,6 +389,7 @@ function AgentConfig() {
       contabilidade: 'Olá! Sou seu assistente **Financeiro**.\n\nCuido de tudo sobre seu dinheiro:\n• Boleto mensal e contas do MEI\n• Notas fiscais\n• Limite de faturamento\n\nÉ só perguntar!',
       cobranca: 'Olá! Cuido das suas **Cobranças**.\n\nPosso te ajudar a:\n• Ver quem tá devendo\n• Mandar lembretes de pagamento\n• Controlar valores em aberto\n\nMe diga como posso ajudar!',
       documentos: 'Olá! Sou o assistente de **Documentos**.\n\nPosso te ajudar com:\n• Notas fiscais\n• Contratos\n• Relatórios\n\nVocê também pode enviar uma foto de um documento para eu analisar!',
+      vendas: 'Olá! Sou seu agente de **Vendas e Propostas**.\n\nPosso te ajudar a fechar negócio:\n• 💰 Calcular o preço de um serviço (com urgência e complexidade)\n• 🎯 Qualificar um lead (score 0-100 e próximo passo)\n• 📄 Gerar uma proposta comercial pronta para enviar\n\nUse as **Ações Rápidas** ao lado ou me conte sobre o cliente!',
       assistente: 'Olá! Sou seu **Assistente Pessoal**.\n\nPosso te ajudar com qualquer coisa:\n• Resumo do seu dia\n• Sugestões do que fazer primeiro\n• Alertas importantes\n\nPode falar comigo por texto, foto ou áudio!'
     };
 
