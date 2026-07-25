@@ -54,5 +54,10 @@ sentry-sdk[fastapi]>=2.0.0
 # === Email ===
 resend>=2.0.0
 
+# === Métricas de mídia ===
+# Lê a duração real do áudio para precificar a transcrição (cobrada por
+# MINUTO). Sem isto, o custo cai num fallback por bitrate — aproximado.
+mutagen>=1.47.0
+
 # === MCP (Model Context Protocol) ===
 mcp[cli]>=1.0.0
