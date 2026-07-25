@@ -763,6 +763,27 @@ def _safe_margin_pct(mrr: float, cost: float) -> float | None:
     return None
 
 
+def _calc_gateway_fee(revenue_brl: float, n_transacoes: int = 1) -> float:
+    """Taxa do gateway de pagamento sobre a receita recebida (custo real).
+
+    Default = Stripe Brasil cartão nacional: 3,99% + R$ 0,39 por transação
+    bem-sucedida (cotação oficial 24/07/2026). Pix custa 1,19% e sem taxa
+    fixa — se o mix migrar para Pix, ajustar as envs:
+        STRIPE_FEE_PERCENT (ex.: "0.0119" para Pix)
+        STRIPE_FEE_FIXED_BRL (ex.: "0" para Pix)
+
+    Retorna 0 quando não houve receita no período.
+    """
+    if not revenue_brl or revenue_brl <= 0:
+        return 0.0
+    try:
+        pct = float(os.getenv("STRIPE_FEE_PERCENT", "0.0399") or "0.0399")
+        fixed = float(os.getenv("STRIPE_FEE_FIXED_BRL", "0.39") or "0.39")
+    except ValueError:
+        pct, fixed = 0.0399, 0.39
+    return round(revenue_brl * pct + fixed * max(0, n_transacoes), 2)
+
+
 def _resolve_user_revenue(db, user_id: int) -> tuple[float, str]:
     """Retorna (mrr_brl, subscription_status). Usa subscription mais recente.
 
@@ -908,10 +929,27 @@ async def admin_margin(
             (calls, llm_usd, total_tokens, avg_dur) = agg
 
             llm_brl = float(llm_usd) * usd_brl
-            automation_cost_brl = 0.0  # variavel direta = 0 (sem proxy/captcha pago ainda)
 
             # Tier 2.3.2: compute prorateado a partir de InfraCostSnapshot
             from database.models import LLMUsageRecord as _LLMU, AutomationUsageRecord as _AU
+
+            # CUSTO DE AUTOMAÇÃO: antes era 0.0 fixo — inconsistente com o
+            # próprio sistema, que limita automação a 5x uma mensagem de chat
+            # (AUTOMATION_MSG_WEIGHT) justamente por ser mais cara. Playwright
+            # ocupa CPU/RAM do container durante toda a execução, então o custo
+            # é o TEMPO de instância consumido: duration_ms x preço/minuto do
+            # plano Render (Starter US$0,00016/min — cotação jul/2026).
+            # Sem proxy/captcha pagos ainda; quando houver, somar aqui.
+            _auto_ms = float(
+                db.query(func.coalesce(func.sum(_AU.duration_ms), 0))
+                .filter(_AU.user_id == user_id, _AU.ts >= start, _AU.ts <= end)
+                .scalar() or 0
+            )
+            try:
+                _render_usd_min = float(os.getenv("RENDER_COMPUTE_USD_PER_MIN", "0.00016"))
+            except ValueError:
+                _render_usd_min = 0.00016
+            automation_cost_brl = round((_auto_ms / 60_000.0) * _render_usd_min * usd_brl, 6)
             _period_start_date = start.date() if hasattr(start, "date") else start
             snap = _cached_snapshot(db, _period_start_date)
             if snap is not None:
@@ -950,7 +988,17 @@ async def admin_margin(
                 effective_revenue_brl = mrr_brl
                 revenue_source = "mrr_theoretical"
 
-            costs_total = llm_brl + automation_cost_brl + compute_cost_brl
+            # TAXA DO GATEWAY (Stripe) — incide sobre a receita efetivamente
+            # recebida. Sem isto a margem usava receita BRUTA e ficava
+            # superestimada em ~4-5% do preço do plano (cartão BR:
+            # 3,99% + R$0,39 por transação; Pix: 1,19%). Cotação jul/2026.
+            # Configurável por env para acompanhar renegociação/mudança de mix.
+            gateway_fee_brl = _calc_gateway_fee(
+                effective_revenue_brl,
+                n_transacoes=max(invoice_count or 0, 1) if effective_revenue_brl > 0 else 0,
+            )
+
+            costs_total = llm_brl + automation_cost_brl + compute_cost_brl + gateway_fee_brl
             margin_brl = effective_revenue_brl - costs_total
 
             # Edge case: effective negativo por dominancia de refund
@@ -997,6 +1045,12 @@ async def admin_margin(
                     "automation_cost_brl": automation_cost_brl,
                     "compute_cost_brl": round(compute_cost_brl, 4),
                     "compute_cost_source": compute_cost_source,
+                    # Taxa do gateway explícita (auditável, não embutida no total)
+                    "gateway_fee_brl": round(gateway_fee_brl, 2),
+                    "gateway_fee_source": (
+                        f"{float(os.getenv('STRIPE_FEE_PERCENT', '0.0399')) * 100:.2f}%"
+                        f" + R${float(os.getenv('STRIPE_FEE_FIXED_BRL', '0.39')):.2f}/transacao"
+                    ),
                     "total_brl": round(costs_total, 4),
                 },
                 "margin": {

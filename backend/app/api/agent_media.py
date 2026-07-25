@@ -45,6 +45,25 @@ ALLOWED_DOC    = {
 }
 
 
+def _estimar_duracao_audio(caminho: str, tamanho_bytes: int) -> float:
+    """Duração do áudio em segundos, para precificar a transcrição.
+
+    A OpenAI cobra transcrição por MINUTO de áudio. Tenta ler a duração real
+    dos metadados (mutagen, se instalado); se não der, cai num fallback por
+    bitrate — grosseiro, porém melhor que não medir. O fallback assume
+    ~24 kB/s (≈192 kbps), típico de webm/opus gravado pelo navegador.
+    """
+    try:
+        from mutagen import File as _MutagenFile  # type: ignore
+        mf = _MutagenFile(caminho)
+        dur = getattr(getattr(mf, "info", None), "length", None)
+        if dur and dur > 0:
+            return float(dur)
+    except Exception:
+        pass
+    return max(1.0, tamanho_bytes / 24_000.0)
+
+
 def _get_openai_raw():
     """Retorna cliente OpenAI cru (não o wrapper) para chamadas diretas (Whisper, Vision)."""
     try:
@@ -112,14 +131,31 @@ async def transcribe_audio(
             tmp_path = tmp.name
 
         try:
+            import time as _time
+            _t0 = _time.time()
+            _audio_model = os.getenv("OPENAI_AUDIO_MODEL", "whisper-1")
             with open(tmp_path, "rb") as audio_file:
                 result = client.audio.transcriptions.create(
-                    model="whisper-1",
+                    model=_audio_model,
                     file=audio_file,
                     language="pt",
                     response_format="text",
                 )
             transcription_text = result.strip() if isinstance(result, str) else str(result).strip()
+
+            # CUSTO: áudio é cobrado por MINUTO. Sem este registro a transcrição
+            # ficava invisível na margem por tenant (custo sem dono).
+            try:
+                from helpers.openai_tracking import track_audio_usage
+                track_audio_usage(
+                    seconds=_estimar_duracao_audio(tmp_path, len(content)),
+                    model=_audio_model,
+                    started_at=_t0,
+                    user_id_override=current_user.get("user_id"),
+                    agent_type_override=agent,
+                )
+            except Exception:
+                logger.debug("tracking de áudio suprimido", exc_info=True)
         finally:
             os.unlink(tmp_path)
 
