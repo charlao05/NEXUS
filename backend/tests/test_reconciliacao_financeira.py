@@ -116,6 +116,12 @@ def cenario(tmp_path):
 
     # ---- Receita por natureza ----
     # C3: implantação (NÃO recorrente) com custo de entrega
+    #
+    # ⚠️ CENÁRIO SINTÉTICO — usado apenas para validar a lógica de separação
+    # entre MRR e receita pontual. NÃO é exemplo de negócio: nenhum cliente
+    # pagou implantação, e nenhum preço de serviço foi validado com mercado.
+    # Os R$ 2.500 e os R$ 800 de custo foram escolhidos por mim para produzir
+    # um caso em que MRR e receita total divergem de forma visível.
     s.add(m.RevenueEntry(user_id=ids["C3_assin_implant"], category="implantacao",
                          is_recurring=False, amount_brl=2500.0, cost_brl=800.0,
                          occurred_at=ontem, source="pix", external_id="nf-c3"))
@@ -323,33 +329,44 @@ def test_cambio_detecta_defasagem():
         os.environ["USD_BRL_RATE"] = "5.08"
         os.environ["USD_BRL_MAX_AGE_DAYS"] = "30"
 
-        # a) sem carimbo de data -> declara a ausência
-        os.environ.pop("USD_BRL_UPDATED_AT", None)
-        taxa, origem = _resolve_usd_brl()
-        assert taxa == 5.08 and origem == "sem_data_de_atualizacao"
+        # Estados nomeados (26/07/2026): status e idade viraram campos
+        # separados, porque "ok_7d" não era comparável por código.
 
-        # b) atualizado hoje -> ok
+        # a) sem carimbo de data -> idade DESCONHECIDA (None, nunca 0)
+        os.environ.pop("USD_BRL_UPDATED_AT", None)
+        taxa, status, idade = _resolve_usd_brl()
+        assert taxa == 5.08 and status == "manual_override"
+        assert idade is None, "sem carimbo, a idade é desconhecida — não zero"
+
+        # b) atualizado hoje -> fresh
         hoje = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         os.environ["USD_BRL_UPDATED_AT"] = hoje
-        _, origem = _resolve_usd_brl()
-        assert origem.startswith("ok_"), origem
+        _, status, idade = _resolve_usd_brl()
+        assert status == "fresh" and idade == 0, (status, idade)
 
         # c) 7 dias (pergunta do dono) -> ainda dentro do limite de 30
         d7 = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
         os.environ["USD_BRL_UPDATED_AT"] = d7
-        _, origem7 = _resolve_usd_brl()
-        assert origem7 == "ok_7d", origem7
+        _, status7, idade7 = _resolve_usd_brl()
+        assert status7 == "fresh" and idade7 == 7, (status7, idade7)
 
         # d) 45 dias -> STALE, com warning logado
         d45 = (datetime.now(timezone.utc) - timedelta(days=45)).strftime("%Y-%m-%d")
         os.environ["USD_BRL_UPDATED_AT"] = d45
-        taxa, origem45 = _resolve_usd_brl()
-        assert origem45.startswith("stale_"), origem45
+        taxa, status45, idade45 = _resolve_usd_brl()
+        assert status45 == "stale" and idade45 == 45, (status45, idade45)
         assert taxa == 5.08, "taxa antiga continua sendo usada — mas agora sinalizada"
 
-        print(f"\nsem data -> 'sem_data_de_atualizacao' OK")
-        print(f"7 dias   -> '{origem7}' (dentro do limite de 30) OK")
-        print(f"45 dias  -> '{origem45}' + WARNING no log OK")
+        # e) 100 dias (>3x o limite) -> EXPIRED: não tratar como confiável
+        d100 = (datetime.now(timezone.utc) - timedelta(days=100)).strftime("%Y-%m-%d")
+        os.environ["USD_BRL_UPDATED_AT"] = d100
+        _, status100, _ = _resolve_usd_brl()
+        assert status100 == "expired", status100
+
+        print(f"\nsem data -> 'manual_override', idade None OK")
+        print(f"7 dias   -> '{status7}' (idade {idade7}, limite 30) OK")
+        print(f"45 dias  -> '{status45}' + WARNING no log OK")
+        print(f"100 dias -> '{status100}' (>3x o limite) OK")
     finally:
         for k, v in salvos.items():
             if v is None:

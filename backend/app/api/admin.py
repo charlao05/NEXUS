@@ -784,46 +784,114 @@ def _calc_gateway_fee(revenue_brl: float, n_transacoes: int = 1) -> float:
     return round(revenue_brl * pct + fixed * max(0, n_transacoes), 2)
 
 
-def _resolve_usd_brl() -> tuple[float, str]:
-    """Câmbio USD→BRL usado para converter custo de IA. Retorna (taxa, origem).
+# Estados nomeados do câmbio (nomenclatura definida pelo dono, 26/07/2026).
+# Substituem as strings ad-hoc anteriores ("ok_7d", "stale_45d"), que
+# misturavam status e idade num mesmo campo e não eram comparáveis por código.
+EXCHANGE_FRESH = "fresh"            # dentro do prazo de conferência
+EXCHANGE_STALE = "stale"            # passou do limite — usar com ressalva
+EXCHANGE_EXPIRED = "expired"        # velho demais — tratar como não confiável
+EXCHANGE_MANUAL = "manual_override"  # sem carimbo de data: valor cravado à mão
 
-    LIMITAÇÃO CONHECIDA (auditoria 26/07/2026, P-020): NÃO há cotação
-    automática. O valor vem da env USD_BRL_RATE, atualizada manualmente. Se
-    ficar dias sem atualização, o sistema segue usando o valor antigo — e como
-    o custo de IA é convertido por ele, uma alta do dólar reduz a margem real
-    sem que nada acuse.
+# Múltiplo do limite a partir do qual "stale" vira "expired".
+_EXCHANGE_EXPIRED_FACTOR = 3
 
-    Mitigação implementada: USD_BRL_UPDATED_AT (YYYY-MM-DD) registra quando a
-    taxa foi conferida. Passando de USD_BRL_MAX_AGE_DAYS (default 30), a
-    origem retorna "stale_Nd" e um WARNING é logado — a defasagem passa a ser
-    visível em vez de silenciosa.
+
+def _resolve_usd_brl() -> tuple[float, str, int | None]:
+    """Câmbio USD→BRL para converter custo de IA. Retorna (taxa, status, idade_dias).
+
+    LIMITAÇÃO CONHECIDA E ACEITA (P-020, decisão do dono em 26/07/2026): NÃO há
+    cotação automática. O valor vem da env USD_BRL_RATE, atualizada à mão.
+
+    A arquitetura completa (fonte primária + secundária, persistência com origem
+    e timestamp, atualização assíncrona, esta rota nunca chamando rede) está
+    especificada e APROVADA em AUDITORIA_NEXUS/13_MATRIZ_DECISOES.md, com
+    implementação deliberadamente ADIADA: o erro financeiro de um câmbio
+    defasado é de centavos enquanto o custo de IA é de ~R$1,59/assinante/mês.
+    Gatilho para implementar: primeira receita recorrente real.
+
+    O que existe hoje é visibilidade — a defasagem é declarada, não corrigida:
+      fresh           idade <= USD_BRL_MAX_AGE_DAYS (default 30)
+      stale           passou do limite — WARNING logado
+      expired         passou de 3x o limite — não confiável
+      manual_override sem USD_BRL_UPDATED_AT: ninguém sabe de quando é o valor
+
+    idade_dias é None quando não há carimbo de data (não é 0 — é desconhecido).
     """
     try:
         rate = float(os.getenv("USD_BRL_RATE", "5.20") or "5.20")
     except ValueError:
         logger.warning("USD_BRL_RATE inválida — usando 5.20")
-        return 5.20, "invalido_default"
+        return 5.20, EXCHANGE_MANUAL, None
 
     carimbo = os.getenv("USD_BRL_UPDATED_AT", "").strip()
     if not carimbo:
-        return rate, "sem_data_de_atualizacao"
+        return rate, EXCHANGE_MANUAL, None
     try:
         quando = datetime.strptime(carimbo, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except ValueError:
-        return rate, "data_invalida"
+        logger.warning("USD_BRL_UPDATED_AT inválido (%r) — idade desconhecida", carimbo)
+        return rate, EXCHANGE_MANUAL, None
 
     dias = (datetime.now(timezone.utc) - quando).days
     try:
         limite = int(os.getenv("USD_BRL_MAX_AGE_DAYS", "30"))
     except ValueError:
         limite = 30
+
+    if dias > limite * _EXCHANGE_EXPIRED_FACTOR:
+        logger.warning(
+            "Câmbio USD/BRL EXPIRADO: %s dias desde %s (limite %s). "
+            "Custo de IA e margem não são confiáveis.", dias, carimbo, limite,
+        )
+        return rate, EXCHANGE_EXPIRED, dias
     if dias > limite:
         logger.warning(
             "Câmbio USD/BRL defasado: %s dias desde %s (limite %s). "
             "Custo de IA e margem podem estar incorretos.", dias, carimbo, limite,
         )
-        return rate, f"stale_{dias}d"
-    return rate, f"ok_{dias}d"
+        return rate, EXCHANGE_STALE, dias
+    return rate, EXCHANGE_FRESH, dias
+
+
+def _is_production() -> bool:
+    """Mesma checagem de agent_automation.py:59 — não duplicar critério."""
+    return (os.getenv("ENVIRONMENT") or "").lower() == "production"
+
+
+def _tax_rate_configured() -> float | None:
+    """Alíquota configurada, ou None. None ≠ 0: 'não sei' ≠ 'é isento'."""
+    raw = os.getenv("TAX_RATE", "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("TAX_RATE inválido (%r) — tratado como não configurado", raw)
+        return None
+
+
+def _require_tax_configured() -> None:
+    """Em PRODUÇÃO, recusa calcular margem sem alíquota. Em dev/test, permite.
+
+    Decisão do dono (26/07/2026): imposto não é dado opcional da empresa. Sem a
+    alíquota não existe margem líquida, e um número pré-imposto exibido sem
+    ressalva acaba sendo lido como definitivo. Melhor a rota recusar do que
+    entregar meio número.
+
+    Em dev/test a rota responde normalmente, com margin_basis="PRE_TAX" — senão
+    o desenvolvimento fica refém de uma configuração fiscal.
+    """
+    if _is_production() and _tax_rate_configured() is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "TAX_RATE_NOT_CONFIGURED",
+                "message": (
+                    "A margem após impostos não pode ser calculada porque "
+                    "TAX_RATE não foi configurado."
+                ),
+            },
+        )
 
 
 def _calc_tax(revenue_brl: float) -> tuple[float, str]:
@@ -966,11 +1034,14 @@ async def admin_margin(
     if period != "current_month":
         raise HTTPException(status_code=400, detail="period suportado: current_month")
 
+    # Em produção sem TAX_RATE, a rota recusa responder (ver _require_tax_configured).
+    _require_tax_configured()
+
     try:
         from sqlalchemy import func
         from database.models import SessionLocal, User, LLMUsageRecord
 
-        usd_brl, usd_brl_source = _resolve_usd_brl()
+        usd_brl, usd_brl_source, usd_brl_age_days = _resolve_usd_brl()
         start, end = _period_bounds_current_month()
 
         db = SessionLocal()
@@ -1130,7 +1201,11 @@ async def admin_margin(
                 },
                 "usd_brl_rate": usd_brl,
                 "revenue": {
-                    "mrr_brl": round(mrr_brl, 2),
+                    # BUG CORRIGIDO 26/07/2026: esta chave se chamava "mrr_brl" e
+                    # era SOBRESCRITA pela "mrr_brl" logo abaixo — o valor nunca
+                    # chegava ao payload. Achado pelo teste de INTEGRAÇÃO (E-002);
+                    # o teste que espelha a fórmula (E-001) não podia pegá-lo.
+                    "plan_mrr_brl": round(mrr_brl, 2),
                     "stripe_invoice_paid_brl": invoice_paid_brl,
                     "stripe_refunded_brl": round(refunded_brl, 2),
                     "invoice_count": invoice_count,
@@ -1163,10 +1238,14 @@ async def admin_margin(
                     # não for definido. Declarado, nunca omitido em silêncio.
                     "tax_brl": round(tax_brl, 2),
                     "tax_source": tax_source,
-                    # Origem do câmbio: "ok_Nd" / "stale_Nd" / sem data.
-                    # Câmbio defasado distorce o custo de IA silenciosamente.
+                    # Qualidade do câmbio usado: fresh / stale / expired /
+                    # manual_override. Câmbio defasado distorce o custo de IA
+                    # em silêncio, então o relatório declara a própria confiança.
+                    # age_days = None significa DESCONHECIDO, não zero.
                     "usd_brl_rate": usd_brl,
                     "usd_brl_source": usd_brl_source,
+                    "exchange_status": usd_brl_source,
+                    "exchange_age_days": usd_brl_age_days,
                     "variable_total_brl": round(variable_costs, 4),
                     "total_brl": round(costs_total, 4),
                 },
@@ -1183,7 +1262,18 @@ async def admin_margin(
                     "gross_brl": round(margin_brl, 2),
                     "margin_pct": margin_pct,
                     "status": status,
-                    "is_pre_tax": tax_source in ("nao_configurado", "invalido"),
+                    # BASE DE CÁLCULO da margem — substitui o antigo booleano
+                    # "is_pre_tax". Nomenclatura definida pelo dono (26/07/2026)
+                    # porque um booleano não escala: amanhã pode existir margem
+                    # operacional ou pós-custos financeiros. Quem lê o número
+                    # sabe, pelo próprio payload, sobre qual base ele foi feito.
+                    "margin_basis": (
+                        "PRE_TAX"
+                        if tax_source in ("nao_configurado", "invalido")
+                        else "AFTER_TAX"
+                    ),
+                    "tax_configured": _tax_rate_configured() is not None,
+                    "tax_rate": _tax_rate_configured(),
                 },
             }
         finally:
@@ -1216,6 +1306,9 @@ async def admin_margin_all(
     if period != "current_month":
         raise HTTPException(status_code=400, detail="period suportado: current_month")
 
+    # Mesmo guard do /margin: em produção sem TAX_RATE não se calcula margem.
+    _require_tax_configured()
+
     valid_status = {"healthy", "warning", "loss", "n/a", "refund_dominant"}
     if status_filter is not None and status_filter not in valid_status:
         raise HTTPException(
@@ -1234,7 +1327,7 @@ async def admin_margin_all(
         from sqlalchemy import func
         from database.models import SessionLocal, User, LLMUsageRecord, AutomationUsageRecord
 
-        usd_brl, usd_brl_source = _resolve_usd_brl()
+        usd_brl, usd_brl_source, usd_brl_age_days = _resolve_usd_brl()
         start, end = _period_bounds_current_month()
         capped_limit = min(max(1, limit), 500)
 
@@ -2397,7 +2490,7 @@ async def admin_billing_resync_refunds(
         skipped_idempotent = 0
         errors = 0
         total_refunded_cents = 0
-        usd_brl, usd_brl_source = _resolve_usd_brl()
+        usd_brl, usd_brl_source, usd_brl_age_days = _resolve_usd_brl()
 
         if not dry_run:
             db = SessionLocal()
