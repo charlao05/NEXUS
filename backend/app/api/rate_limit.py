@@ -58,9 +58,23 @@ RATE_LIMITS: dict[str, dict[str, int]] = {
 }
 
 # Limites para não-autenticados (por IP)
+#
+# ⚠️ ATENÇÃO (26/07/2026): estes valores NUNCA rodaram em produção — o middleware
+# não estava montado (import com nome errado em main.py). Ao ativá-lo, eles
+# passam a valer de verdade, e os valores originais (10/min, 60/hora) são
+# apertados para uso normal de uma SPA: uma navegação faz várias chamadas de
+# API, e vários usuários atrás do mesmo NAT compartilham o IP.
+#
+# Os defaults foram afrouxados para 60/min e 600/hora. Isso NÃO enfraquece a
+# proteção que importa: brute force e email bombing são barrados por
+# AUTH_LIMITS (abaixo), que continuam agressivos e são específicos por rota.
+# Este limite genérico existe contra scraping/abuso de volume, não contra
+# ataque a credenciais.
+#
+# Configurável por env para ajuste sem redeploy de código.
 ANON_LIMITS = {
-    "requests_per_minute": 10,
-    "requests_per_hour": 60,
+    "requests_per_minute": int(os.getenv("RATE_LIMIT_ANON_PER_MINUTE", "60")),
+    "requests_per_hour": int(os.getenv("RATE_LIMIT_ANON_PER_HOUR", "600")),
 }
 
 # Limites específicos para endpoints de auth (anti brute-force)
