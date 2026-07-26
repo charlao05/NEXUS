@@ -108,6 +108,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # O docker-compose.yml declara `env_file: .env` para o backend, e .env
+      # NAO e versionado (contem secrets — corretamente no .gitignore). Sem este
+      # passo o compose morre antes de subir qualquer container:
+      #   "env file /home/runner/work/NEXUS/NEXUS/.env not found"
+      #
+      # Este job nunca havia rodado (dependia de backend-tests, vermelho desde
+      # 02/03/2026), entao a falha so apareceu agora que o backend ficou verde.
+      # Todos os valores abaixo sao DESCARTAVEIS e existem so dentro do runner.
+      - name: Gerar .env descartavel para o compose
+        run: |
+          cat > .env <<'ENVEOF'
+          ENVIRONMENT=test
+          JWT_SECRET=ci-test-secret-key-do-not-use-in-prod
+          DATABASE_URL=postgresql://nexus:nexus@postgres:5432/nexus
+          REDIS_URL=redis://redis:6379/0
+          OPENAI_API_KEY=sk-ci-dummy-nao-e-uma-chave-real
+          FRONTEND_URL=http://localhost:5173
+          CORS_ORIGINS=http://localhost:5173
+          ENVEOF
+          echo "variaveis geradas: $(grep -c '=' .env)"
+
       - name: Build and run E2E tests
         env:
           JWT_SECRET: ci-test-secret-key-do-not-use-in-prod
