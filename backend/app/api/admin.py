@@ -8,7 +8,7 @@ Acesso restrito a usuários com role=admin ou plano enterprise.
 import os
 import logging
 from datetime import datetime, timedelta, timezone, date
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field, field_validator
@@ -784,6 +784,37 @@ def _calc_gateway_fee(revenue_brl: float, n_transacoes: int = 1) -> float:
     return round(revenue_brl * pct + fixed * max(0, n_transacoes), 2)
 
 
+def _calc_tax(revenue_brl: float) -> tuple[float, str]:
+    """Imposto sobre a receita. Retorna (valor_brl, origem).
+
+    ATENÇÃO — este termo estava AUSENTE do modelo até 26/07/2026, o que tornava
+    TODA margem reportada uma margem PRÉ-IMPOSTO apresentada como se fosse
+    líquida (ver AUDITORIA_NEXUS/11_FECHAMENTO_MODELO.md).
+
+    A alíquota NÃO é presumida aqui: depende do regime tributário da empresa
+    (MEI / Simples Nacional / Lucro Presumido / Real) — informação que o
+    sistema não tem. Default = 0.0 com origem "nao_configurado", para que o
+    payload declare explicitamente que o imposto não está sendo considerado,
+    em vez de silenciosamente omiti-lo.
+
+    Configurar em: TAX_RATE (ex.: "0.06" para 6% do Simples anexo III).
+    """
+    if not revenue_brl or revenue_brl <= 0:
+        return 0.0, "sem_receita"
+    raw = os.getenv("TAX_RATE", "").strip()
+    if not raw:
+        return 0.0, "nao_configurado"
+    try:
+        rate = float(raw)
+    except ValueError:
+        logger.warning("TAX_RATE inválido (%r) — imposto não aplicado", raw)
+        return 0.0, "invalido"
+    if rate < 0 or rate > 1:
+        logger.warning("TAX_RATE fora de 0..1 (%r) — imposto não aplicado", rate)
+        return 0.0, "invalido"
+    return round(revenue_brl * rate, 2), f"aliquota_{rate * 100:.2f}pct"
+
+
 def _resolve_user_revenue(db, user_id: int) -> tuple[float, str]:
     """Retorna (mrr_brl, subscription_status). Usa subscription mais recente.
 
@@ -997,9 +1028,40 @@ async def admin_margin(
                 effective_revenue_brl,
                 n_transacoes=max(invoice_count or 0, 1) if effective_revenue_brl > 0 else 0,
             )
+            # RECEITA POR NATUREZA — sem isto, um cliente com R$2.500 de
+            # implantação aparecia como R$89,90 e a decisão comercial saía
+            # errada. MRR continua sendo só o recorrente (ver Doc 12).
+            from database.models import RevenueEntry as _RE
+            _entries = db.query(_RE).filter(
+                _RE.user_id == user_id, _RE.occurred_at >= start,
+                _RE.occurred_at <= end,
+            ).all()
+            recurring_extra_brl = sum(
+                float(e.amount_brl or 0) for e in _entries if e.is_recurring)
+            nonrecurring_brl = sum(
+                float(e.amount_brl or 0) for e in _entries if not e.is_recurring)
+            service_cost_brl = sum(float(e.cost_brl or 0) for e in _entries)
 
-            costs_total = llm_brl + automation_cost_brl + compute_cost_brl + gateway_fee_brl
-            margin_brl = effective_revenue_brl - costs_total
+            # MRR = assinatura (Stripe) + recorrente manual. Pontual NÃO entra.
+            mrr_total_brl = effective_revenue_brl + recurring_extra_brl
+            total_revenue_brl = mrr_total_brl + nonrecurring_brl
+
+            # Imposto e gateway incidem sobre TUDO que entrou, não só assinatura
+            tax_brl, tax_source = _calc_tax(total_revenue_brl)
+
+            # MARGEM DE CONTRIBUIÇÃO = receita − custos VARIÁVEIS.
+            # compute_cost_brl (rateio de infra) é custo FIXO rateado e fica
+            # FORA daqui por definição contábil — entra só no resultado
+            # consolidado da empresa. Ver 11_FECHAMENTO_MODELO.md §3: ratear
+            # fixo por cliente é o que quebra Σ(custos)=Custo Total, porque o
+            # rateio pula tenant sem uso ("unattributed").
+            variable_costs = (llm_brl + automation_cost_brl + gateway_fee_brl
+                              + tax_brl + service_cost_brl)
+            contribution_margin_brl = total_revenue_brl - variable_costs
+
+            # Mantido para compatibilidade: custo total COM rateio de infra.
+            costs_total = variable_costs + compute_cost_brl
+            margin_brl = total_revenue_brl - costs_total
 
             # Edge case: effective negativo por dominancia de refund
             refund_dominant = (
@@ -1035,6 +1097,10 @@ async def admin_margin(
                     "last_refund_at": last_refund_iso,
                     "revenue_source": revenue_source,
                     "effective_brl": round(effective_revenue_brl, 2),
+                    # Separação por natureza (Doc 12): MRR nunca contaminado
+                    "mrr_brl": round(mrr_total_brl, 2),
+                    "nonrecurring_brl": round(nonrecurring_brl, 2),
+                    "total_brl": round(total_revenue_brl, 2),
                 },
                 "costs": {
                     "llm_usd": round(float(llm_usd), 6),
@@ -1051,12 +1117,27 @@ async def admin_margin(
                         f"{float(os.getenv('STRIPE_FEE_PERCENT', '0.0399')) * 100:.2f}%"
                         f" + R${float(os.getenv('STRIPE_FEE_FIXED_BRL', '0.39')):.2f}/transacao"
                     ),
+                    # Imposto — 0 com origem "nao_configurado" enquanto TAX_RATE
+                    # não for definido. Declarado, nunca omitido em silêncio.
+                    "tax_brl": round(tax_brl, 2),
+                    "tax_source": tax_source,
+                    "variable_total_brl": round(variable_costs, 4),
                     "total_brl": round(costs_total, 4),
                 },
                 "margin": {
+                    # Margem de CONTRIBUIÇÃO (receita − variáveis): o número
+                    # correto para decisão por cliente.
+                    "contribution_brl": round(contribution_margin_brl, 2),
+                    "contribution_pct": (
+                        round(contribution_margin_brl / effective_revenue_brl * 100, 2)
+                        if effective_revenue_brl > 0 else 0.0
+                    ),
+                    # Margem COM rateio de infra (fixo) — mantida para
+                    # compatibilidade; ver ressalva do "unattributed".
                     "gross_brl": round(margin_brl, 2),
                     "margin_pct": margin_pct,
                     "status": status,
+                    "is_pre_tax": tax_source in ("nao_configurado", "invalido"),
                 },
             }
         finally:
@@ -3115,5 +3196,157 @@ async def admin_usage_report(
     except Exception as e:
         logger.error(f"admin_usage_report erro: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+# ============================================================================
+# RECEITA POR NATUREZA ECONÔMICA (fecha as igualdades 1, 2 e 4)
+# ============================================================================
+# Antes disto, a única receita registrada era assinatura (Stripe). Um cliente
+# que pagasse R$2.500 de implantação aparecia no /margin como R$89,90 — e a
+# decisão de "absorver consumo alto" saía sem base. Ver
+# AUDITORIA_NEXUS/12_MODELO_CONTABIL.md.
+#
+# REGRA INEGOCIÁVEL: is_recurring separa MRR de receita pontual. Métricas SaaS
+# (MRR/ARR/churn/LTV) usam SOMENTE is_recurring=True.
+
+
+class RevenueEntryCreate(BaseModel):
+    user_id: int
+    category: str
+    amount_brl: float = Field(..., gt=0)
+    cost_brl: float = Field(0.0, ge=0)
+    occurred_at: Optional[str] = None      # ISO; default = agora
+    source: str = Field("manual", max_length=20)
+    external_id: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+    is_recurring: Optional[bool] = None     # None = deriva da categoria
+
+    @field_validator("category")
+    @classmethod
+    def _cat_valida(cls, v: str) -> str:
+        from database.models import RevenueEntry
+        if v not in RevenueEntry.CATEGORIAS:
+            raise ValueError(
+                f"categoria inválida: {v}. Use uma de: "
+                f"{', '.join(RevenueEntry.CATEGORIAS)}"
+            )
+        return v
+
+
+@router.post("/revenue", status_code=201)
+async def criar_revenue_entry(
+    body: RevenueEntryCreate,
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Lança uma entrada de receita não-Stripe (implantação, treinamento...)."""
+    from database.models import RevenueEntry, User
+
+    db = SessionLocal()
+    try:
+        if not db.query(User).filter(User.id == body.user_id).first():
+            raise HTTPException(404, f"user_id {body.user_id} não encontrado")
+
+        if body.external_id:
+            dup = db.query(RevenueEntry).filter(
+                RevenueEntry.external_id == body.external_id).first()
+            if dup:
+                return {"status": "duplicate", "entry": dup.to_dict()}
+
+        # is_recurring deriva da categoria quando não informado — evita que
+        # um lançamento manual contamine o MRR por descuido.
+        recorrente = (
+            body.is_recurring
+            if body.is_recurring is not None
+            else body.category in RevenueEntry.CATEGORIAS_RECORRENTES
+        )
+
+        quando = datetime.now(timezone.utc)
+        if body.occurred_at:
+            try:
+                quando = datetime.fromisoformat(body.occurred_at)
+            except ValueError:
+                raise HTTPException(400, "occurred_at deve ser ISO 8601")
+
+        entry = RevenueEntry(
+            user_id=body.user_id, category=body.category,
+            is_recurring=recorrente, amount_brl=body.amount_brl,
+            cost_brl=body.cost_brl, occurred_at=quando,
+            source=body.source, external_id=body.external_id, notes=body.notes,
+        )
+        db.add(entry)
+        db.commit()
+        db.refresh(entry)
+        logger.info(
+            "RevenueEntry criada: user=%s cat=%s R$%.2f recorrente=%s",
+            body.user_id, body.category, body.amount_brl, recorrente,
+        )
+        return {"status": "created", "entry": entry.to_dict()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"criar_revenue_entry erro: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+    finally:
+        db.close()
+
+
+@router.get("/revenue/summary")
+async def revenue_summary(
+    days: int = Query(30, ge=1, le=365),
+    admin: dict[str, Any] = Depends(require_admin),
+):
+    """Receita do período separada por natureza — MRR nunca contaminado."""
+    from database.models import RevenueEntry, InvoicePayment
+
+    inicio = datetime.now(timezone.utc) - timedelta(days=days)
+    db = SessionLocal()
+    try:
+        entries = db.query(RevenueEntry).filter(
+            RevenueEntry.occurred_at >= inicio).all()
+
+        # Assinatura via Stripe (fonte canônica) — não duplicar com entries
+        # de categoria "assinatura", que existem só para casos fora do Stripe.
+        pagos = db.query(InvoicePayment).filter(
+            InvoicePayment.paid_at >= inicio).all()
+        stripe_brl = sum(float(p.amount_cents or 0) / 100.0 for p in pagos)
+
+        por_cat: dict[str, dict[str, float]] = {}
+        for e in entries:
+            c = por_cat.setdefault(
+                e.category, {"receita": 0.0, "custo": 0.0, "qtd": 0})
+            c["receita"] += e.amount_brl or 0
+            c["custo"] += e.cost_brl or 0
+            c["qtd"] += 1
+
+        recorrente = sum(e.amount_brl or 0 for e in entries if e.is_recurring)
+        pontual = sum(e.amount_brl or 0 for e in entries if not e.is_recurring)
+        custo_entrega = sum(e.cost_brl or 0 for e in entries)
+
+        return {
+            "period_days": days,
+            "mrr": {
+                "stripe_brl": round(stripe_brl, 2),
+                "manual_recorrente_brl": round(recorrente, 2),
+                "total_brl": round(stripe_brl + recorrente, 2),
+                "nota": "somente receita recorrente — base de MRR/ARR/churn/LTV",
+            },
+            "nao_recorrente": {
+                "total_brl": round(pontual, 2),
+                "custo_entrega_brl": round(custo_entrega, 2),
+                "contribuicao_brl": round(pontual - custo_entrega, 2),
+                "nota": "NUNCA somar ao MRR — distorce métricas SaaS",
+            },
+            "receita_total_brl": round(stripe_brl + recorrente + pontual, 2),
+            "por_categoria": {
+                k: {"receita_brl": round(v["receita"], 2),
+                    "custo_brl": round(v["custo"], 2),
+                    "contribuicao_brl": round(v["receita"] - v["custo"], 2),
+                    "lancamentos": int(v["qtd"])}
+                for k, v in sorted(por_cat.items())
+            },
+        }
     finally:
         db.close()

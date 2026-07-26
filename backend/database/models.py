@@ -1193,6 +1193,70 @@ for _tbl_name, _model, _cols in PII_PROTECTED:
     _sa_event.listens_for(_model, "before_insert")(_make_pii_listener(_model, _cols))
 
 
+class RevenueEntry(Base):
+    """Toda entrada financeira do NEXUS, classificada por NATUREZA ECONÔMICA.
+
+    Existe porque somar receita recorrente com não recorrente inverte decisões
+    comerciais (ver AUDITORIA_NEXUS/12_MODELO_CONTABIL.md):
+      - Cliente A: R$89,90/mês + R$2.500 de implantação → parece enorme no mês
+        1; no mês 2 vale R$89,90.
+      - Cliente B: R$89,90/mês, sem serviços, por 5 anos → vale muito mais.
+
+    `is_recurring` é o campo que decide se a linha entra no MRR. Métricas SaaS
+    (MRR/ARR/churn/LTV) usam SOMENTE is_recurring=True; o valor total do
+    cliente (Lifetime Contribution Margin) usa todas as linhas.
+
+    Assinatura via Stripe continua em InvoicePayment (fonte canônica); esta
+    tabela cobre o que NÃO passa pelo Stripe — implantação, treinamento,
+    consultoria, suporte avulso — além de espelhar categorias quando útil.
+    """
+
+    __tablename__ = "revenue_entries"
+
+    # Categorias válidas (Doc 12 §1). Mantidas como constante para o
+    # validador da rota e para evitar divergência entre código e documento.
+    CATEGORIAS = (
+        "assinatura", "implantacao", "treinamento", "consultoria",
+        "suporte", "addon", "excedente", "marketplace",
+        "reembolso", "estorno", "desconto",
+    )
+    # Quais contam como receita RECORRENTE (entram no MRR)
+    CATEGORIAS_RECORRENTES = ("assinatura", "suporte")
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    category = Column(String(30), nullable=False, index=True)
+    is_recurring = Column(Boolean, default=False, nullable=False, index=True)
+    amount_brl = Column(Float, nullable=False)
+    # Custo direto da entrega (ex.: horas de implantação). Sem isto, serviço
+    # parece 100% de margem, o que é falso.
+    cost_brl = Column(Float, default=0.0)
+    occurred_at = Column(DateTime, default=_utcnow, index=True)
+    source = Column(String(20), default="manual")   # manual | stripe | pix
+    external_id = Column(String(100), nullable=True, unique=True)  # idempotência
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_revenue_user_period", "user_id", "occurred_at"),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "category": self.category,
+            "is_recurring": self.is_recurring,
+            "amount_brl": self.amount_brl,
+            "cost_brl": self.cost_brl,
+            "contribution_brl": round((self.amount_brl or 0) - (self.cost_brl or 0), 2),
+            "occurred_at": self.occurred_at.isoformat() if self.occurred_at else None,
+            "source": self.source,
+            "external_id": self.external_id,
+            "notes": self.notes,
+        }
+
+
 def init_db():
     """Cria todas as tabelas se não existirem + migra colunas faltantes"""
     Base.metadata.create_all(bind=engine)

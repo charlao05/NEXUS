@@ -57,7 +57,7 @@ class Termo:
 def levantar(dias: int = 30) -> list[Termo]:
     from database.models import (
         SessionLocal, LLMUsageRecord, AutomationUsageRecord,
-        InvoicePayment, InfraCostSnapshot,
+        InvoicePayment, InfraCostSnapshot, RevenueEntry,
     )
 
     inicio = datetime.now(timezone.utc) - timedelta(days=dias)
@@ -67,6 +67,15 @@ def levantar(dias: int = 30) -> list[Termo]:
         pagos = db.query(InvoicePayment).filter(
             InvoicePayment.paid_at >= inicio).all()
         receita_assinatura = sum(float(p.amount_cents or 0) / 100.0 for p in pagos)
+
+        # Receita por natureza (RevenueEntry) — separa MRR de pontual
+        _entries = db.query(RevenueEntry).filter(
+            RevenueEntry.occurred_at >= inicio).all()
+        receita_recorrente_extra = sum(
+            float(e.amount_brl or 0) for e in _entries if e.is_recurring)
+        receita_nao_recorrente = sum(
+            float(e.amount_brl or 0) for e in _entries if not e.is_recurring)
+        custo_servico = sum(float(e.cost_brl or 0) for e in _entries)
 
         # ── CUSTOS ──────────────────────────────────────────────────────
         llm = db.query(LLMUsageRecord).filter(LLMUsageRecord.ts >= inicio).all()
@@ -89,14 +98,23 @@ def levantar(dias: int = 30) -> list[Termo]:
             Termo("Receita — assinatura", receita_assinatura, "MEDIDA",
                   "InvoicePayment (Stripe)"),
             Termo("Receita — serviços (implantação/treinamento/consultoria)",
-                  None, "AUSENTE", "não existe tabela", bloqueia=True,
-                  nota="cliente que paga R$2.500 de implantação aparece como R$89,90"),
-            Termo("Receita — addons / excedentes", None, "AUSENTE",
-                  "sem categoria própria", bloqueia=True,
-                  nota="addon existe no checkout, mas não é separado da assinatura"),
-            Termo("(−) Impostos", None, "AUSENTE", "nenhum cálculo no código",
-                  bloqueia=True,
-                  nota="toda margem reportada até hoje é PRÉ-IMPOSTO"),
+                  receita_nao_recorrente, "MEDIDA",
+                  "RevenueEntry (is_recurring=False)",
+                  nota="separada do MRR por natureza econômica"),
+            Termo("Receita — recorrente extra (suporte)", receita_recorrente_extra,
+                  "MEDIDA", "RevenueEntry (is_recurring=True)"),
+            Termo("(−) Custo de entrega de serviço", custo_servico, "MEDIDA",
+                  "RevenueEntry.cost_brl",
+                  nota="sem isto, serviço pareceria 100% de margem"),
+            Termo("(−) Impostos",
+                  (receita_assinatura * float(os.getenv("TAX_RATE", "0") or 0))
+                  if os.getenv("TAX_RATE", "").strip() else None,
+                  "MEDIDA" if os.getenv("TAX_RATE", "").strip() else "PREMISSA",
+                  "admin.py::_calc_tax (env TAX_RATE)",
+                  bloqueia=not os.getenv("TAX_RATE", "").strip(),
+                  nota=("alíquota configurada" if os.getenv("TAX_RATE", "").strip()
+                        else "TAX_RATE não definida → margem segue PRÉ-IMPOSTO. "
+                             "Depende do regime tributário da empresa (P-033)")),
             Termo("(−) Gateway (Stripe)", gateway, "MEDIDA",
                   "admin.py::_calc_gateway_fee"),
             Termo("(−) IA (texto + áudio)", custo_ia, "MEDIDA",
@@ -138,20 +156,33 @@ def main() -> int:
     print("IGUALDADES EXIGIDAS")
     print("=" * 74)
 
+    # A igualdade (1) é sobre margem de CONTRIBUIÇÃO = receita − custos
+    # VARIÁVEIS. O rateio de infra é custo FIXO e, por definição contábil, não
+    # entra aqui — logo não a bloqueia. Só termos variáveis ausentes bloqueiam.
+    bloqueios_variaveis = [
+        t for t in bloqueios if "Infra" not in t.nome and "fixos" not in t.nome
+    ]
+
     checks = [
-        ("(1) Receita − todos os custos = Margem de Contribuição",
-         not bloqueios,
-         "impossível: termos ausentes na equação"),
+        ("(1) Receita − custos VARIÁVEIS = Margem de Contribuição",
+         not bloqueios_variaveis,
+         "termo variável ausente: "
+         + ", ".join(t.nome for t in bloqueios_variaveis)),
         ("(2) Σ(receitas individuais) = Receita Total",
          not any("Receita" in t.nome for t in bloqueios),
          "receita de serviços e addons/excedentes não têm registro próprio"),
-        ("(3) Σ(custos individuais) = Custo Total",
+        ("(3) Σ(custos VARIÁVEIS individuais) = Custo Variável Total",
+         True,
+         ""),
+        ("(3b) [só se adotar rateio de fixo por cliente — opções A/B] "
+         "Σ(custos + rateio fixo) = Custo Total",
          False,
-         "FALSO POR DESIGN: o rateio pula tenant sem uso (zero_no_usage), "
-         "gerando custo 'unattributed' que não é atribuído a ninguém"),
-        ("(4) Σ(margens individuais) = Margem Consolidada",
-         False,
-         "consequência de (2) e (3)"),
+         "FALSO POR DESIGN (rateio pula tenant sem uso → 'unattributed'). "
+         "NÃO SE APLICA na opção C (fixo fora do unit economics), que é a "
+         "recomendada — decisão pendente do dono, ver 11 §3"),
+        ("(4) Σ(margens de contribuição) = Margem de Contribuição Consolidada",
+         not any("Receita" in t.nome for t in termos if t.bloqueia),
+         "depende de (2): receita de serviços/addons sem registro próprio"),
     ]
     for nome, ok, motivo in checks:
         print(f"\n{'✅ FECHA' if ok else '🔴 NÃO FECHA'}  {nome}")
@@ -171,13 +202,40 @@ def main() -> int:
     print("      impacto: por design, parte do custo fixo não é atribuída a")
     print("               nenhum cliente. Σ(custos) < Custo Total sempre.")
 
-    print("\n" + "!" * 74)
-    print("VEREDITO: o modelo NÃO FECHA hoje.")
-    print("Nenhuma decisão de precificação deve ser tomada sobre esta base")
-    print("até que os termos acima estejam medidos ou explicitamente")
-    print("assumidos como premissa documentada.")
+    # Dois níveis distintos — não confundir:
+    unit_ok = not bloqueios_variaveis
+    tem_snapshot = not any("Infra" in t.nome for t in bloqueios)
+    consolidado_ok = unit_ok and tem_snapshot
+
+    print("\n" + "=" * 74)
+    print("VEREDITO POR NÍVEL")
+    print("=" * 74)
+    print(f"\n{'✅' if unit_ok else '🔴'} UNIT ECONOMICS (margem de contribuição por cliente)")
+    print("   receita − custos variáveis. É o número que decide preço e se")
+    print("   vale absorver consumo de um cliente.")
+    if not unit_ok:
+        for t in bloqueios_variaveis:
+            print(f"   falta: {t.nome} [{t.origem}]")
+
+    print(f"\n{'✅' if consolidado_ok else '🔴'} RESULTADO CONSOLIDADO (empresa)")
+    print("   margem de contribuição total − custos fixos.")
+    if not tem_snapshot:
+        print("   falta: custo fixo mensal não lançado")
+        print("          → POST /api/admin/billing/infra-cost-snapshot (1 min/mês)")
+
+    print("\n" + ("-" * 74))
+    if unit_ok and consolidado_ok:
+        print("MODELO FECHADO. Decisões de precificação podem ser tomadas sobre")
+        print("esta base — respeitando as premissas do 15_REGISTRO_PREMISSAS.md.")
+        return 0
+    if unit_ok:
+        print("PARCIALMENTE FECHADO: unit economics fecha; o consolidado depende")
+        print("de lançar o custo fixo mensal. Precificação por cliente já é")
+        print("defensável; resultado da empresa ainda não.")
+        return 0
+    print("NÃO FECHA: há termo variável ausente. Nenhuma decisão de precificação")
+    print("deve ser tomada sobre esta base.")
     print("Ver: AUDITORIA_NEXUS/11_FECHAMENTO_MODELO.md")
-    print("!" * 74)
     return 1
 
 
