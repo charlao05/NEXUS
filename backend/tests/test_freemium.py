@@ -130,6 +130,23 @@ class TestMeEndpoint:
 # ---------------------------------------------------------------------------
 
 class TestMyLimits:
+    """ATUALIZADO 26/07/2026 — os valores anteriores eram da era pre-reestruturacao.
+
+    Auditoria antes de mexer (o teste nao foi so "feito passar"): cada divergencia
+    foi rastreada no git ate o commit que a estabeleceu.
+
+      free.crm_clients          5 -> 10     4612314 feat(pricing): reestrutura planos
+      free.invoices_per_month   3 -> 0      4612314 (free virou CRM + trial, sem faturas)
+      free.agent_messages       10 -> 0     4612314 + dc34275 — deixou de ser limite
+                                            permanente e virou TRIAL de 3 dias
+                                            (trial_ai_messages_per_day = 10)
+      profissional.msgs/dia  1000 -> 500    4612314
+
+    O commit dc34275 ("fix(limits): trial free 10msgs+1auto/dia - analise
+    combinatoria de custo") mostra que o trial foi DIMENSIONADO POR CUSTO, nao
+    alterado por descuido. Logo: mudancas intencionais, testes desatualizados.
+    """
+
     def test_free_limits(self, client):
         token = _signup_and_token(client, "limits_free@test.com")
         resp = client.get("/api/auth/my-limits", headers=_headers(token))
@@ -137,9 +154,11 @@ class TestMyLimits:
         data = resp.json()
         assert data["plan"] == "free"
         limits = data["limits"]
-        assert limits["crm_clients"]["max"] == 5
-        assert limits["invoices_per_month"]["max"] == 3
-        assert limits["agent_messages_per_day"]["max"] == 10
+        assert limits["crm_clients"]["max"] == 10
+        # Free nao emite fatura nem tem mensagens permanentes — o acesso a IA
+        # vem do TRIAL (trial_ai_messages_per_day), nao deste limite.
+        assert limits["invoices_per_month"]["max"] == 0
+        assert limits["agent_messages_per_day"]["max"] == 0
         assert "contabilidade" in limits["available_agents"]
 
     def test_profissional_limits(self, client):
@@ -150,7 +169,7 @@ class TestMyLimits:
         assert data["plan"] == "profissional"
         limits = data["limits"]
         assert limits["crm_clients"]["max"] == 500
-        assert limits["agent_messages_per_day"]["max"] == 1000
+        assert limits["agent_messages_per_day"]["max"] == 500
         assert limits["agent_messages_per_day"]["unlimited"] is False
 
 
@@ -160,9 +179,20 @@ class TestMyLimits:
 
 class TestCRMLimit:
     def test_free_crm_limit(self, client):
+        """O limite free de CRM bloqueia? (limite = 10 desde 4612314, era 5)
+
+        O numero vem de PLAN_LIMITS em vez de literal: se o limite mudar de novo,
+        o teste continua verificando a REGRA (bloqueia ao exceder) em vez de
+        quebrar por um numero. Foi a ausencia dessa indirecao que deixou este
+        teste vermelho por meses.
+        """
+        from app.core.plan_limits import PLAN_LIMITS, Plan
+
+        maximo = PLAN_LIMITS[Plan.FREE]["crm_clients"]
+        assert maximo > 0, "teste pressupoe limite finito no plano free"
+
         token = _signup_and_token(client, "crm_limit@test.com")
-        # Criar 5 clientes via API
-        for i in range(5):
+        for i in range(maximo):
             resp = client.post(
                 "/api/crm/clients",
                 json={"name": f"Client {i}", "email": f"c{i}@test.com"},
@@ -170,13 +200,15 @@ class TestCRMLimit:
             )
             assert resp.status_code in (200, 201), f"Falhou criando cliente {i}: {resp.text}"
 
-        # O 6° deve ser bloqueado
+        # O seguinte deve ser bloqueado
         resp = client.post(
             "/api/crm/clients",
-            json={"name": "Client 6", "email": "c6@test.com"},
+            json={"name": "Client extra", "email": "extra@test.com"},
             headers=_headers(token),
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 403, (
+            f"limite free de {maximo} clientes NAO bloqueou o {maximo + 1}o "
+            f"(veio {resp.status_code}) — usuario free consumindo sem limite")
         detail = resp.json()["detail"]
         assert detail["code"] == "LIMIT_REACHED"
         assert detail["resource"] == "crm_clients"
@@ -188,8 +220,18 @@ class TestCRMLimit:
 
 class TestInvoiceLimit:
     def test_free_invoice_limit(self, client):
+        """Free NAO emite fatura (limite = 0 desde 4612314; antes eram 3).
+
+        O teste antigo criava 3 faturas e esperava bloqueio na 4a. Como o free
+        passou a ter ZERO faturas, a PRIMEIRA ja e bloqueada — e o teste morria
+        na criacao, nao na asserção. Igual ao CRM, o numero vem de PLAN_LIMITS
+        para o teste verificar a REGRA e nao um literal.
+        """
+        from app.core.plan_limits import PLAN_LIMITS, Plan
+
+        maximo = PLAN_LIMITS[Plan.FREE]["invoices_per_month"]
+
         token = _signup_and_token(client, "inv_limit@test.com")
-        # Primeiro criar um cliente para vincular
         cr = client.post(
             "/api/crm/clients",
             json={"name": "C1", "email": "c1inv@test.com"},
@@ -197,22 +239,24 @@ class TestInvoiceLimit:
         )
         client_id = cr.json().get("id") or cr.json().get("client", {}).get("id")
 
-        # Criar 3 invoices
-        for i in range(3):
-            resp = client.post(
+        def _criar(desc: str):
+            return client.post(
                 "/api/crm/invoices",
-                json={"amount": 100.0, "description": f"Invoice {i}", "client_id": client_id, "due_date": "2026-12-31"},
+                json={"amount": 100.0, "description": desc,
+                      "client_id": client_id, "due_date": "2026-12-31"},
                 headers=_headers(token),
             )
+
+        # Consome exatamente a cota (hoje: nenhuma)
+        for i in range(maximo):
+            resp = _criar(f"Invoice {i}")
             assert resp.status_code in (200, 201), f"Falhou criando invoice {i}: {resp.text}"
 
-        # O 4° deve ser bloqueado
-        resp = client.post(
-            "/api/crm/invoices",
-            json={"amount": 50.0, "description": "Extra", "client_id": client_id, "due_date": "2026-12-31"},
-            headers=_headers(token),
-        )
-        assert resp.status_code == 403
+        # A proxima tem de ser bloqueada
+        resp = _criar("Extra")
+        assert resp.status_code == 403, (
+            f"limite free de {maximo} faturas NAO bloqueou a seguinte "
+            f"(veio {resp.status_code})")
         detail = resp.json()["detail"]
         assert detail["code"] == "LIMIT_REACHED"
         assert detail["resource"] == "invoices_per_month"

@@ -574,10 +574,44 @@ class TestSystemPrompts:
         assert "2026" in prompt
 
     def test_action_prompts_contabilidade(self):
+        """As ações fiscais do agente têm prompt no chat?
+
+        AUDITADO 26/07/2026 — este teste falhava e a leitura fácil seria
+        "desatualizado". Verificando ação por ação contra o contabilidade_agent:
+
+          dasn_status         existia no agente (:152), FALTAVA no chat  -> ADICIONADA
+          calendario_fiscal   existia no agente (:168), FALTAVA no chat  -> ADICIONADA
+          penalidades         existia como consultar_penalidades no agente,
+                              FALTAVA no chat                            -> ADICIONADA
+          irpf_calculo        NUNCA existiu — o nome real é
+                              calcular_irpf_isento (:166)                -> teste corrigido
+
+        Ou seja: TRÊS lacunas REAIS de produto (o usuário não conseguia acionar
+        a declaração anual, o calendário fiscal nem a consulta de penalidades
+        pelo chat) e um nome errado no teste. Fazer o teste passar sem
+        investigar teria escondido as três.
+        """
         from app.api.agent_chat import ACTION_PROMPTS
         assert "das_status" in ACTION_PROMPTS
         assert "dasn_status" in ACTION_PROMPTS
         assert "calendario_fiscal" in ACTION_PROMPTS
         assert "checklist_mensal" in ACTION_PROMPTS
-        assert "irpf_calculo" in ACTION_PROMPTS
-        assert "penalidades" in ACTION_PROMPTS
+        assert "calcular_irpf_isento" in ACTION_PROMPTS
+        assert "consultar_penalidades" in ACTION_PROMPTS
+
+    def test_acoes_fiscais_do_agente_alcancaveis_pelo_chat(self):
+        """REGRESSÃO: ação fiscal no agente sem prompt no chat = função órfã.
+
+        Guarda contra a classe de defeito acima voltar — o agente ganha uma
+        ação e ninguém consegue chamá-la pela interface.
+        """
+        from app.api.agent_chat import ACTION_PROMPTS
+
+        essenciais = {
+            "das_status", "dasn_status", "mei_status", "calendario_fiscal",
+            "checklist_mensal", "calcular_irpf_isento", "consultar_penalidades",
+        }
+        faltando = essenciais - set(ACTION_PROMPTS)
+        assert not faltando, (
+            f"ações fiscais sem prompt no chat: {sorted(faltando)} — "
+            "existem no contabilidade_agent mas o usuário não alcança")

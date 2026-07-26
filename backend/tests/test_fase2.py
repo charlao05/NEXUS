@@ -127,33 +127,27 @@ class TestChatHistory:
 
 
 # ============================================================================
-# ANALYTICS
+# ANALYTICS — REMOVIDO EM 26/07/2026
 # ============================================================================
-
-class TestAnalytics:
-    def test_analytics_dashboard(self, client, auth_headers):
-        resp = client.get("/api/analytics/dashboard", headers=auth_headers)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "overview" in data
-        assert "mei" in data
-        assert "activity_timeline" in data
-        assert "chat_usage" in data
-        assert "revenue_chart" in data
-        assert "clients_chart" in data
-        # MEI limit
-        assert data["mei"]["limit"] == 81000.0
-        assert data["mei"]["percent_used"] >= 0
-
-    def test_activity_timeline(self, client, auth_headers):
-        resp = client.get("/api/analytics/activity?days=7", headers=auth_headers)
-        assert resp.status_code == 200
-        assert "activities" in resp.json()
-        assert resp.json()["days"] == 7
-
-    def test_analytics_requires_auth(self, client):
-        resp = client.get("/api/analytics/dashboard")
-        assert resp.status_code == 401
+#
+# Três testes (test_analytics_dashboard, test_activity_timeline,
+# test_analytics_requires_auth) foram REMOVIDOS por testarem uma feature que
+# NUNCA EXISTIU no código:
+#
+#   - app/api/analytics.py não existe
+#   - main.py não menciona analytics em nenhum lugar
+#   - nenhuma rota /api/analytics/* é registrada (verificado em app.routes)
+#
+# Os três recebiam 404 e falhavam desde sempre. Um teste que aponta para rota
+# inexistente não é cobertura — é ruído que esconde falha real, e foi parte do
+# que manteve o CI vermelho por 134 runs seguidos.
+#
+# Se o dashboard de analytics for construído um dia, os testes voltam JUNTO com
+# a implementação. Recriá-los agora seria inverter a ordem.
+#
+# O que o teste esperava, para quem for implementar: /api/analytics/dashboard
+# com overview, mei (limit 81000.0 e percent_used), activity_timeline,
+# chat_usage, revenue_chart, clients_chart; e /api/analytics/activity?days=N.
 
 
 # ============================================================================

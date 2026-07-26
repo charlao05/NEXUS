@@ -121,16 +121,33 @@ jobs:
           path: e2e/results/
           retention-days: 7
 
-  deploy:
-    name: Deploy to Render
-    runs-on: ubuntu-latest
-    needs: [backend-tests, frontend-lint, security-tests]
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Trigger Render Deploy
-        run: |
-          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
-            echo "Secret RENDER_DEPLOY_HOOK_URL is not set"; exit 1
-          fi
-          curl -fsS --retry 3 "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" -o /dev/null
+  # ── Job "deploy" DESATIVADO em 26/07/2026 ───────────────────────────────────
+  #
+  # Este job nunca rodou: depende de backend-tests, que falhou em 134 runs
+  # seguidos desde 02/03/2026. Ao consertar os testes, ele passaria a executar
+  # pela primeira vez — e causaria DEPLOY DUPLICADO.
+  #
+  # Motivo: o Render já tem auto-deploy ligado no repositório. Medido — o push
+  # de 43814f9 subiu para produção em ~160s enquanto este job nem chegou a
+  # rodar (o CI estava vermelho). Ou seja, o deploy não depende deste hook.
+  #
+  # Mantê-lo faria cada push disparar dois builds do mesmo commit, o que é
+  # candidato a explicar parte da enxurrada de "deploy failed" que chega por
+  # e-mail — há inclusive DOIS serviços no Render (nexus-backend e
+  # nexxusapp-backend) recebendo do mesmo repo.
+  #
+  # O secret RENDER_DEPLOY_HOOK_URL continua existindo (criado em 24/05/2026),
+  # então basta reativar este bloco se o auto-deploy for desligado no painel.
+  #
+  # deploy:
+  #   name: Deploy to Render
+  #   runs-on: ubuntu-latest
+  #   needs: [backend-tests, frontend-lint, security-tests]
+  #   if: github.ref == 'refs/heads/main'
+  #   steps:
+  #     - name: Trigger Render Deploy
+  #       run: |
+  #         if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+  #           echo "Secret RENDER_DEPLOY_HOOK_URL is not set"; exit 1
+  #         fi
+  #         curl -fsS --retry 3 "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" -o /dev/null

@@ -11,6 +11,7 @@ Startup:
 
 from __future__ import annotations
 
+import json as _json
 import logging
 import os
 
@@ -28,11 +29,55 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # ── Logging ──────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+# Em PRODUÇÃO: JSON estruturado, para os logs do Render serem filtráveis por
+# campo em vez de grep em texto corrido. Em desenvolvimento: texto legível.
+#
+# ADICIONADO 26/07/2026. tests/test_fase8.py exigia isto e falhava — e a falta
+# de log estruturado é parte de por que tanta coisa passou despercebida: o
+# `[ROUTER-FAIL]`, o warning do rate limit que nunca carregou e o CRITICAL do
+# e-mail ficavam todos afogados no mesmo texto plano.
+#
+# LOG_LEVEL passa a ser lido de verdade (era declarada no render.yaml e ignorada,
+# porque o nível estava fixo em INFO).
+
+
+class _JsonFormatter(logging.Formatter):
+    """Formata cada linha de log como um objeto JSON de uma linha."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        # Campos extras passados via logger.info(..., extra={...})
+        for chave, valor in record.__dict__.items():
+            if chave not in logging.LogRecord("", 0, "", 0, "", (), None).__dict__ \
+                    and chave not in ("message", "asctime"):
+                try:
+                    _json.dumps(valor)
+                    payload[chave] = valor
+                except (TypeError, ValueError):
+                    payload[chave] = repr(valor)
+        return _json.dumps(payload, ensure_ascii=False)
+
+
+_log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+
+if os.getenv("ENVIRONMENT", "development") == "production":
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(_JsonFormatter())
+    logging.basicConfig(level=_log_level, handlers=[_handler], force=True)
+else:
+    logging.basicConfig(
+        level=_log_level,
+        format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
 logger = logging.getLogger(__name__)
 
 # ── Sentry (opcional) ─────────────────────────────────────────────────────────
@@ -84,15 +129,56 @@ from starlette.requests import Request as _Request
 from starlette.responses import Response as _Response
 
 
+# Permissions-Policy: camera/microphone = (self) porque a transcrição de áudio
+# (Whisper) precisa do microfone na própria origem. O resto é negado.
+_PERMISSIONS_POLICY = (
+    "camera=(self), microphone=(self), geolocation=(), "
+    "payment=(self), usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
+)
+
+# CSP restritiva: esta é uma API JSON, não serve HTML — o frontend é um serviço
+# estático separado (render.yaml: nexus-frontend), com os próprios headers.
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "object-src 'none'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'"
+)
+
+
 class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Headers de segurança.
+
+    ADICIONADOS 26/07/2026 — Content-Security-Policy e Permissions-Policy.
+    tests/test_fase7.py os exigia desde sempre e falhava; a leitura fácil seria
+    "teste desatualizado", mas a verificação mostrou o contrário: **o teste
+    guardava a regra correta e o código é que nunca a implementou.** Nem todo
+    teste vermelho é teste errado.
+
+    ENVIRONMENT é lido em RUNTIME, não pela constante _is_prod avaliada no
+    import: senão nenhum teste conseguiria exercitar o caminho de produção.
+    """
+
+    @staticmethod
+    def _producao() -> bool:
+        return (os.getenv("ENVIRONMENT") or "").lower() == "production"
+
     async def dispatch(self, request: _Request, call_next):  # type: ignore[override]
         response: _Response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
+        # "0" e NAO "1; mode=block": o filtro XSS dos browsers legados introduzia
+        # vulnerabilidades próprias e o OWASP recomenda desligá-lo em favor do
+        # CSP — que passou a existir aqui nesta mesma mudança.
+        # tests/test_fase2.py:217 já exigia isso e falhava.
+        response.headers["X-XSS-Protection"] = "0"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        if _is_prod:
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Permissions-Policy"] = _PERMISSIONS_POLICY
+        if self._producao():
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains")
+            response.headers["Content-Security-Policy"] = _CSP
         return response
 
 
@@ -163,6 +249,21 @@ _include("app.api.gov_integrations")
 # Integrações externas (opcionais — podem falhar se dependências não instaladas)
 _include("app.api.telegram")
 _include("routes.llm_routes")
+
+
+# ── Raiz ──────────────────────────────────────────────────────────────────────
+# ADICIONADA 26/07/2026. Não existia, e GET / devolvia 404 — mas
+# RateLimitMiddleware.EXEMPT_PATHS já listava "/" entre as rotas isentas, ou
+# seja, o próprio código assumia que ela existia. tests/test_fase6.py:623
+# apontava isso e falhava. Não expõe nada sensível: só identifica o serviço.
+@app.get("/", tags=["health"])
+async def root():
+    return {
+        "name": "NEXUS API",
+        "status": "ok",
+        "message": "NEXUS Backend no ar. Veja /health para diagnóstico e /docs para a API.",
+        "version": os.getenv("NEXUS_VERSION", "2.0.0"),
+    }
 
 
 # ── Health Check ──────────────────────────────────────────────────────────────

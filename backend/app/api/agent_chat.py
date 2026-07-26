@@ -265,6 +265,7 @@ REGRAS DE OURO:
 - NUNCA diga "vou emitir sua nota" ou "nota emitida" — diga "posso te guiar no portal da prefeitura"
 - A ferramenta create_invoice registra uma COBRANÇA INTERNA no sistema, não é nota fiscal
 - Se o usuário pedir nota fiscal, explique: "Posso abrir o portal da prefeitura e guiar o processo. Você precisará ter login no portal da sua cidade."
+- Ao guiar a emissão, lembre o usuário: o código de regime tributário é **CRT 4**, obrigatório para MEI desde 2026 (padrão nacional de NFS-e). Errar esse código invalida a nota.
 
 COMO RESPONDER:
 - Sempre em linguagem simples, como um contador amigo explicaria
@@ -454,6 +455,18 @@ ACTION_PROMPTS: dict[str, str] = {
     "weekly_summary_fin": "Mostre o resumo financeiro desta semana.",
     "payment_breakdown": "Mostre as vendas separadas por forma de pagamento.",
     "das_status":        "Qual é o status do próximo boleto MEI (DAS)?",
+    # LACUNA CORRIGIDA 26/07/2026: o contabilidade_agent já tem a ação
+    # "dasn_status" (contabilidade_agent.py:152) — a declaração ANUAL do MEI
+    # (DASN-SIMEI) — mas ela não existia aqui, então não havia como acioná-la
+    # pelo chat. tests/test_fase5.py:579 apontava isso e falhava há meses.
+    # O teste estava certo; o código é que tinha a lacuna.
+    "dasn_status":       "Qual é o status da minha declaração anual (DASN-SIMEI)?",
+    # Mesma lacuna: existem no contabilidade_agent (:168 e :166) e não havia
+    # como acioná-las pelo chat.
+    "calendario_fiscal": "Mostre meu calendário fiscal com os próximos vencimentos.",
+    "calcular_irpf_isento": "Preciso declarar Imposto de Renda como MEI? Sou isento?",
+    "consultar_penalidades": "Quais são as penalidades por atraso nas obrigações do MEI?",
+    "calcular_multa_das":  "Paguei o DAS em atraso — quanto fica de multa e juros?",
     "mei_status":        "Qual é o meu limite MEI e quanto já usei?",
     # Cobranças
     "list_overdue":      "Liste os clientes que estão devendo (faturas vencidas).",
