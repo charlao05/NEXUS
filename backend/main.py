@@ -194,6 +194,23 @@ async def health_check():
     # Sentry
     info["sentry"] = "active" if os.getenv("SENTRY_DSN") else "not_configured"
 
+    # Configuração de ambiente — sem isto, o healthCheckPath do Render aprovava
+    # um deploy sem RESEND_API_KEY, sem STRIPE_WEBHOOK_SECRET e sem TAX_RATE
+    # como se estivesse tudo certo. Só nomes e estado; nenhum valor é exposto.
+    #
+    # DELIBERADO: config NÃO rebaixa o "status" do topo. Esse campo significa
+    # "o serviço está operacional" (é o contrato que o Render e os testes já
+    # usam), e configuração incompleta é coisa diferente de serviço fora do ar.
+    # Misturar os dois faria um deploy propositalmente sem Stripe parecer
+    # quebrado. Quem quer saber de configuração lê info["config"]["status"] —
+    # que é impossível de não ver, porque lista os nomes que faltam.
+    try:
+        from app.core.config_check import resumo_para_health
+        info["config"] = resumo_para_health()
+    except Exception as _e:  # noqa: BLE001
+        logger.error(f"Health check config error: {_e}")
+        info["config"] = {"status": "unknown", "error": str(_e)}
+
     return info
 
 
@@ -202,6 +219,15 @@ async def health_check():
 async def on_startup():
     logger.info(f"NEXUS API iniciando — ambiente: {_env}")
     logger.info(f"CORS origins: {_origins}")
+
+    # CHECKLIST DE AMBIENTE — antes de qualquer coisa que toque o banco.
+    # Envs CRÍTICAS derrubam o boot em produção (DATABASE_URL ausente gravaria
+    # em SQLite efêmero e perderia dados de cliente sem nenhum erro); as demais
+    # sobem com log CRITICAL/WARNING e aparecem no /health.
+    # Ver AUDITORIA_NEXUS/17_CHECKLIST_AMBIENTE.md
+    from app.core.config_check import validar_no_startup
+    validar_no_startup()
+
     # Garante o schema no RUNTIME (idempotente). DATABASE_URL está sempre
     # disponível aqui — diferente do build, onde o Postgres do Render pode
     # não estar acessível. create_all só cria tabelas ausentes.
