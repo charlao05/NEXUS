@@ -784,6 +784,48 @@ def _calc_gateway_fee(revenue_brl: float, n_transacoes: int = 1) -> float:
     return round(revenue_brl * pct + fixed * max(0, n_transacoes), 2)
 
 
+def _resolve_usd_brl() -> tuple[float, str]:
+    """Câmbio USD→BRL usado para converter custo de IA. Retorna (taxa, origem).
+
+    LIMITAÇÃO CONHECIDA (auditoria 26/07/2026, P-020): NÃO há cotação
+    automática. O valor vem da env USD_BRL_RATE, atualizada manualmente. Se
+    ficar dias sem atualização, o sistema segue usando o valor antigo — e como
+    o custo de IA é convertido por ele, uma alta do dólar reduz a margem real
+    sem que nada acuse.
+
+    Mitigação implementada: USD_BRL_UPDATED_AT (YYYY-MM-DD) registra quando a
+    taxa foi conferida. Passando de USD_BRL_MAX_AGE_DAYS (default 30), a
+    origem retorna "stale_Nd" e um WARNING é logado — a defasagem passa a ser
+    visível em vez de silenciosa.
+    """
+    try:
+        rate = float(os.getenv("USD_BRL_RATE", "5.20") or "5.20")
+    except ValueError:
+        logger.warning("USD_BRL_RATE inválida — usando 5.20")
+        return 5.20, "invalido_default"
+
+    carimbo = os.getenv("USD_BRL_UPDATED_AT", "").strip()
+    if not carimbo:
+        return rate, "sem_data_de_atualizacao"
+    try:
+        quando = datetime.strptime(carimbo, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return rate, "data_invalida"
+
+    dias = (datetime.now(timezone.utc) - quando).days
+    try:
+        limite = int(os.getenv("USD_BRL_MAX_AGE_DAYS", "30"))
+    except ValueError:
+        limite = 30
+    if dias > limite:
+        logger.warning(
+            "Câmbio USD/BRL defasado: %s dias desde %s (limite %s). "
+            "Custo de IA e margem podem estar incorretos.", dias, carimbo, limite,
+        )
+        return rate, f"stale_{dias}d"
+    return rate, f"ok_{dias}d"
+
+
 def _calc_tax(revenue_brl: float) -> tuple[float, str]:
     """Imposto sobre a receita. Retorna (valor_brl, origem).
 
@@ -928,7 +970,7 @@ async def admin_margin(
         from sqlalchemy import func
         from database.models import SessionLocal, User, LLMUsageRecord
 
-        usd_brl = float(os.getenv("USD_BRL_RATE", "5.20") or "5.20")
+        usd_brl, usd_brl_source = _resolve_usd_brl()
         start, end = _period_bounds_current_month()
 
         db = SessionLocal()
@@ -1121,6 +1163,10 @@ async def admin_margin(
                     # não for definido. Declarado, nunca omitido em silêncio.
                     "tax_brl": round(tax_brl, 2),
                     "tax_source": tax_source,
+                    # Origem do câmbio: "ok_Nd" / "stale_Nd" / sem data.
+                    # Câmbio defasado distorce o custo de IA silenciosamente.
+                    "usd_brl_rate": usd_brl,
+                    "usd_brl_source": usd_brl_source,
                     "variable_total_brl": round(variable_costs, 4),
                     "total_brl": round(costs_total, 4),
                 },
@@ -1188,7 +1234,7 @@ async def admin_margin_all(
         from sqlalchemy import func
         from database.models import SessionLocal, User, LLMUsageRecord, AutomationUsageRecord
 
-        usd_brl = float(os.getenv("USD_BRL_RATE", "5.20") or "5.20")
+        usd_brl, usd_brl_source = _resolve_usd_brl()
         start, end = _period_bounds_current_month()
         capped_limit = min(max(1, limit), 500)
 
@@ -2351,7 +2397,7 @@ async def admin_billing_resync_refunds(
         skipped_idempotent = 0
         errors = 0
         total_refunded_cents = 0
-        usd_brl = float(os.getenv("USD_BRL_RATE", "5.20") or "5.20")
+        usd_brl, usd_brl_source = _resolve_usd_brl()
 
         if not dry_run:
             db = SessionLocal()
