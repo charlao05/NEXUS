@@ -387,8 +387,20 @@ class TestEmailService:
 class TestPasswordReset:
     """Testa fluxo de recuperação de senha."""
 
-    def test_forgot_password_returns_message(self, client):
-        """Forgot password retorna mensagem genérica (anti-enumeração)."""
+    def test_forgot_password_returns_message(self, client, monkeypatch):
+        """Forgot password retorna mensagem genérica (anti-enumeração).
+
+        ATUALIZADO 26/07/2026: antes este teste exigia 200 incondicionalmente —
+        e passava justamente porque a rota respondia "enviamos" mesmo sem ter
+        enviado nada. Agora, sem serviço de e-mail, a resposta correta é 503.
+        Para testar a mensagem anti-enumeração é preciso o serviço no ar.
+        Ver tests/test_forgot_password_integracao.py.
+        """
+        import app.api.email_service as es
+        monkeypatch.setattr(es, "email_service_disponivel", lambda: (True, "ok"))
+        monkeypatch.setattr(
+            es, "send_password_reset_email", lambda *a, **k: {"status": "sent"})
+
         r = client.post("/api/auth/forgot-password", json={
             "email": "nonexistent@nexus.com"
         })
@@ -396,6 +408,17 @@ class TestPasswordReset:
         data = r.json()
         msg = data.get("message", "").lower()
         assert "enviaremos" in msg or "enviado" in msg or data.get("status") == "sent"
+
+    def test_forgot_password_sem_servico_de_email_recusa(self, client, monkeypatch):
+        """REGRESSAO: sem serviço de e-mail a rota NÃO pode dizer 'enviamos'."""
+        import app.api.email_service as es
+        monkeypatch.setattr(
+            es, "email_service_disponivel", lambda: (False, "RESEND_API_KEY nao configurada"))
+
+        r = client.post("/api/auth/forgot-password", json={"email": "quem@nexus.com"})
+        assert r.status_code == 503, (
+            f"falso sucesso de volta: esperado 503, veio {r.status_code}")
+        assert r.json()["detail"]["error"] == "EMAIL_SERVICE_UNAVAILABLE"
 
     def test_reset_password_invalid_token(self, client):
         """Reset com token inválido retorna 400."""
@@ -405,9 +428,19 @@ class TestPasswordReset:
         })
         assert r.status_code == 400
 
-    def test_forgot_password_with_real_user(self, client):
-        """Forgot password com user real não dá erro."""
-        # Cria user
+    def test_forgot_password_with_real_user(self, client, monkeypatch):
+        """Forgot password com user real não dá erro (com o serviço no ar).
+
+        ATUALIZADO 26/07/2026: exigia só status 200, e a rota retornava 200
+        sempre — inclusive quando o commit falhava. O teste não provava nada.
+        A verificação de que o token é persistido e enviado está em
+        tests/test_forgot_password_integracao.py.
+        """
+        import app.api.email_service as es
+        monkeypatch.setattr(es, "email_service_disponivel", lambda: (True, "ok"))
+        monkeypatch.setattr(
+            es, "send_password_reset_email", lambda *a, **k: {"status": "sent"})
+
         email = f"forgot_test_{int(time.time())}@nexus.com"
         client.post("/api/auth/signup", json={
             "email": email,

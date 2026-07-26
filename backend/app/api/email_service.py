@@ -25,13 +25,45 @@ if os.getenv("ENVIRONMENT", "development") == "production" and not RESEND_API_KE
     )
 
 
+def _api_key() -> str:
+    """Chave lida em RUNTIME.
+
+    A constante RESEND_API_KEY é capturada no import do módulo; se o processo
+    subir antes da env existir (ou num teste que a define depois), ela fica
+    vazia para sempre. Ler em runtime torna a checagem honesta e testável.
+    """
+    return os.getenv("RESEND_API_KEY", "") or RESEND_API_KEY
+
+
+def email_service_disponivel() -> tuple[bool, str]:
+    """O serviço de e-mail consegue enviar AGORA? Retorna (ok, motivo).
+
+    Existem DOIS jeitos de o envio falhar em silêncio, e eles são
+    indistinguíveis para quem só olha a resposta da API:
+      1. RESEND_API_KEY ausente;
+      2. pacote 'resend' não instalado — `_get_resend()` devolve None
+         exatamente como no caso 1, MESMO com a chave correta configurada.
+
+    Esta função separa os dois e permite que a rota recuse o pedido em vez de
+    responder "enviamos" sem ter enviado.
+    """
+    if not _api_key():
+        return False, "RESEND_API_KEY nao configurada"
+    try:
+        import resend  # type: ignore[import-unresolved]  # noqa: F401
+    except ImportError:
+        return False, "pacote 'resend' nao instalado no ambiente"
+    return True, "ok"
+
+
 def _get_resend():
     """Importa e configura Resend apenas quando necessário."""
-    if not RESEND_API_KEY:
+    chave = _api_key()
+    if not chave:
         return None
     try:
         import resend  # type: ignore[import-unresolved]
-        resend.api_key = RESEND_API_KEY
+        resend.api_key = chave
         return resend
     except ImportError:
         logger.warning("Pacote 'resend' não instalado")

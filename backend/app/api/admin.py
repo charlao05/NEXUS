@@ -29,10 +29,23 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 # ============================================================================
 
 def _get_admin_emails() -> list[str]:
-    """Lê ADMIN_EMAILS do env em runtime (para suportar testes)."""
+    """Lê ADMIN_EMAILS do env em runtime (para suportar testes).
+
+    FAIL-CLOSED (corrigido em 26/07/2026). O default era "admin@nexus.com".
+    Como require_admin concede acesso por MATCH DE E-MAIL (não só por role) e o
+    signup é público e não restringe endereço (auth.py:420-450), a ausência da
+    env abria o painel admin inteiro para quem cadastrasse esse e-mail.
+
+    Os outros três módulos que leem esta env já usavam "" (auth.py:445,
+    auth.py:519, main.py:237). O único com default permissivo era justamente o
+    que faz o controle de acesso.
+
+    Sem a env, ninguém é admin por e-mail — o role gravado no banco continua
+    funcionando normalmente.
+    """
     return [
         e.strip()
-        for e in os.getenv("ADMIN_EMAILS", "admin@nexus.com").split(",")
+        for e in os.getenv("ADMIN_EMAILS", "").split(",")
         if e.strip()
     ]
 

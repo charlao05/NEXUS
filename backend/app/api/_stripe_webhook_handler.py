@@ -69,13 +69,33 @@ def validate_and_parse_webhook(payload: bytes, sig_header: str) -> Any:
 
     Levanta ValueError em payload invalido, SignatureVerificationError em
     assinatura invalida — caller route decide HTTP status (400 em ambos).
+
+    FAIL-CLOSED EM PRODUCAO (26/07/2026). Antes, a ausencia de
+    STRIPE_WEBHOOK_SECRET fazia o handler parsear o payload SEM verificar
+    assinatura, com apenas um WARNING no log. Qualquer POST forjado em
+    /api/billing/webhook disparava dispatch_stripe_event — ou seja, dava para
+    conceder plano pago sem pagar. O comentario dizia "NAO deve acontecer em
+    prod", mas nada impedia.
+
+    Agora, em ENVIRONMENT=production sem o secret, a validacao FALHA. O modo
+    permissivo continua existindo apenas fora de producao, para desenvolvimento
+    local sem credencial da Stripe.
     """
     import os
     import stripe
 
     secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
     if not secret:
-        # Sem secret, modo dev: parseia sem validar (NAO deve acontecer em prod)
+        if (os.getenv("ENVIRONMENT") or "").lower() == "production":
+            logger.critical(
+                "STRIPE_WEBHOOK_SECRET ausente em producao — webhook RECUSADO. "
+                "Sem ele nao ha como distinguir um evento da Stripe de um POST forjado."
+            )
+            raise ValueError(
+                "STRIPE_WEBHOOK_SECRET nao configurado: webhook recusado em producao"
+            )
+
+        # Fora de producao: parseia sem validar, para desenvolvimento local.
         import json as _json
         logger.warning("STRIPE_WEBHOOK_SECRET nao configurado — parseando sem validacao!")
         try:

@@ -98,12 +98,24 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(_SecurityHeadersMiddleware)
 
-# ── Rate Limit Middleware (opcional) ─────────────────────────────────────────
-try:
-    from app.api.rate_limit import NexusRateLimitMiddleware
-    app.add_middleware(NexusRateLimitMiddleware)
-except Exception as exc:
-    logger.warning(f"Rate limit middleware não carregado: {exc}")
+# ── Rate Limit Middleware ────────────────────────────────────────────────────
+# BUG CORRIGIDO 26/07/2026: importava "NexusRateLimitMiddleware", nome que NUNCA
+# existiu (a classe sempre se chamou RateLimitMiddleware). O except engolia o
+# ImportError e logava só um WARNING, então o middleware NUNCA foi montado —
+# nem em produção. Consequência: /api/auth/login e /api/auth/forgot-password
+# ficaram sem qualquer limite (brute force e email bombing livres), apesar de a
+# classe já protegê-los em AUTH_RATE_LIMITED.
+#
+# Passou despercebido porque tests/test_fase8.py só verifica as CONSTANTES da
+# classe (EXEMPT_PREFIXES, AUTH_LIMITS), nunca que o middleware está montado no
+# app. Teste de montagem adicionado em tests/test_middleware_montado.py.
+#
+# Não é mais "opcional": rate limit ausente em produção é falha de segurança,
+# não degradação aceitável.
+from app.api.rate_limit import RateLimitMiddleware
+
+app.add_middleware(RateLimitMiddleware)
+logger.info("[MIDDLEWARE-OK] RateLimitMiddleware montado")
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 def _include(module_path: str, attr: str = "router") -> None:

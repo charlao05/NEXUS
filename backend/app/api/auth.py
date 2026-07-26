@@ -9,7 +9,9 @@ Autenticação REAL com banco de dados SQLAlchemy.
 - OAuth → Google/Facebook com persistência
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status, Header, Request
+from fastapi import (
+    APIRouter, BackgroundTasks, HTTPException, Depends, status, Header, Request,
+)
 from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel, EmailStr
 from datetime import datetime, timedelta, timezone, date
@@ -1829,22 +1831,70 @@ async def facebook_callback(code: str | None = None, error: str | None = None, s
 # ============================================================================
 
 @router.post("/forgot-password")
-async def forgot_password(data: ForgotPasswordRequest):
-    """Envia email real de recuperação de senha (previne enumeração)."""
+async def forgot_password(data: ForgotPasswordRequest, background: BackgroundTasks):
+    """Envia email real de recuperação de senha (previne enumeração).
+
+    CORRIGIDO 26/07/2026 — falso sucesso. Antes, o retorno de
+    send_password_reset_email era DESCARTADO e a rota respondia
+    {"status": "sent"} incondicionalmente. Sem RESEND_API_KEY (que não está
+    declarada no render.yaml) o envio devolvia {"status": "skipped"} e o usuário
+    via "Enviamos um link" sem que nada tivesse saído. Não existia caminho de
+    código em que o usuário soubesse que o e-mail não foi enviado.
+
+    ANTI-ENUMERAÇÃO PRESERVADA: a checagem de disponibilidade do serviço não
+    depende de QUAL e-mail foi pedido, então o 503 não revela se a conta existe.
+    Quando o serviço está no ar, a resposta é idêntica para e-mail cadastrado e
+    não cadastrado — como antes.
+    """
+    from app.api.email_service import (  # type: ignore[import-unresolved]
+        email_service_disponivel, generate_reset_token, send_password_reset_email,
+    )
+
+    disponivel, motivo = email_service_disponivel()
+    if not disponivel:
+        logger.critical(
+            "forgot-password INDISPONIVEL (%s) — nenhum e-mail de recuperação "
+            "pode ser enviado neste ambiente.", motivo,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "EMAIL_SERVICE_UNAVAILABLE",
+                "message": (
+                    "Não foi possível enviar o e-mail de recuperação agora. "
+                    "Tente novamente mais tarde."
+                ),
+            },
+        )
+
     logger.info(f"Recuperação de senha solicitada: {data.email}")
 
     db = _get_db_session()
     try:
         user = db.query(User).filter(User.email == data.email).first()
         if user:
-            from app.api.email_service import generate_reset_token, send_password_reset_email  # type: ignore[import-unresolved]
             token = generate_reset_token()
             user.password_reset_token = token
             user.password_reset_expires = datetime.now(timezone.utc) + timedelta(hours=1)
             db.commit()
-            send_password_reset_email(data.email, token)
+            # Fora do caminho síncrono: resend.Emails.send é HTTP bloqueante e o
+            # deploy roda com --workers 1, então um timeout do Resend congelaria
+            # o backend inteiro.
+            background.add_task(_enviar_reset_em_background, data.email, token)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Erro no forgot-password: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "PASSWORD_RESET_FAILED",
+                "message": (
+                    "Não foi possível processar a recuperação agora. "
+                    "Tente novamente mais tarde."
+                ),
+            },
+        )
     finally:
         db.close()
 
@@ -1852,6 +1902,29 @@ async def forgot_password(data: ForgotPasswordRequest):
         "status": "sent",
         "message": "Se o email estiver cadastrado, enviaremos um link de recuperação.",
     }
+
+
+def _enviar_reset_em_background(email: str, token: str) -> None:
+    """Envia o e-mail depois da resposta. Falha aqui é ALERTA, não silêncio.
+
+    A disponibilidade já foi checada antes de responder, então uma falha neste
+    ponto é transitória (rede, cota, remetente rejeitado) e precisa aparecer no
+    log como CRITICAL — é o único sinal que resta.
+    """
+    from app.api.email_service import send_password_reset_email  # type: ignore[import-unresolved]
+
+    try:
+        resultado = send_password_reset_email(email, token)
+    except Exception as e:  # noqa: BLE001
+        logger.critical("Falha ao enviar reset de senha para %s: %s", email, e)
+        return
+
+    if (resultado or {}).get("status") != "sent":
+        logger.critical(
+            "Reset de senha NAO enviado para %s — status=%s. "
+            "O usuário recebeu confirmação mas não receberá o e-mail.",
+            email, (resultado or {}).get("status"),
+        )
 
 
 class ResetPasswordRequest(BaseModel):
