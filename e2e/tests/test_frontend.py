@@ -77,8 +77,19 @@ class TestLoginFlow:
             json={"email": test_user["email"], "password": test_user["password"]},
             timeout=10,
         )
+        if login_r.status_code == 429:
+            # LACUNA CONHECIDA (26/07/2026): AUTH_LIMITS limita /api/auth/login a
+            # 5 tentativas/minuto por IP, e a suite gasta 6 antes de chegar aqui —
+            # entao este teste pula SEMPRE no compose. O rate limit esta certo; o
+            # que falta e a suite nao competir consigo mesma (reusar token de
+            # sessao ou isentar o IP do runner). Registrado para nao virar um
+            # verde que ninguem sabe que nao testa nada.
+            pytest.skip(
+                "429 em /api/auth/login: a propria suite estourou AUTH_LIMITS "
+                "(5/min). Este teste nao exerce o logout no ambiente do CI."
+            )
         if login_r.status_code != 200:
-            pytest.skip("Cannot login")
+            pytest.skip(f"Cannot login (HTTP {login_r.status_code})")
 
         token = login_r.json()["access_token"]
 
