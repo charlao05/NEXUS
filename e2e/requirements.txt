@@ -1,4 +1,25 @@
+# NEXUS E2E — dependencias dos testes
+#
+# ATENCAO: `playwright` PRECISA casar com a tag da imagem base do Dockerfile
+# (mcr.microsoft.com/playwright/python:vX.Y.Z-noble). A imagem traz os browsers
+# ja instalados em /ms-playwright, mas identificados por REVISAO de build, nao
+# por versao do pacote — a v1.49.1 traz chromium_headless_shell-1148.
+#
+# Sem pin, o pip instalava a ultima versao (1.61.0 em 26/07/2026), que procura
+# a revisao 1228. Resultado no CI, na primeira vez que este job rodou:
+#
+#   BrowserType.launch: Executable doesn't exist at
+#   /ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64/...
+#
+# Os 8 testes de browser davam ERROR no setup em 2,67s — nenhum chegava a fazer
+# asserção. Ao subir a versao aqui, suba a tag do Dockerfile junto.
+playwright==1.49.1
+pytest-playwright==0.7.2
+
 pytest
-playwright
-pytest-playwright
 pytest-html
+
+# tests/test_api.py faz `import requests` desde o primeiro commit. Funcionava
+# por acidente: a imagem do Playwright traz requests como dependencia
+# transitiva. Declarado aqui para nao depender do conteudo da imagem base.
+requests

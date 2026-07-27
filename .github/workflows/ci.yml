@@ -5,6 +5,10 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  # Permite validar o E2E numa branch ANTES de liga-lo em main. Sem isto, a
+  # unica forma de saber se o job passa era mergear e torcer — foi assim que
+  # ele chegou a 2026 sem nunca ter rodado.
+  workflow_dispatch:
 
 jobs:
   backend-tests:
@@ -99,32 +103,44 @@ jobs:
       - name: Build
         run: npm run build
 
-  # ── E2E DESATIVADO em 26/07/2026 — precisa de trabalho dedicado ─────────────
+  # ── E2E REATIVADO em 27/07/2026 ─────────────────────────────────────────────
   #
-  # Este job nunca havia rodado: dependia de backend-tests, vermelho desde
-  # 02/03/2026 (134 runs). Quando o backend ficou verde, ele executou pela
-  # primeira vez e revelou dois problemas em sequencia:
+  # Ficou desativado por um dia. Ao rodar pela primeira vez na historia do repo
+  # (dependia de backend-tests, vermelho desde 02/03/2026), deu
+  # `3 failed, 8 passed, 8 errors`. As quatro causas, todas ja corrigidas:
   #
   #   1. `.env` ausente — o compose morria antes de subir container.
-  #      CORRIGIDO (passo "Gerar .env descartavel", mantido abaixo).
-  #   2. Playwright/chromium: `3 failed, 8 passed, 8 errors` em
-  #      e2e/tests/test_frontend.py. Oito testes [chromium] dao ERROR na
-  #      inicializacao do browser; parte da suite ja passa.
+  #      Corrigido pelo passo "Gerar .env descartavel", abaixo.
   #
-  # POR QUE DESATIVAR EM VEZ DE INSISTIR: os tres jobs que protegem o codigo
-  # (Backend Tests, Frontend Lint & Build, Security Tests) estao VERDES pela
-  # primeira vez. Manter um job historicamente inexecutavel bloqueando o CI
-  # recria exatamente o problema que acabamos de resolver — vermelho permanente
-  # que mascara regressao real. O E2E volta quando alguem puder trabalhar o
-  # ambiente de browser com atencao, nao de passagem.
+  #   2. Os 8 ERRORs de [chromium] NAO eram flakiness de browser: e2e/
+  #      requirements.txt nao fixava `playwright`, entao o pip instalava a
+  #      ultima versao (1.61.0) dentro de uma imagem base v1.49.1-noble. Os
+  #      browsers vem embutidos por REVISAO de build — a imagem traz a 1148, a
+  #      1.61 procura a 1228:
+  #        "Executable doesn't exist at .../chromium_headless_shell-1228/..."
+  #      Nenhum dos 8 chegava a fazer asserção (2,67s de suite inteira).
+  #      Corrigido com pin em e2e/requirements.txt + rede de seguranca no
+  #      Dockerfile. Com o browser subindo, os 8 passam.
   #
-  # Para reativar: trocar `if: false` pela condicao original
-  # `github.ref == 'refs/heads/main'`.
+  #   3+4. As 3 falhas de API vinham de os testes suporem um backend de
+  #      desenvolvimento, mas o compose sobe o de PRODUCAO (correto — o E2E
+  #      deve testar o artefato que vai pro ar):
+  #        - /openapi.json e 404 em producao por decisao (main.py:98-100)
+  #        - CORS: o teste mandava Origin http://localhost:5173, mas o backend
+  #          recebe CORS_ORIGINS=...,http://frontend,... -> Starlette devolvia
+  #          400. Agora a origem vem de BASE_URL.
+  #      Os testes passaram a perguntar o ambiente ao proprio backend
+  #      (fixture `backend_env` em e2e/tests/conftest.py).
+  #
+  # VALIDADO ANTES DE LIGAR, nao depois: rodado via workflow_dispatch na branch
+  # claude/zen-satoshi-804235 ate ficar verde. A condicao aceita disparo manual
+  # justamente para que a proxima mudanca no E2E possa ser provada numa branch
+  # em vez de testada em main.
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
     needs: [backend-tests, frontend-lint, security-tests]
-    if: false  # era: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
 
     steps:
       - uses: actions/checkout@v4
@@ -137,18 +153,43 @@ jobs:
       # Este job nunca havia rodado (dependia de backend-tests, vermelho desde
       # 02/03/2026), entao a falha so apareceu agora que o backend ficou verde.
       # Todos os valores abaixo sao DESCARTAVEIS e existem so dentro do runner.
+      #
+      # ATENCAO A PRECEDENCIA, que ja gerou confusao: o bloco `environment:` do
+      # docker-compose.yml VENCE o `env_file:`. Entao as chaves que o compose
+      # tambem define (ENVIRONMENT, DATABASE_URL, REDIS_URL, CORS_ORIGINS,
+      # FRONTEND_URL) sao ignoradas aqui — o backend sobe como `production` por
+      # mais que este arquivo diga `test`. Prova no log do run 30226049876:
+      # este passo escreveu CORS_ORIGINS=http://localhost:5173 e o backend
+      # logou ['http://localhost', ..., 'http://frontend', ...].
+      #
+      # Este arquivo serve, na pratica, para duas coisas:
+      #   1. existir, para o `env_file:` nao matar o compose;
+      #   2. fornecer o que o compose NAO define — JWT_SECRET e OPENAI_API_KEY;
+      #      e alimentar a interpolacao ${POSTGRES_*} do proprio compose.
       - name: Gerar .env descartavel para o compose
         run: |
           cat > .env <<'ENVEOF'
-          ENVIRONMENT=test
+          # --- lidos de verdade pelo backend (o compose nao os define) ---
           JWT_SECRET=ci-test-secret-key-do-not-use-in-prod
-          DATABASE_URL=postgresql://nexus:nexus@postgres:5432/nexus
-          REDIS_URL=redis://redis:6379/0
           OPENAI_API_KEY=sk-ci-dummy-nao-e-uma-chave-real
-          FRONTEND_URL=http://localhost:5173
-          CORS_ORIGINS=http://localhost:5173
+
+          # --- interpolacao ${...} do docker-compose.yml ---
+          # Estes SIM valem: o compose monta o DATABASE_URL do backend a partir
+          # deles. Precisam bater com o servico postgres, senao o backend nao
+          # conecta. O default do compose e nexus_secret (nao "nexus").
+          POSTGRES_USER=nexus
+          POSTGRES_PASSWORD=nexus_secret
+          POSTGRES_DB=nexus
+
+          # --- sobrepostos pelo `environment:` do compose; aqui so por clareza
+          # e para quem rodar o compose sem o bloco environment ---
+          ENVIRONMENT=production
+          DATABASE_URL=postgresql://nexus:nexus_secret@postgres:5432/nexus
+          REDIS_URL=redis://redis:6379/0
+          CORS_ORIGINS=http://localhost,http://localhost:80,http://frontend,http://frontend:80
+          FRONTEND_URL=http://localhost
           ENVEOF
-          echo "variaveis geradas: $(grep -c '=' .env)"
+          echo "variaveis geradas: $(grep -cE '^[A-Z]' .env)"
 
       - name: Build and run E2E tests
         env:
