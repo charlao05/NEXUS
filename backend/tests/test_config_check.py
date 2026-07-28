@@ -135,6 +135,48 @@ def test_valor_real_nao_e_confundido_com_placeholder(ambiente_limpo):
 
 
 # ==========================================================================
+# 5b. Automacao web — a falha de build nao pode ficar muda
+# ==========================================================================
+def test_browser_ausente_e_detectado(monkeypatch, tmp_path):
+    """REGRESSAO: `playwright install chromium || true` engole o erro no build.
+
+    Sem esta deteccao, o app sobe verde, o router carrega (o PACOTE playwright
+    importa normalmente) e a automacao so quebra no PRIMEIRO USO do usuario,
+    com "Executable doesn't exist at /ms-playwright/...".
+    """
+    from app.core import config_check as cc
+
+    # Aponta o Playwright para um diretorio vazio: simula o build que falhou.
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    monkeypatch.setattr(cc.os.path, "isdir", lambda p: str(p) == str(tmp_path))
+
+    ok, motivo = cc.browser_disponivel(forcar=True)
+    assert ok is False, "diretorio sem chromium deveria acusar indisponibilidade"
+    assert "chromium" in motivo.lower()
+
+
+def test_browser_presente_e_reconhecido(monkeypatch, tmp_path):
+    from app.core import config_check as cc
+
+    (tmp_path / "chromium-1148").mkdir()
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+
+    ok, motivo = cc.browser_disponivel(forcar=True)
+    assert ok is True, motivo
+
+
+def test_health_reporta_automacao_web(ambiente_limpo):
+    """O estado da automacao precisa estar VISIVEL no /health."""
+    from app.core import config_check as cc
+
+    cc.browser_disponivel(forcar=True)  # limpa cache de outros testes
+    saude = resumo_para_health()
+    assert "automacao_web" in saude, "o /health precisa reportar a automacao web"
+    assert "disponivel" in saude["automacao_web"]
+    assert "motivo" in saude["automacao_web"]
+
+
+# ==========================================================================
 # 6. O /health nao pode vazar secret
 # ==========================================================================
 def test_health_nao_expoe_valores(ambiente_limpo):

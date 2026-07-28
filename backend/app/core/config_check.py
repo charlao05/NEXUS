@@ -117,10 +117,12 @@ ENVS: tuple[EnvSpec, ...] = (
         placeholders=("sk-cole", "cole_aqui"),
     ),
     EnvSpec(
-        "TAX_RATE", DEGRADADA,
+        "TAX_REGIME", DEGRADADA,
         "/api/admin/margin e /margin/all respondem 503 em producao (por decisao: "
-        "margem sem aliquota nao e margem).",
-        "app/api/admin.py::_require_tax_configured",
+        "margem sem tributacao definida nao e margem). Valores: mei | "
+        "simples_anexo_iii | simples_anexo_v. NOTA: no MEI nao existe aliquota "
+        "- o imposto e DAS FIXO -, por isso TAX_RATE nao e exigido neste regime.",
+        "app/core/tributacao.py; app/api/admin.py::_require_tax_configured",
     ),
     EnvSpec(
         "USD_BRL_RATE", SILENCIOSA,
@@ -216,7 +218,83 @@ def validar_no_startup() -> dict:
 
     if estado["ok"]:
         logger.info("[CONFIG-OK] nenhuma variavel critica ou degradada ausente")
+
+    # Automacao web: falha de build NAO pode ficar muda ate o primeiro uso.
+    ok_browser, motivo_browser = browser_disponivel()
+    if not ok_browser:
+        logger.critical(
+            "[CONFIG] AUTOMACAO WEB INDISPONIVEL: %s. As rotas de "
+            "/api/agents/automation vao falhar quando o usuario tentar usar.",
+            motivo_browser,
+        )
+
     return estado
+
+
+# ---------------------------------------------------------------------------
+# Automacao web (Playwright)
+# ---------------------------------------------------------------------------
+#
+# POR QUE ISTO EXISTE: render.yaml instala o browser com
+#     playwright install chromium || true
+# O `|| true` e deliberado — impede que uma falha do browser derrube o deploy
+# inteiro. O efeito colateral e que, se o download falhar, o app sobe verde, o
+# router carrega (o PACOTE playwright esta no requirements e importa bem) e a
+# automacao so quebra no PRIMEIRO USO REAL do usuario, com
+# "Executable doesn't exist at /ms-playwright/...".
+#
+# Esta checagem torna esse estado visivel no boot e no /health, sem remover o
+# `|| true` (que continua sendo o comportamento certo para o build).
+#
+# Verifica apenas o FILESYSTEM — nao inicia o browser, que custaria segundos a
+# cada health check.
+
+_browser_cache: tuple[bool, str] | None = None
+
+
+def browser_disponivel(forcar: bool = False) -> tuple[bool, str]:
+    """O Playwright consegue abrir um browser AGORA? Retorna (ok, motivo).
+
+    Resultado e cacheado: o binario nao aparece nem some durante a vida do
+    processo. Passe forcar=True para reavaliar (usado em teste).
+    """
+    global _browser_cache
+    if _browser_cache is not None and not forcar:
+        return _browser_cache
+
+    resultado = _checar_browser()
+    _browser_cache = resultado
+    return resultado
+
+
+def _checar_browser() -> tuple[bool, str]:
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        return False, "pacote 'playwright' nao instalado"
+
+    import glob
+
+    # Locais onde o Playwright guarda os browsers, em ordem de precedencia.
+    candidatos = []
+    if os.getenv("PLAYWRIGHT_BROWSERS_PATH"):
+        candidatos.append(os.environ["PLAYWRIGHT_BROWSERS_PATH"])
+    candidatos += [
+        "/ms-playwright",                                   # imagem oficial
+        os.path.expanduser("~/.cache/ms-playwright"),        # Linux (Render)
+        os.path.expanduser("~/AppData/Local/ms-playwright"),  # Windows
+    ]
+
+    for base in candidatos:
+        if not base or not os.path.isdir(base):
+            continue
+        if glob.glob(os.path.join(base, "chromium*")):
+            return True, f"chromium encontrado em {base}"
+
+    return False, (
+        "binario do chromium ausente — 'playwright install chromium' "
+        "provavelmente falhou no build (render.yaml usa '|| true', que engole o erro)"
+    )
 
 
 def resumo_para_health() -> dict:
@@ -236,4 +314,11 @@ def resumo_para_health() -> dict:
         estado["status"] = "ok_with_warnings"
     else:
         estado["status"] = "ok"
+
+    # Automacao web — visivel aqui em vez de descoberta pelo usuario.
+    ok_browser, motivo_browser = browser_disponivel()
+    estado["automacao_web"] = {
+        "disponivel": ok_browser,
+        "motivo": motivo_browser,
+    }
     return estado

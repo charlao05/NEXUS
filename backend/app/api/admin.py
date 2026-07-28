@@ -883,6 +883,24 @@ def _tax_rate_configured() -> float | None:
         return None
 
 
+def _tributacao_configurada() -> bool:
+    """A tributação está definida de ALGUMA forma válida?
+
+    Duas formas contam, e a distinção importa: no MEI **não existe alíquota** —
+    o imposto é um valor fixo. Exigir TAX_RATE de um MEI seria pedir um número
+    que não existe no regime dele.
+
+      TAX_REGIME=mei                 -> DAS fixo, sem alíquota    ✔
+      TAX_REGIME=simples_anexo_iii/v -> alíquota (TAX_RATE ou padrão do anexo) ✔
+      só TAX_RATE                    -> compatibilidade com o que já existia ✔
+    """
+    from app.core.tributacao import regime_atual, REGIME_NENHUM
+
+    if regime_atual() != REGIME_NENHUM:
+        return True
+    return _tax_rate_configured() is not None
+
+
 def _require_tax_configured() -> None:
     """Em PRODUÇÃO, recusa calcular margem sem alíquota. Em dev/test, permite.
 
@@ -894,7 +912,7 @@ def _require_tax_configured() -> None:
     Em dev/test a rota responde normalmente, com margin_basis="PRE_TAX" — senão
     o desenvolvimento fica refém de uma configuração fiscal.
     """
-    if _is_production() and _tax_rate_configured() is None:
+    if _is_production() and not _tributacao_configurada():
         raise HTTPException(
             status_code=503,
             detail={
@@ -920,22 +938,47 @@ def _calc_tax(revenue_brl: float) -> tuple[float, str]:
     payload declare explicitamente que o imposto não está sendo considerado,
     em vez de silenciosamente omiti-lo.
 
-    Configurar em: TAX_RATE (ex.: "0.06" para 6% do Simples anexo III).
+    CORRIGIDO 27/07/2026 — o cálculo assumia SEMPRE percentual sobre a receita,
+    o que modela o Simples Nacional. **MEI paga DAS FIXO**: R$ 86,05/mês em
+    serviços, igual faturando R$ 500 ou R$ 6.000. Tratar valor fixo como
+    percentual distorce o unit economics, porque muda a NATUREZA do custo:
+
+        percentual -> variável -> DENTRO da margem de contribuição
+        fixo       -> fixo     -> FORA dela
+
+    Agora o regime vem de `app/core/tributacao.py` (TAX_REGIME), que também diz
+    se o valor entra ou não na margem. TAX_RATE continua valendo para os
+    regimes Simples.
     """
+    from app.core.tributacao import calcular_imposto, REGIME_NENHUM
+
+    resultado = calcular_imposto(revenue_brl or 0.0)
+
+    if resultado["regime"] == REGIME_NENHUM:
+        # Compatibilidade: TAX_RATE sozinho (sem TAX_REGIME) segue funcionando
+        # como percentual, para não quebrar quem já configurou assim.
+        raw = os.getenv("TAX_RATE", "").strip()
+        if not raw:
+            return 0.0, "nao_configurado"
+        if not revenue_brl or revenue_brl <= 0:
+            return 0.0, "sem_receita"
+        try:
+            rate = float(raw)
+        except ValueError:
+            logger.warning("TAX_RATE inválido (%r) — imposto não aplicado", raw)
+            return 0.0, "invalido"
+        if rate < 0 or rate > 1:
+            logger.warning("TAX_RATE fora de 0..1 (%r) — imposto não aplicado", rate)
+            return 0.0, "invalido"
+        return round(revenue_brl * rate, 2), f"aliquota_{rate * 100:.2f}pct"
+
+    # MEI: valor fixo, independente de haver receita no período.
+    if not resultado["entra_na_margem_de_contribuicao"]:
+        return float(resultado["valor_brl"]), f"{resultado['origem']}_FIXO"
+
     if not revenue_brl or revenue_brl <= 0:
         return 0.0, "sem_receita"
-    raw = os.getenv("TAX_RATE", "").strip()
-    if not raw:
-        return 0.0, "nao_configurado"
-    try:
-        rate = float(raw)
-    except ValueError:
-        logger.warning("TAX_RATE inválido (%r) — imposto não aplicado", raw)
-        return 0.0, "invalido"
-    if rate < 0 or rate > 1:
-        logger.warning("TAX_RATE fora de 0..1 (%r) — imposto não aplicado", rate)
-        return 0.0, "invalido"
-    return round(revenue_brl * rate, 2), f"aliquota_{rate * 100:.2f}pct"
+    return float(resultado["valor_brl"]), resultado["origem"]
 
 
 def _resolve_user_revenue(db, user_id: int) -> tuple[float, str]:
