@@ -88,6 +88,38 @@ ENVS: tuple[EnvSpec, ...] = (
         "app/api/auth.py:167-175",
         placeholders=("troque", "changeme", "your-secret"),
     ),
+    # ADICIONADA 29/07/2026 — LACUNA DO CHECKLIST, encontrada do pior jeito.
+    # Esta lista tinha STRIPE_WEBHOOK_SECRET (receber eventos) e NAO tinha a
+    # chave que COBRA. Em 28/07 23:05 UTC o Sentry acusou AuthenticationError
+    # em create_checkout: o checkout estava quebrado em producao e o /health
+    # dizia que estava tudo bem.
+    EnvSpec(
+        "STRIPE_SECRET_KEY", DEGRADADA,
+        "NINGUEM CONSEGUE ASSINAR. /api/auth/checkout devolve 503 e o frontend "
+        "mostra 'Sistema de pagamento em manutencao' (Pricing.tsx:182-183) — "
+        "mensagem honesta para o usuario que ESCONDE a causa do dono. "
+        "ATENCAO: presenca nao basta; ver stripe_autentica().",
+        "app/api/auth.py:1260-1265; app/api/billing.py",
+        placeholders=("sk_cole", "cole_aqui", "sk_test_51…", "sua_chave"),
+    ),
+    EnvSpec(
+        "STRIPE_PRICE_ESSENCIAL", DEGRADADA,
+        "plano Essencial nao pode ser assinado (price_id vazio no checkout).",
+        "app/api/billing.py:21",
+        placeholders=("price_cole", "cole_aqui"),
+    ),
+    EnvSpec(
+        "STRIPE_PRICE_PROFISSIONAL", DEGRADADA,
+        "plano Profissional nao pode ser assinado.",
+        "app/api/billing.py:27",
+        placeholders=("price_cole", "cole_aqui"),
+    ),
+    EnvSpec(
+        "STRIPE_PRICE_COMPLETO", DEGRADADA,
+        "plano Completo nao pode ser assinado.",
+        "app/api/billing.py:33",
+        placeholders=("price_cole", "cole_aqui"),
+    ),
     EnvSpec(
         "STRIPE_WEBHOOK_SECRET", DEGRADADA,
         "webhook RECUSA eventos da Stripe em producao (fail-closed). Pagamentos, "
@@ -228,6 +260,17 @@ def validar_no_startup() -> dict:
             motivo_browser,
         )
 
+    # Stripe: se a chave nao autentica, NINGUEM consegue assinar — e o unico
+    # sinal hoje seria um cliente clicando em "Assinar" e vendo o banner de
+    # manutencao. Descobrir por alerta e melhor que descobrir por cliente.
+    ok_stripe, motivo_stripe = stripe_autentica()
+    if not ok_stripe:
+        logger.critical(
+            "[CONFIG] STRIPE NAO AUTENTICA: %s. O checkout vai responder 503 e "
+            "a pagina de planos vai mostrar 'Sistema de pagamento em manutencao'.",
+            motivo_stripe,
+        )
+
     return estado
 
 
@@ -248,6 +291,79 @@ def validar_no_startup() -> dict:
 #
 # Verifica apenas o FILESYSTEM — nao inicia o browser, que custaria segundos a
 # cada health check.
+
+# ---------------------------------------------------------------------------
+# Stripe: a chave AUTENTICA? (presenca nao basta)
+# ---------------------------------------------------------------------------
+#
+# POR QUE ISTO EXISTE (29/07/2026): em 28/07 23:05 UTC o Sentry acusou
+#
+#     Stripe AuthenticationError — STRIPE_SECRET_KEY invalida ou ausente
+#     HTTPException: Stripe nao configurado corretamente (app.api.auth.create_checkout)
+#
+# A variavel ESTAVA definida no Render. O checklist de presenca teria dito
+# "tudo ok" — e o checkout estava quebrado. Quem descobriu foi um clique em
+# "Assinar", ou seja, seria um CLIENTE descobrindo.
+#
+# Uma chave pode existir e nao autenticar por varios motivos: revogada,
+# truncada, com espaco, de outra conta, ou de um modo diferente do resto da
+# configuracao. Nenhum deles e visivel olhando se a env "existe".
+#
+# Mesma logica de browser_disponivel(), que provou que a automacao web estava
+# morta: testar o EFEITO, nao a declaracao.
+
+_stripe_cache: tuple[bool, str] | None = None
+
+
+def stripe_autentica(forcar: bool = False) -> tuple[bool, str]:
+    """A STRIPE_SECRET_KEY autentica de verdade? Retorna (ok, motivo).
+
+    Faz UMA chamada somente-leitura (Account.retrieve) e cacheia. Nunca lanca:
+    quem consome e um health check, e derrubar o /health por causa do Stripe
+    seria trocar um problema por outro pior.
+
+    Distingue chave ruim de erro de rede DE PROPOSITO: reportar um blip de rede
+    como "chave invalida" gera alarme falso, e alarme falso destroi a confianca
+    no alerta — que e justamente o que faz ninguem mais olhar.
+    """
+    global _stripe_cache
+    if _stripe_cache is not None and not forcar:
+        return _stripe_cache
+
+    resultado = _checar_stripe()
+    _stripe_cache = resultado
+    return resultado
+
+
+def _checar_stripe() -> tuple[bool, str]:
+    chave = (os.getenv("STRIPE_SECRET_KEY", "") or "").strip()
+    if not chave:
+        return False, "STRIPE_SECRET_KEY ausente"
+
+    try:
+        import stripe
+    except ImportError:
+        return False, "pacote 'stripe' nao instalado"
+
+    modo = "live" if chave.startswith("sk_live_") else (
+        "test" if chave.startswith("sk_test_") else "prefixo_desconhecido")
+
+    try:
+        stripe.api_key = chave
+        stripe.Account.retrieve()
+        return True, f"chave valida (modo {modo})"
+    except Exception as e:  # noqa: BLE001
+        nome = type(e).__name__
+        if "Authentication" in nome:
+            return False, (
+                f"chave REJEITADA pelo Stripe (modo aparente: {modo}) — "
+                "revogada, truncada ou de outra conta. Ninguem consegue assinar."
+            )
+        if "APIConnection" in nome or "Timeout" in nome:
+            # NAO e problema de chave. Nao alarmar como se fosse.
+            return True, f"indeterminado: falha de rede ao verificar ({nome})"
+        return False, f"erro ao verificar a chave: {nome}"
+
 
 _browser_cache: tuple[bool, str] | None = None
 
@@ -320,5 +436,13 @@ def resumo_para_health() -> dict:
     estado["automacao_web"] = {
         "disponivel": ok_browser,
         "motivo": motivo_browser,
+    }
+
+    # Stripe — a chave AUTENTICA? Sem isto, o dono so descobre que o checkout
+    # esta quebrado quando um cliente tenta pagar e nao consegue.
+    ok_stripe, motivo_stripe = stripe_autentica()
+    estado["stripe"] = {
+        "autentica": ok_stripe,
+        "motivo": motivo_stripe,
     }
     return estado

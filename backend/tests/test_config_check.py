@@ -177,6 +177,128 @@ def test_health_reporta_automacao_web(ambiente_limpo):
 
 
 # ==========================================================================
+# 5c. Stripe — presenca da chave NAO basta
+# ==========================================================================
+#
+# INCIDENTE REAL (28/07/2026 23:05 UTC): STRIPE_SECRET_KEY estava DEFINIDA no
+# Render e o Stripe a rejeitava. O checkout devolvia 503, a pagina de planos
+# mostrava "Sistema de pagamento em manutencao" e o /health dizia que estava
+# tudo bem. Quem descobriu foi um clique em "Assinar" — ou seja, seria um
+# cliente descobrindo.
+#
+# Estes testes protegem a diferenca entre "a env existe" e "a chave funciona".
+
+def test_chave_ausente_e_detectada(monkeypatch):
+    from app.core import config_check as cc
+
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+    ok, motivo = cc.stripe_autentica(forcar=True)
+    assert ok is False
+    assert "ausente" in motivo.lower()
+
+
+def test_chave_presente_mas_rejeitada_e_detectada(monkeypatch):
+    """O CASO DO INCIDENTE: env definida, Stripe recusa."""
+    from app.core import config_check as cc
+
+    class _AuthenticationError(Exception):
+        pass
+
+    class _FakeAccount:
+        @staticmethod
+        def retrieve():
+            raise _AuthenticationError("Invalid API Key provided")
+
+    class _FakeStripe:
+        api_key = None
+        Account = _FakeAccount
+
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_parece_valida_mas_nao_e")
+    monkeypatch.setitem(sys.modules, "stripe", _FakeStripe)
+
+    ok, motivo = cc.stripe_autentica(forcar=True)
+    assert ok is False, "chave rejeitada pelo Stripe tem de acusar"
+    assert "rejeitada" in motivo.lower()
+    assert "assinar" in motivo.lower(), "o motivo precisa dizer o IMPACTO"
+
+
+def test_chave_valida_nao_acusa(monkeypatch):
+    from app.core import config_check as cc
+
+    class _FakeAccount:
+        @staticmethod
+        def retrieve():
+            return {"id": "acct_fake"}
+
+    class _FakeStripe:
+        api_key = None
+        Account = _FakeAccount
+
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_chave_boa")
+    monkeypatch.setitem(sys.modules, "stripe", _FakeStripe)
+
+    ok, motivo = cc.stripe_autentica(forcar=True)
+    assert ok is True, motivo
+    assert "live" in motivo
+
+
+def test_falha_de_rede_nao_vira_alarme_falso(monkeypatch):
+    """Blip de rede NAO pode ser reportado como chave invalida.
+
+    Alarme falso destroi a confianca no alerta — e alerta em que ninguem
+    confia e igual a nao ter alerta. Foi assim que o CI ficou 134 runs
+    vermelho sem ninguem olhar.
+    """
+    from app.core import config_check as cc
+
+    class _APIConnectionError(Exception):
+        pass
+
+    class _FakeAccount:
+        @staticmethod
+        def retrieve():
+            raise _APIConnectionError("connection dropped")
+
+    class _FakeStripe:
+        api_key = None
+        Account = _FakeAccount
+
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_chave_boa")
+    monkeypatch.setitem(sys.modules, "stripe", _FakeStripe)
+
+    ok, motivo = cc.stripe_autentica(forcar=True)
+    assert ok is True, "falha de rede nao pode ser tratada como chave invalida"
+    assert "indeterminado" in motivo.lower()
+
+
+def test_health_reporta_stripe(ambiente_limpo):
+    from app.core import config_check as cc
+
+    cc.stripe_autentica(forcar=True)
+    saude = resumo_para_health()
+    assert "stripe" in saude, "o /health precisa reportar o estado do Stripe"
+    assert "autentica" in saude["stripe"]
+    assert "motivo" in saude["stripe"]
+
+
+def test_envs_de_cobranca_estao_no_checklist():
+    """REGRESSAO da lacuna: faltavam a chave que COBRA e os 3 price IDs.
+
+    O checklist tinha STRIPE_WEBHOOK_SECRET (receber eventos) e nao tinha
+    STRIPE_SECRET_KEY (cobrar). Sem cobranca nao ha negocio.
+    """
+    nomes = {s.nome for s in ENVS}
+    obrigatorias = {
+        "STRIPE_SECRET_KEY",
+        "STRIPE_PRICE_ESSENCIAL",
+        "STRIPE_PRICE_PROFISSIONAL",
+        "STRIPE_PRICE_COMPLETO",
+    }
+    faltando = obrigatorias - nomes
+    assert not faltando, f"envs de cobranca fora do checklist: {sorted(faltando)}"
+
+
+# ==========================================================================
 # 6. O /health nao pode vazar secret
 # ==========================================================================
 def test_health_nao_expoe_valores(ambiente_limpo):
