@@ -68,6 +68,31 @@ services:
         sync: false
       - key: TELEGRAM_ADMIN_CHAT_ID
         sync: false
+      # ── Declaradas em 30/07/2026 ────────────────────────────────────────
+      # Todas existiam SO no painel do Render. Um reapply do blueprint
+      # devolveria o servico ao estado quebrado — foi assim que o checkout
+      # ficou fora do ar. sync:false mantem o VALOR apenas no painel; aqui
+      # fica so a declaracao de que a variavel e necessaria.
+      - key: STRIPE_PRICE_ESSENCIAL
+        sync: false
+      - key: STRIPE_PRICE_PROFISSIONAL
+        sync: false
+      - key: STRIPE_PRICE_COMPLETO
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      # Regime tributario — MEI paga DAS FIXO, nao percentual (ver
+      # app/core/tributacao.py). Sem isto, /margin responde 503 em producao.
+      - key: TAX_REGIME
+        sync: false
+      - key: MEI_ATIVIDADE
+        sync: false
 
   # -- Frontend SPA --
   - type: web

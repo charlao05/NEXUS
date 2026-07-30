@@ -15,6 +15,12 @@
 _test_stripe.py
 audit_output.txt
 
+# ARTEFATOS DO E2E
+# O docker-compose.yml monta ./e2e/results no container (volume) e o pytest
+# escreve results/report.html ali. Rodar a suite localmente sujava a arvore com
+# um diretorio nao rastreado.
+e2e/results/
+
 # DATABASE FILES
 *.db.empty_backup
 backend/data/nexus.db

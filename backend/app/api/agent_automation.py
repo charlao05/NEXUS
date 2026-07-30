@@ -1120,12 +1120,47 @@ async def start_automation(
     return await _start_automation_core(request, user_id, current_user=current_user)
 
 
+def _exigir_browser() -> None:
+    """Recusa a automação se o navegador não estiver instalado.
+
+    ADICIONADO 30/07/2026. Sem isto o Playwright estourava
+    "Executable doesn't exist at /ms-playwright/..." e o erro cru chegava ao
+    usuário — em produção, onde o chromium NÃO ESTÁ instalado (medido:
+    /health -> config.automacao_web.disponivel = false).
+
+    Causa: render.yaml:12 usa `playwright install chromium || true`. O
+    `|| true` e correto — nao derrubar o deploy inteiro por causa do browser —
+    mas fazia a falha so aparecer no primeiro uso real.
+
+    Falhar com mensagem honesta e aceitavel; entregar stack trace nao e.
+    """
+    from app.core.config_check import browser_disponivel
+
+    ok, motivo = browser_disponivel()
+    if not ok:
+        logger.error("Automação recusada — navegador indisponível: %s", motivo)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "AUTOMACAO_WEB_INDISPONIVEL",
+                "message": (
+                    "A automação web está temporariamente indisponível neste "
+                    "ambiente. As demais funções do NEXUS seguem normais."
+                ),
+            },
+        )
+
+
 async def _start_automation_core(
     request: AutomationStartRequest,
     user_id: int,
     current_user: dict | None = None,
 ) -> AutomationStartResponse:
     """Core logic para iniciar automação — chamável tanto pelo endpoint quanto por agent_hub."""
+    # Antes de qualquer trabalho: da para executar isto? Recusar aqui evita
+    # consumir cota de automacao do usuario por algo que vai falhar.
+    _exigir_browser()
+
     # ── Freemium: verificar limite de automações do plano/trial ───────────
     # Se current_user não foi passado (chamada interna), monta dict mínimo;
     # check_automation_limit buscará created_at do DB pelo user_id.
@@ -1209,6 +1244,12 @@ async def approve_automation(
     current_user: dict = Depends(get_current_user),
 ) -> AutomationResultResponse:
     """Aprova e executa a automação, ou rejeita. Requer autenticação."""
+    # Este e o ponto que REALMENTE abre o navegador. Uma task pode ter sido
+    # criada quando o browser existia e ser aprovada depois de um deploy que o
+    # perdeu — por isso a checagem se repete aqui, e nao so no /start.
+    if request.approved:
+        _exigir_browser()
+
     task = _get_automation_task(request.task_id)
     # Verificar que o usuário é o dono da task
     if task and task.get("user_id") != current_user["user_id"]:
