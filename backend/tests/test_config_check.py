@@ -271,6 +271,100 @@ def test_falha_de_rede_nao_vira_alarme_falso(monkeypatch):
     assert "indeterminado" in motivo.lower()
 
 
+def test_chave_live_com_preco_de_test_e_detectado(monkeypatch):
+    """O INCIDENTE DE 29/07: migracao trocou a chave e esqueceu os precos.
+
+    Estado real em producao: STRIPE_SECRET_KEY=sk_live e STRIPE_PRICE_* ainda
+    apontando para precos de TEST. O /health dizia autentica=true (a CHAVE
+    autentica mesmo) e o checkout estava quebrado com "No such price".
+
+    Validar a chave NAO e validar a cobranca.
+    """
+    from app.core import config_check as cc
+
+    class _InvalidRequestError(Exception):
+        pass
+
+    class _FakePrice:
+        @staticmethod
+        def retrieve(pid):
+            # Chave live nao enxerga price de test.
+            raise _InvalidRequestError(f"No such price: '{pid}'")
+
+    class _FakeStripe:
+        api_key = None
+        Price = _FakePrice
+
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_chave_boa")
+    for n in ("STRIPE_PRICE_ESSENCIAL", "STRIPE_PRICE_PROFISSIONAL",
+              "STRIPE_PRICE_COMPLETO"):
+        monkeypatch.setenv(n, "price_de_test_qualquer")
+    monkeypatch.setitem(sys.modules, "stripe", _FakeStripe)
+
+    ok, motivo = cc.stripe_precos_coerentes(forcar=True)
+    assert ok is False, "chave live + price de test tem de acusar"
+    assert "No such price" in motivo or "nao existem nesse" in motivo
+    assert "live" in motivo, "o motivo precisa dizer em que modo a chave esta"
+
+
+def test_precos_coerentes_com_a_chave_passam(monkeypatch):
+    from app.core import config_check as cc
+
+    class _FakePrice:
+        @staticmethod
+        def retrieve(pid):
+            return {"id": pid, "livemode": True}
+
+    class _FakeStripe:
+        api_key = None
+        Price = _FakePrice
+
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_chave_boa")
+    for n in ("STRIPE_PRICE_ESSENCIAL", "STRIPE_PRICE_PROFISSIONAL",
+              "STRIPE_PRICE_COMPLETO"):
+        monkeypatch.setenv(n, "price_live_valido")
+    monkeypatch.setitem(sys.modules, "stripe", _FakeStripe)
+
+    ok, motivo = cc.stripe_precos_coerentes(forcar=True)
+    assert ok is True, motivo
+
+
+def test_cobranca_operacional_exige_chave_E_precos(monkeypatch):
+    """O campo que responde a pergunta que importa: da pra cobrar?"""
+    from app.core import config_check as cc
+
+    class _FakeAccount:
+        @staticmethod
+        def retrieve():
+            return {"id": "acct_fake"}
+
+    class _FakePrice:
+        @staticmethod
+        def retrieve(pid):
+            raise Exception("No such price")
+
+    class _FakeStripe:
+        api_key = None
+        Account = _FakeAccount
+        Price = _FakePrice
+
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_chave_boa")
+    for n in ("STRIPE_PRICE_ESSENCIAL", "STRIPE_PRICE_PROFISSIONAL",
+              "STRIPE_PRICE_COMPLETO"):
+        monkeypatch.setenv(n, "price_errado")
+    monkeypatch.setitem(sys.modules, "stripe", _FakeStripe)
+
+    cc.stripe_autentica(forcar=True)
+    cc.stripe_precos_coerentes(forcar=True)
+    saude = resumo_para_health()
+
+    assert saude["stripe"]["autentica"] is True, "a chave autentica de fato"
+    assert saude["stripe"]["precos_ok"] is False, "mas os precos nao servem"
+    assert saude["stripe"]["cobranca_operacional"] is False, (
+        "cobranca_operacional tem de ser False — chave boa com preco errado "
+        "NAO cobra ninguem")
+
+
 def test_health_reporta_stripe(ambiente_limpo):
     from app.core import config_check as cc
 

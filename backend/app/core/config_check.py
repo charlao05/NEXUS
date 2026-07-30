@@ -270,6 +270,16 @@ def validar_no_startup() -> dict:
             "a pagina de planos vai mostrar 'Sistema de pagamento em manutencao'.",
             motivo_stripe,
         )
+    else:
+        # Chave OK nao basta. So checa precos se a chave autentica — senao o
+        # erro seria consequencia, nao causa, e poluiria o diagnostico.
+        ok_precos, motivo_precos = stripe_precos_coerentes()
+        if not ok_precos:
+            logger.critical(
+                "[CONFIG] STRIPE: chave valida, mas os PRECOS nao: %s. "
+                "NINGUEM CONSEGUE ASSINAR, apesar de a chave autenticar.",
+                motivo_precos,
+            )
 
     return estado
 
@@ -365,6 +375,91 @@ def _checar_stripe() -> tuple[bool, str]:
         return False, f"erro ao verificar a chave: {nome}"
 
 
+# ---------------------------------------------------------------------------
+# Stripe: os PRICE IDs existem no MESMO MODO da chave?
+# ---------------------------------------------------------------------------
+#
+# POR QUE ISTO EXISTE (29/07/2026): validar a chave NAO e validar a cobranca.
+#
+# Numa migracao test -> live, a STRIPE_SECRET_KEY foi trocada para sk_live e os
+# tres STRIPE_PRICE_* ficaram apontando para precos de TEST. Resultado:
+#
+#   /health dizia  stripe.autentica: true   (a CHAVE autentica mesmo)
+#   e o checkout continuava quebrado        ("No such price" — o Stripe nao
+#                                             enxerga price de test com chave live)
+#
+# O sistema declarava saude total enquanto ninguem conseguia pagar. E o mesmo
+# erro de nivel do que ja aconteceu duas vezes aqui — presenca nao e validade,
+# e agora: chave valida nao e cobranca funcionando.
+#
+# Esta checagem tenta recuperar cada price ID configurado. Se a chave e o price
+# forem de modos diferentes, o Stripe devolve erro e nos sabemos ANTES do
+# cliente.
+
+_precos_cache: tuple[bool, str] | None = None
+
+_ENVS_PRECO = (
+    "STRIPE_PRICE_ESSENCIAL",
+    "STRIPE_PRICE_PROFISSIONAL",
+    "STRIPE_PRICE_COMPLETO",
+)
+
+
+def stripe_precos_coerentes(forcar: bool = False) -> tuple[bool, str]:
+    """Cada STRIPE_PRICE_* existe no mesmo modo da chave? Retorna (ok, motivo).
+
+    Cacheado e nunca lanca, pelas mesmas razoes de stripe_autentica().
+    """
+    global _precos_cache
+    if _precos_cache is not None and not forcar:
+        return _precos_cache
+
+    resultado = _checar_precos()
+    _precos_cache = resultado
+    return resultado
+
+
+def _checar_precos() -> tuple[bool, str]:
+    chave = (os.getenv("STRIPE_SECRET_KEY", "") or "").strip()
+    if not chave:
+        return False, "sem STRIPE_SECRET_KEY — nao da para verificar os precos"
+
+    try:
+        import stripe
+    except ImportError:
+        return False, "pacote 'stripe' nao instalado"
+
+    modo_chave = "live" if chave.startswith("sk_live_") else (
+        "test" if chave.startswith("sk_test_") else "desconhecido")
+
+    ausentes = [n for n in _ENVS_PRECO if not (os.getenv(n, "") or "").strip()]
+    if ausentes:
+        return False, f"price IDs nao configurados: {', '.join(ausentes)}"
+
+    stripe.api_key = chave
+    quebrados: list[str] = []
+
+    for nome in _ENVS_PRECO:
+        price_id = os.getenv(nome, "").strip()
+        try:
+            stripe.Price.retrieve(price_id)
+        except Exception as e:  # noqa: BLE001
+            tipo = type(e).__name__
+            if "APIConnection" in tipo or "Timeout" in tipo:
+                return True, f"indeterminado: falha de rede ao verificar ({tipo})"
+            quebrados.append(nome)
+
+    if quebrados:
+        return False, (
+            f"chave em modo {modo_chave}, mas estes price IDs nao existem nesse "
+            f"modo: {', '.join(quebrados)}. O checkout vai falhar com 'No such "
+            "price'. Causa tipica: migracao test->live que trocou a chave e "
+            "esqueceu os precos."
+        )
+
+    return True, f"{len(_ENVS_PRECO)} price IDs validos no modo {modo_chave}"
+
+
 _browser_cache: tuple[bool, str] | None = None
 
 
@@ -441,8 +536,14 @@ def resumo_para_health() -> dict:
     # Stripe — a chave AUTENTICA? Sem isto, o dono so descobre que o checkout
     # esta quebrado quando um cliente tenta pagar e nao consegue.
     ok_stripe, motivo_stripe = stripe_autentica()
+    ok_precos, motivo_precos = stripe_precos_coerentes()
     estado["stripe"] = {
         "autentica": ok_stripe,
         "motivo": motivo_stripe,
+        # Chave valida NAO significa cobranca funcionando: chave live com price
+        # de test da "No such price" no checkout. Ver stripe_precos_coerentes().
+        "precos_ok": ok_precos,
+        "precos_motivo": motivo_precos,
+        "cobranca_operacional": ok_stripe and ok_precos,
     }
     return estado
