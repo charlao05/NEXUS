@@ -260,8 +260,12 @@ async def analytics_dashboard(
 
         # ⚠️ ARMADILHA DESARMADA EM 30/07/2026 — leia antes de mexer.
         #
-        # Sete queries abaixo NÃO filtravam por user_id: teriam somado receita,
-        # despesa, pipeline, clientes e agendamentos de TODOS os usuários.
+        # DEZ queries abaixo NÃO filtravam por user_id: teriam somado receita,
+        # despesa, pipeline, clientes, agendamentos, os dois gráficos e — a
+        # pior — a barra de limite MEI (R$ 81.000) de TODOS os usuários.
+        # (Eu corrigi sete na primeira passada e afirmei "as 7 queries". Eram
+        # dez: as de gráfico e a de limite MEI ficaram de fora porque eu parei
+        # de ler no ponto em que a lista que eu mesmo montara terminava.)
         #
         # ALCANCE REAL: nenhum. `analytics_router` NUNCA é montado em main.py —
         # esta função é código morto e o defeito jamais foi exposto a ninguém.
@@ -371,7 +375,7 @@ async def analytics_dashboard(
             for row in agent_chats
         }
 
-        # 7) Receita por dia (últimos 30 dias) para gráfico
+        # 7) Receita por dia (últimos 30 dias) para gráfico — SÓ deste usuário
         thirty_days_ago = now - timedelta(days=30)
         daily_revenue = (
             db.query(
@@ -379,6 +383,7 @@ async def analytics_dashboard(
                 func.sum(Transaction.amount).label("total"),
             )
             .filter(
+                Transaction.user_id == user_id,
                 Transaction.type == "receita",
                 Transaction.date >= thirty_days_ago.date(),
             )
@@ -391,28 +396,44 @@ async def analytics_dashboard(
             for row in daily_revenue
         ]
 
-        # 8) Clientes novos por semana (últimas 8 semanas)
+        # 8) Clientes novos por semana (últimas 8 semanas) — SÓ deste usuário.
+        #
+        # Agrupamento feito em Python de propósito: a versão anterior usava
+        # func.strftime("%Y-%W", ...), que é função do SQLite. Em Postgres
+        # (Neon, que é o banco de produção) isso levanta ProgrammingError —
+        # ou seja, montar este router derrubaria a rota com 500 em produção
+        # enquanto passava nos testes locais em SQLite. São 8 semanas de
+        # registros; não há ganho em empurrar o agrupamento para o banco.
         eight_weeks_ago = now - timedelta(weeks=8)
-        new_clients_raw = (
-            db.query(
-                func.strftime("%Y-%W", Client.created_at).label("week"),
-                func.count(Client.id).label("count"),
+        novos_clientes = (
+            db.query(Client.created_at)
+            .filter(
+                Client.user_id == user_id,
+                Client.created_at >= eight_weeks_ago,
             )
-            .filter(Client.created_at >= eight_weeks_ago)
-            .group_by("week")
-            .order_by("week")
             .all()
         )
+        por_semana: dict[str, int] = {}
+        for (criado_em,) in novos_clientes:
+            if criado_em is None:
+                continue
+            ano, semana, _ = criado_em.isocalendar()
+            chave = f"{ano}-{semana:02d}"
+            por_semana[chave] = por_semana.get(chave, 0) + 1
         clients_chart = [
-            {"week": row.week, "count": row.count}
-            for row in new_clients_raw
+            {"week": semana, "count": qtd}
+            for semana, qtd in sorted(por_semana.items())
         ]
 
-        # 9) Limite MEI tracking
+        # 9) Limite MEI tracking — SÓ deste usuário.
+        # É a query mais sensível do payload: alimenta a barra de progresso dos
+        # R$ 81.000. Somando todos os tenants, o usuário veria a própria
+        # margem de desenquadramento estourada por faturamento alheio.
         year_start = now.replace(month=1, day=1).date()
         year_revenue = (
             db.query(func.coalesce(func.sum(Transaction.amount), 0))
             .filter(
+                Transaction.user_id == user_id,
                 Transaction.type == "receita",
                 Transaction.date >= year_start,
             )
