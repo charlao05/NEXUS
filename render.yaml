@@ -9,6 +9,13 @@ services:
     runtime: python
     # Schema criado no startup (runtime), não no build — ver main.py on_startup.
     # playwright é não-fatal: se falhar (Módulo B/browser), o build segue.
+    # PLAYWRIGHT_BROWSERS_PATH (envVars abaixo) manda o chromium para dentro
+    # do projeto. Sem isso ele ia para ~/.cache/ms-playwright, que NAO faz
+    # parte do artefato deployado — build e runtime sao containers distintos
+    # no Render, entao o browser era baixado e descartado. Era essa a causa
+    # de config.automacao_web.disponivel = false em producao.
+    # O `|| true` fica: nao derrubar o deploy inteiro por causa do browser.
+    # A falha continua VISIVEL via /health (config_check.browser_disponivel).
     buildCommand: pip install -r requirements.txt && (playwright install chromium || true)
     startCommand: gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers 1 --timeout 300
     healthCheckPath: /health
@@ -56,6 +63,10 @@ services:
         value: "10000"
       - key: ENVIRONMENT
         value: "production"
+      # CRITICO: o valor tem de ser IDENTICO no build e no runtime — ate uma
+      # barra final a mais conta como caminho diferente e o browser "some".
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "/opt/render/project/.cache/playwright"
       - key: NEXUS_VERSION
         value: "2.0.0"
       - key: PYTHONUNBUFFERED
