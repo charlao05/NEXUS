@@ -314,6 +314,30 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict[
         role = str(getattr(user, 'role', None) or 'user')
         plan = _normalize_plan(user.plan)
 
+        # ── Contexto de telemetria ──────────────────────────────────────────
+        # ADICIONADO 30/07/2026. Todo consumo de IA era gravado com user_id=0,
+        # e por isso o sistema sabia "foram geradas 122 propostas" mas não
+        # QUEM gerou cada uma. Sem essa atribuição, nada de limite mensal,
+        # franquia, degustação, cobrança por uso ou detecção de abuso é
+        # implementável — tudo depende de saber o dono do consumo.
+        #
+        # A infraestrutura já existia e ninguém a alimentava:
+        # openai_tracking.py:89 já cai para este ContextVar quando
+        # user_id_override não é passado. Faltava só popular.
+        #
+        # Este é o ponto certo: get_current_user é a dependency por onde passa
+        # TODO request autenticado (111 usos em 10 módulos). Uma linha aqui
+        # cobre proposta, áudio, visão, automação e chat de uma vez, sem tocar
+        # em nenhum call site.
+        #
+        # try/except deliberado: telemetria NUNCA pode derrubar autenticação.
+        # Perder uma medição é aceitável; impedir alguém de entrar não é.
+        try:
+            from utils.automation_logger import set_context
+            set_context(user_id=int(user.id), agent_type=None)
+        except Exception:  # noqa: BLE001
+            pass
+
         return {
             "user_id": user.id,
             "email": user.email,

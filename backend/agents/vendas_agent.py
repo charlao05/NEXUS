@@ -326,7 +326,8 @@ class VendasAgent:
                 "Estruture em: Contexto, Escopo, Entregáveis, Investimento, "
                 "Prazo, Próximos passos."
             )
-            texto = gerar_texto_simples(prompt, max_tokens=800, temperature=0.4)
+            texto = gerar_texto_simples(prompt, max_tokens=800, temperature=0.4,
+                                        agent_type="vendas")
             if texto and texto.strip():
                 texto_ia = texto.strip()
         except Exception as e:  # noqa: BLE001

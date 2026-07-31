@@ -258,15 +258,42 @@ async def analytics_dashboard(
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         week_ago = now - timedelta(days=7)
 
-        # 1) Total de clientes
-        total_clients = db.query(Client).count()
-        active_clients = db.query(Client).filter(Client.is_active == True).count()  # noqa: E712
+        # ⚠️ ARMADILHA DESARMADA EM 30/07/2026 — leia antes de mexer.
+        #
+        # Sete queries abaixo NÃO filtravam por user_id: teriam somado receita,
+        # despesa, pipeline, clientes e agendamentos de TODOS os usuários.
+        #
+        # ALCANCE REAL: nenhum. `analytics_router` NUNCA é montado em main.py —
+        # esta função é código morto e o defeito jamais foi exposto a ninguém.
+        # (Eu afirmei o contrário antes de verificar qual função servia
+        # /api/crm/dashboard. Servia crm_routes.py:397, que sempre isolou.)
+        #
+        # POR QUE CORRIGIR MESMO ASSIM: frontend/src/pages/Dashboard.tsx JÁ
+        # chama /api/analytics/dashboard. O gatilho está puxado — basta alguém
+        # "consertar o dashboard" montando o router para o vazamento nascer
+        # pronto, no mesmo commit. Ver AUDITORIA_NEXUS/20_CODIGO_MORTO.md.
+        #
+        # Não era arquitetura, era descuido: o user_id já estava na mão
+        # (linha 256) e era usado corretamente na query de ActivityLog abaixo.
+        #
+        # ⚠️ Não existe teste cobrindo ESTA função — rota morta não se alcança
+        # por HTTP. tests/test_isolamento_dashboard.py cobre a rota VIVA
+        # (/api/crm/dashboard) e trava quem tentar servi-la a partir daqui.
 
-        # 2) Receita do mês
+        # 1) Total de clientes — SÓ os deste usuário
+        total_clients = db.query(Client).filter(Client.user_id == user_id).count()
+        active_clients = (
+            db.query(Client)
+            .filter(Client.user_id == user_id, Client.is_active == True)  # noqa: E712
+            .count()
+        )
+
+        # 2) Receita do mês — SÓ deste usuário
         from sqlalchemy import func
         month_revenue = (
             db.query(func.coalesce(func.sum(Transaction.amount), 0))
             .filter(
+                Transaction.user_id == user_id,
                 Transaction.type == "receita",
                 Transaction.date >= month_start.date(),
             )
@@ -276,27 +303,38 @@ async def analytics_dashboard(
         month_expenses = (
             db.query(func.coalesce(func.sum(Transaction.amount), 0))
             .filter(
+                Transaction.user_id == user_id,
                 Transaction.type == "despesa",
                 Transaction.date >= month_start.date(),
             )
             .scalar()
         ) or 0
 
-        # 3) Pipeline aberto
+        # 3) Pipeline aberto — SÓ deste usuário.
+        # Opportunity NÃO tem user_id próprio: o isolamento é INDIRETO, via
+        # Client.user_id. Por isso o join é obrigatório — sem ele, soma o
+        # pipeline de todo mundo.
         open_pipeline = (
             db.query(func.coalesce(func.sum(Opportunity.value), 0))
-            .filter(Opportunity.is_won == None)  # noqa: E711
+            .join(Client, Opportunity.client_id == Client.id)
+            .filter(Client.user_id == user_id, Opportunity.is_won == None)  # noqa: E711
             .scalar()
         ) or 0
 
-        open_opps = db.query(Opportunity).filter(Opportunity.is_won == None).count()  # noqa: E711
+        open_opps = (
+            db.query(Opportunity)
+            .join(Client, Opportunity.client_id == Client.id)
+            .filter(Client.user_id == user_id, Opportunity.is_won == None)  # noqa: E711
+            .count()
+        )
 
-        # 4) Agendamentos hoje
+        # 4) Agendamentos hoje — SÓ deste usuário
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         today_end = today_start + timedelta(days=1)
         appointments_today = (
             db.query(Appointment)
             .filter(
+                Appointment.user_id == user_id,
                 Appointment.scheduled_at >= today_start,
                 Appointment.scheduled_at < today_end,
             )

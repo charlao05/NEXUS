@@ -113,7 +113,7 @@ def prepare_invoice_steps(sales_record: Dict[str, Any]) -> Dict[str, Any]:
     prompt = resumo + ". " + prompt
 
     try:
-        explicacao = gerar_texto_simples(prompt)
+        explicacao = gerar_texto_simples(prompt, agent_type="nota_fiscal")
     except Exception as e:
         logger.warning("LLM falhou ao gerar explicação: %s", e)
         explicacao = (

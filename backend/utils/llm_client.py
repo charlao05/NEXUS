@@ -175,13 +175,23 @@ REGRAS OBRIGATÓRIAS:
 
 
 def gerar_texto_simples(
-    prompt: str, max_tokens: int = 200, temperature: float = 0.2
+    prompt: str, max_tokens: int = 200, temperature: float = 0.2,
+    agent_type: str | None = None,
 ) -> str:
     """
     Gera um texto simples a partir de um prompt em linguagem natural.
 
     Uso: respostas curtas para atendimento, mensagens, resumos.
     Retorna o texto bruto retornado pelo modelo.
+
+    agent_type (30/07/2026): rotula o consumo pela FUNCIONALIDADE em vez do
+    transporte. Antes, todo custo passava por aqui como "llm_client_simple" —
+    o nome do canal, não do que foi feito. Com isso, a pergunta "quanto o
+    módulo de vendas custou este mês?" não tinha resposta, porque proposta
+    comercial, cobrança e nota fiscal caíam todas no mesmo balde.
+
+    O user_id NÃO precisa ser passado: track_openai_response já cai para o
+    ContextVar populado em get_current_user (auth.py).
     """
     logger.info("Chamando modelo OpenAI para gerar texto simples.")
     import time as _t
@@ -201,7 +211,10 @@ def gerar_texto_simples(
     )
     try:
         from helpers.openai_tracking import track_openai_response
-        track_openai_response(resposta, _model, _track_t0, agent_type_override="llm_client_simple")
+        track_openai_response(
+            resposta, _model, _track_t0,
+            agent_type_override=agent_type or "llm_client_simple",
+        )
     except Exception:
         pass
 

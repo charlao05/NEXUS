@@ -59,7 +59,7 @@ def generate_collection_message(invoice: Dict[str, Any]) -> str:
     prompt = f"Gere uma mensagem curta e educada para cobrar o cliente {client} sobre uma fatura de R$ {amount:.2f} vencida há {days_over} dias."
 
     try:
-        texto = gerar_texto_simples(prompt)
+        texto = gerar_texto_simples(prompt, agent_type="cobranca")
     except Exception as e:
         logger.warning("LLM falhou: %s", e)
         texto = f"Olá {client}, sua fatura de R$ {amount:.2f} está em atraso há {days_over} dias. Por favor, entre em contato para regularizar."
