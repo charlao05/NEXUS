@@ -302,18 +302,39 @@ async def clear_notifications(
 # ============================================================================
 
 def _generate_proactive_notifications(user_id: int) -> list[dict[str, Any]]:
-    """Gera notificações proativas baseadas no estado do banco."""
+    """Gera notificações proativas baseadas no estado do banco.
+
+    ⚠️ ISOLAMENTO ENTRE TENANTS — CORRIGIDO EM 01/08/2026 (E-041).
+
+    Quatro das seis regras abaixo NÃO filtravam por user_id: varriam a tabela
+    inteira e entregavam ao usuário o TÍTULO DO COMPROMISSO, o NOME DO CLIENTE
+    e o VALOR DEVIDO de outros usuários.
+
+    Alcance na época: o router está montado, então GET /api/notifications/stream
+    (:210) servia dado alheio a qualquer autenticado que a chamasse. O frontend
+    não abria o stream (só faz polling em /unread), então não vazava pela UI —
+    mas bastava alguém ligar o stream para virar vazamento pleno.
+
+    REGRA DESTA FUNÇÃO, daqui em diante: toda query que leia dado de negócio
+    filtra por user_id. Não existe notificação "global" — se um dia precisar
+    existir (aviso de manutenção, por exemplo), ela não sai daqui, sai de uma
+    função separada que não toca em tabela de cliente.
+
+    Regressão coberta por tests/test_isolamento_notificacoes.py, verificado por
+    mutação: removendo qualquer filtro abaixo, o teste falha.
+    """
     notifications: list[dict[str, Any]] = []
     db = SessionLocal()
     try:
         now = datetime.now(timezone.utc)
         today = now.date()
 
-        # 1) Agendamentos nas próximas 2 horas
+        # 1) Agendamentos nas próximas 2 horas — SÓ deste usuário
         two_hours = now + timedelta(hours=2)
         upcoming = (
             db.query(Appointment)
             .filter(
+                Appointment.user_id == user_id,
                 Appointment.scheduled_at >= now,
                 Appointment.scheduled_at <= two_hours,
                 Appointment.status == "scheduled",
@@ -321,7 +342,26 @@ def _generate_proactive_notifications(user_id: int) -> list[dict[str, Any]]:
             .all()
         )
         for apt in upcoming:
-            minutes_until = int((apt.scheduled_at - now).total_seconds() / 60)
+            # ⚠️ CRASH CORRIGIDO EM 01/08/2026, encontrado pelo teste desta
+            # correção — e não era o defeito que eu vim consertar.
+            #
+            # Appointment.scheduled_at é Column(DateTime) SEM timezone=True
+            # (models.py:533), então volta do banco NAIVE — em SQLite e em
+            # Postgres. `now` é aware. A subtração levantava TypeError
+            # ("can't subtract offset-naive and offset-aware datetimes") em
+            # TODA execução que encontrasse um compromisso.
+            #
+            # E o `except Exception` do fim desta função (:498) engolia o erro
+            # e devolvia lista VAZIA. Consequência: o motor inteiro de
+            # notificações — as 6 regras, não só esta — ficava mudo sempre que
+            # o usuário tivesse compromisso nas próximas 2 horas. Silenciosamente.
+            #
+            # Isto é crash, não regra de negócio: normalizar para UTC não muda
+            # o comportamento pretendido, destrava o que já deveria funcionar.
+            agendado = apt.scheduled_at
+            if agendado.tzinfo is None:
+                agendado = agendado.replace(tzinfo=timezone.utc)
+            minutes_until = int((agendado - now).total_seconds() / 60)
             notifications.append({
                 "type": "appointment_reminder",
                 "title": "Agendamento próximo",
@@ -330,10 +370,13 @@ def _generate_proactive_notifications(user_id: int) -> list[dict[str, Any]]:
                 "data": {"appointment_id": apt.id, "minutes_until": minutes_until},
             })
 
-        # 2) Faturas vencidas (atrasadas) — cobrança urgente
+        # 2) Faturas vencidas (atrasadas) — SÓ deste usuário.
+        # Esta é a mais sensível das quatro: a notificação carrega NOME DO
+        # CLIENTE e VALOR DEVIDO no texto (:353).
         overdue_invoices = (
             db.query(Invoice)
             .filter(
+                Invoice.user_id == user_id,
                 Invoice.status == "pending",
                 Invoice.due_date < today,
             )
@@ -345,7 +388,10 @@ def _generate_proactive_notifications(user_id: int) -> list[dict[str, Any]]:
                 days_late = (today - inv.due_date).days
                 # Buscar nome do cliente
                 from database.models import Client
-                client = db.query(Client).filter(Client.id == inv.client_id).first()
+                # user_id redundante (a fatura já é deste usuário), de propósito:
+                # torna a invariante LOCAL em vez de depender do filtro acima.
+                client = db.query(Client).filter(
+                    Client.id == inv.client_id, Client.user_id == user_id).first()
                 client_name = client.name if client else "Cliente"
                 notifications.append({
                     "type": "invoice_overdue",
@@ -370,10 +416,11 @@ def _generate_proactive_notifications(user_id: int) -> list[dict[str, Any]]:
                     "data": {"count": len(overdue_invoices), "total": total_overdue},
                 })
 
-        # 3) Faturas vencendo HOJE — lembrete de último dia
+        # 3) Faturas vencendo HOJE — SÓ deste usuário
         due_today = (
             db.query(Invoice)
             .filter(
+                Invoice.user_id == user_id,
                 Invoice.status == "pending",
                 Invoice.due_date == today,
             )
@@ -381,7 +428,10 @@ def _generate_proactive_notifications(user_id: int) -> list[dict[str, Any]]:
         )
         for inv in due_today:
             from database.models import Client
-            client = db.query(Client).filter(Client.id == inv.client_id).first()
+            # user_id redundante (a fatura já é deste usuário), de propósito:
+            # torna a invariante LOCAL em vez de depender do filtro acima.
+            client = db.query(Client).filter(
+                Client.id == inv.client_id, Client.user_id == user_id).first()
             client_name = client.name if client else "Cliente"
             notifications.append({
                 "type": "invoice_due_today",
@@ -397,11 +447,12 @@ def _generate_proactive_notifications(user_id: int) -> list[dict[str, Any]]:
                 },
             })
 
-        # 4) Faturas vencendo nos próximos 3 dias — antecipação
+        # 4) Faturas vencendo nos próximos 3 dias — SÓ deste usuário
         three_days = today + timedelta(days=3)
         upcoming_invoices = (
             db.query(Invoice)
             .filter(
+                Invoice.user_id == user_id,
                 Invoice.status == "pending",
                 Invoice.due_date > today,
                 Invoice.due_date <= three_days,
@@ -410,7 +461,10 @@ def _generate_proactive_notifications(user_id: int) -> list[dict[str, Any]]:
         )
         for inv in upcoming_invoices:
             from database.models import Client
-            client = db.query(Client).filter(Client.id == inv.client_id).first()
+            # user_id redundante (a fatura já é deste usuário), de propósito:
+            # torna a invariante LOCAL em vez de depender do filtro acima.
+            client = db.query(Client).filter(
+                Client.id == inv.client_id, Client.user_id == user_id).first()
             client_name = client.name if client else "Cliente"
             days_until = (inv.due_date - today).days
             notifications.append({

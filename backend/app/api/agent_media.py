@@ -177,6 +177,22 @@ async def transcribe_audio(
         from app.api.agent_chat import get_llm_response
 
         # Carregar histórico
+        # ⚠️ ISOLAMENTO ENTRE TENANTS — CORRIGIDO EM 01/08/2026 (E-041).
+        #
+        # Esta query lia as 10 últimas mensagens do agente SEM filtrar user_id,
+        # e o resultado ia direto para dentro do prompt do LLM. Somado à
+        # gravação com user_id=0 mais abaixo, o efeito era um BALDE COMUM: o
+        # áudio da Marina entrava no contexto do LLM do João, e a resposta podia
+        # refleti-lo de volta. Vazava conteúdo livre de conversa — o mais
+        # imprevisível de todos, porque pode conter qualquer coisa que o usuário
+        # tenha dito.
+        #
+        # Diferente do analytics_router, estas rotas são VIVAS: o frontend chama
+        # /audio/transcribe (AgentConfig.tsx:592) e /upload (:708) todo dia.
+        #
+        # Regressão coberta por tests/test_isolamento_midia.py, verificado por
+        # mutação.
+        _uid = current_user.get("user_id")
         chat_history: list[dict] = []
         try:
             from database.models import ChatMessage, SessionLocal
@@ -184,7 +200,10 @@ async def transcribe_audio(
             try:
                 recent = (
                     db.query(ChatMessage)
-                    .filter(ChatMessage.agent_id == agent)
+                    .filter(
+                        ChatMessage.user_id == _uid,
+                        ChatMessage.agent_id == agent,
+                    )
                     .order_by(ChatMessage.created_at.desc())
                     .limit(10)
                     .all()
@@ -203,8 +222,18 @@ async def transcribe_audio(
                 from database.models import ChatMessage as CM, SessionLocal as SL
                 db = SL()
                 try:
-                    db.add(CM(user_id=0, agent_id=agent, role="user", content=f"[áudio] {transcription_text}"))
-                    db.add(CM(user_id=0, agent_id=agent, role="assistant", content=agent_response))
+                    # user_id=0 era a RAIZ do balde comum: gravava anônimo e
+                    # lia sem filtro. Ver o comentário na leitura, acima.
+                    #
+                    # ⚠️ CONSEQUÊNCIA DECLARADA: com o user_id real, estas
+                    # mensagens passam a CONTAR COTA — check_agent_message_limit
+                    # (limit_service.py:232) conta ChatMessage por user_id.
+                    # Antes, áudio e visão, as operações MAIS CARAS do produto,
+                    # eram as únicas que não consumiam cota. É correção, mas é
+                    # mudança perceptível: quem usa áudio esgota o plano mais
+                    # rápido do que esgotava ontem.
+                    db.add(CM(user_id=_uid, agent_id=agent, role="user", content=f"[áudio] {transcription_text}"))
+                    db.add(CM(user_id=_uid, agent_id=agent, role="assistant", content=agent_response))
                     db.commit()
                 finally:
                     db.close()
@@ -349,6 +378,22 @@ async def upload_and_process(
     try:
         from app.api.agent_chat import get_llm_response
 
+        # ⚠️ ISOLAMENTO ENTRE TENANTS — CORRIGIDO EM 01/08/2026 (E-041).
+        #
+        # Esta query lia as 10 últimas mensagens do agente SEM filtrar user_id,
+        # e o resultado ia direto para dentro do prompt do LLM. Somado à
+        # gravação com user_id=0 mais abaixo, o efeito era um BALDE COMUM: o
+        # áudio da Marina entrava no contexto do LLM do João, e a resposta podia
+        # refleti-lo de volta. Vazava conteúdo livre de conversa — o mais
+        # imprevisível de todos, porque pode conter qualquer coisa que o usuário
+        # tenha dito.
+        #
+        # Diferente do analytics_router, estas rotas são VIVAS: o frontend chama
+        # /audio/transcribe (AgentConfig.tsx:592) e /upload (:708) todo dia.
+        #
+        # Regressão coberta por tests/test_isolamento_midia.py, verificado por
+        # mutação.
+        _uid = current_user.get("user_id")
         chat_history: list[dict] = []
         try:
             from database.models import ChatMessage, SessionLocal
@@ -356,7 +401,10 @@ async def upload_and_process(
             try:
                 recent = (
                     db.query(ChatMessage)
-                    .filter(ChatMessage.agent_id == agent)
+                    .filter(
+                        ChatMessage.user_id == _uid,
+                        ChatMessage.agent_id == agent,
+                    )
                     .order_by(ChatMessage.created_at.desc())
                     .limit(10)
                     .all()
@@ -376,8 +424,11 @@ async def upload_and_process(
                 db = SL()
                 try:
                     file_names = ", ".join(f.filename or "arquivo" for f in files)
-                    db.add(CM(user_id=0, agent_id=agent, role="user", content=f"[upload: {file_names}] {message}"))
-                    db.add(CM(user_id=0, agent_id=agent, role="assistant", content=agent_response))
+                    # Mesma correção do /audio/transcribe: user_id=0 era a raiz
+                    # do balde comum. Ver o comentário na leitura, acima —
+                    # inclusive a consequência sobre cota.
+                    db.add(CM(user_id=_uid, agent_id=agent, role="user", content=f"[upload: {file_names}] {message}"))
+                    db.add(CM(user_id=_uid, agent_id=agent, role="assistant", content=agent_response))
                     db.commit()
                 finally:
                     db.close()
