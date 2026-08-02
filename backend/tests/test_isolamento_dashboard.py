@@ -87,31 +87,35 @@ def _registrar(client, dados) -> tuple[str, int]:
 @pytest.fixture(scope="module")
 def cenario(client):
     from database.models import SessionLocal, Client as ClientModel
+    from app.core.tenant import sem_tenant
 
     t_marina, id_marina = _registrar(client, MARINA)
     t_joao, id_joao = _registrar(client, JOAO)
 
     db = SessionLocal()
-    try:
-        # o .db de teste persiste entre execucoes
-        for uid in (id_marina, id_joao):
-            db.query(ClientModel).filter(ClientModel.user_id == uid).delete()
-        db.commit()
+    # A pia exige escopo declarado: semear dados de DOIS tenants e limpar o
+    # .db entre execucoes sao operacoes de sistema, nao de usuario.
+    with sem_tenant("carga de dados de dois tenants para o teste"):
+        try:
+            # o .db de teste persiste entre execucoes
+            for uid in (id_marina, id_joao):
+                db.query(ClientModel).filter(ClientModel.user_id == uid).delete()
+            db.commit()
 
-        # revenue.total do dashboard vem de Client.total_revenue
-        for uid, qtd, receita in (
-            (id_marina, CLIENTES_MARINA, RECEITA_MARINA),
-            (id_joao, CLIENTES_JOAO, RECEITA_JOAO),
-        ):
-            for i in range(qtd):
-                db.add(ClientModel(
-                    user_id=uid, name=f"cliente-{uid}-{i}",
-                    email=f"c{uid}x{i}@teste.com", is_active=True,
-                    total_revenue=(receita / qtd),
-                ))
-        db.commit()
-    finally:
-        db.close()
+            # revenue.total do dashboard vem de Client.total_revenue
+            for uid, qtd, receita in (
+                (id_marina, CLIENTES_MARINA, RECEITA_MARINA),
+                (id_joao, CLIENTES_JOAO, RECEITA_JOAO),
+            ):
+                for i in range(qtd):
+                    db.add(ClientModel(
+                        user_id=uid, name=f"cliente-{uid}-{i}",
+                        email=f"c{uid}x{i}@teste.com", is_active=True,
+                        total_revenue=(receita / qtd),
+                    ))
+            db.commit()
+        finally:
+            db.close()
 
     return {"marina": t_marina, "joao": t_joao}
 

@@ -60,6 +60,18 @@ async def require_admin(
     role = current_user.get("role", "user")
 
     if role in ("admin", "superadmin") or email in _get_admin_emails():
+        # ── A PIA: visão global, declarada e auditada ───────────────────────
+        # ADICIONADO 01/08/2026. O painel do dono agrega TODOS os tenants por
+        # natureza — MRR, margem por cliente, consumo de IA, reconciliação de
+        # cobrança. Com a pia instalada (app/core/tenant.py) isso deixa de ser
+        # implícito e passa a ser escolha registrada em log de auditoria.
+        #
+        # Aqui, e não nas 30 rotas: é neste guard que a decisão "esta pessoa
+        # pode ver tudo" já é tomada. Espalhar 30 `with` seria repetir a mesma
+        # aposta que produziu os três vazamentos — alguém esquece na 31ª.
+        from app.core.tenant import entrar_em_escopo_global_do_request
+        entrar_em_escopo_global_do_request(
+            f"painel administrativo ({email or role}) agrega todos os tenants")
         return current_user
 
     raise HTTPException(status_code=403, detail="Acesso restrito a administradores")

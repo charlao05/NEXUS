@@ -61,12 +61,21 @@ LUCAS_COMPROMISSO = "Entrega de encomenda"
 
 @pytest.fixture(scope="module")
 def cenario():
-    """Dois usuarios, cada um com fatura vencida e compromisso proximo."""
+    """Dois usuarios, cada um com fatura vencida e compromisso proximo.
+
+    ⚠️ A carga roda dentro de `sem_tenant`: semear dados de DOIS tenants e
+    limpar o .db entre execucoes sao, por definicao, operacoes de escopo
+    global. Declarar isso e o preco de ter a pia — e e um preco que se paga
+    uma vez, com o motivo escrito.
+    """
     from database.models import (
         init_db, SessionLocal, User, Client, Invoice, Appointment)
+    from app.core.tenant import sem_tenant
     init_db()
 
     db = SessionLocal()
+    escopo = sem_tenant("carga de dados de dois tenants para o teste")
+    escopo.__enter__()
     try:
         ids = {}
         for apelido, email in (("marina", "marina-notif@teste.com"),
@@ -119,11 +128,24 @@ def cenario():
         return ids
     finally:
         db.close()
+        escopo.__exit__(None, None, None)
 
 
 def _notificacoes(user_id: int) -> list[dict]:
+    """Chama o motor DENTRO do escopo do tenant, como a rota faria.
+
+    ⚠️ Isto muda o que este arquivo prova, e a diferença importa:
+    com a pia instalada, o isolamento aqui passa a ter DUAS barreiras — o
+    filtro explícito de cada regra E o filtro automático. Estes testes provam
+    o resultado (ninguém vê dado alheio), não qual das duas barreiras segurou.
+
+    Quem prova que a PIA é a peça que segura é tests/test_pia.py, que consulta
+    SEM nenhum filtro escrito na query.
+    """
     from app.api.notifications import _generate_proactive_notifications
-    return _generate_proactive_notifications(user_id)
+    from app.core.tenant import tenant_scope
+    with tenant_scope(user_id):
+        return _generate_proactive_notifications(user_id)
 
 
 def _texto(notifs: list[dict]) -> str:

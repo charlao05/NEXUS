@@ -534,27 +534,43 @@ class TestPasswordReset:
 # ============================================================================
 
 class TestCRMServiceMultiTenancy:
-    """Testa CRMService diretamente com user_id."""
+    """Testa CRMService diretamente com user_id.
+
+    ⚠️ MUDANÇA DE 01/08/2026 — A PIA.
+
+    Estes testes chamam o CRMService FORA de uma requisição HTTP. Em produção
+    isso nunca acontece: toda chamada vem de uma rota, e `get_current_user`
+    abre o escopo do tenant (auth.py). Aqui não há rota, então o escopo precisa
+    ser aberto à mão — exatamente como script, worker e cron passam a fazer.
+
+    Sem `tenant_scope`, a pia recusa a query com TenantContextMissing. Não é o
+    teste que quebrou: é o teste que passou a exercitar a garantia nova.
+    """
 
     def test_create_client_with_user_id(self):
         from database.crm_service import CRMService
+        from app.core.tenant import tenant_scope
         svc = CRMService()
-        result = svc.create_client(
-            name="Tenant Test", email="tenant_f6@test.com", phone="11000000099",
-            user_id=999
-        )
+        with tenant_scope(999):
+            result = svc.create_client(
+                name="Tenant Test", email="tenant_f6@test.com",
+                phone="11000000099", user_id=999
+            )
         assert result is not None
 
     def test_search_clients_filters_by_user(self):
         from database.crm_service import CRMService
+        from app.core.tenant import tenant_scope
         svc = CRMService()
-        # Cria cliente para user 998
-        svc.create_client(
-            name="User998 Client", email="u998@test.com", phone="11000000002",
-            user_id=998
-        )
-        # Busca como user 997 — não deve encontrar
-        results = svc.search_clients("User998", user_id=997)
+        with tenant_scope(998):
+            svc.create_client(
+                name="User998 Client", email="u998@test.com",
+                phone="11000000002", user_id=998
+            )
+        # Busca como user 997 — não deve encontrar.
+        # Agora há DUAS barreiras: o filtro explícito do serviço e a pia.
+        with tenant_scope(997):
+            results = svc.search_clients("User998", user_id=997)
         if isinstance(results, list):
             names = []
             for c in results:
@@ -566,26 +582,34 @@ class TestCRMServiceMultiTenancy:
 
     def test_get_clients_for_followup_with_user_id(self):
         from database.crm_service import CRMService
+        from app.core.tenant import tenant_scope
         svc = CRMService()
-        results = svc.get_clients_for_followup(user_id=9999)
+        with tenant_scope(9999):
+            results = svc.get_clients_for_followup(user_id=9999)
         assert isinstance(results, list)
 
     def test_get_birthday_clients_with_user_id(self):
         from database.crm_service import CRMService
+        from app.core.tenant import tenant_scope
         svc = CRMService()
-        results = svc.get_birthday_clients(user_id=9999)
+        with tenant_scope(9999):
+            results = svc.get_birthday_clients(user_id=9999)
         assert isinstance(results, list)
 
     def test_financial_summary_with_user_id(self):
         from database.crm_service import CRMService
+        from app.core.tenant import tenant_scope
         svc = CRMService()
-        result = svc.get_financial_summary(user_id=9999)
+        with tenant_scope(9999):
+            result = svc.get_financial_summary(user_id=9999)
         assert isinstance(result, dict)
 
     def test_overdue_invoices_with_user_id(self):
         from database.crm_service import CRMService
+        from app.core.tenant import tenant_scope
         svc = CRMService()
-        result = svc.get_overdue_invoices(user_id=9999)
+        with tenant_scope(9999):
+            result = svc.get_overdue_invoices(user_id=9999)
         assert isinstance(result, list)
 
 

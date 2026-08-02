@@ -122,6 +122,27 @@ class Base(DeclarativeBase):
 
 
 # ============================================================================
+# A PIA — isolamento por tenant (implementação em app/core/tenant.py)
+# ============================================================================
+# Marcação POR TIPO: toda tabela de NEGÓCIO herda TenantScopedModel e passa a
+# ser filtrada automaticamente pelo tenant corrente.
+#
+# NÃO herdam, de propósito:
+#   User ............................ é a RAIZ do tenant, não um dado dentro dele
+#   StripeEvent, WebhookHit ......... trilha de integração, do operador
+#   InfraCostSnapshot ............... custo de infra do operador
+#   PIISentinelState, PIIBackfillAudit  auditoria do operador
+#   Interaction, Opportunity ........ ⚠️ AINDA NÃO — não têm user_id próprio,
+#                                     isolam por join com Client. É a migration
+#                                     da Fase 2; enquanto isso são a única
+#                                     exceção à regra, e está declarada aqui.
+#
+# A instalação das duas camadas fica no fim do arquivo, depois que todos os
+# modelos existirem.
+from app.core.tenant import TenantScopedModel  # noqa: E402
+
+
+# ============================================================================
 # ENUMS
 # ============================================================================
 
@@ -317,7 +338,7 @@ class User(Base):
         }
 
 
-class Subscription(Base):
+class Subscription(Base, TenantScopedModel):
     """Assinaturas Stripe — histórico de pagamentos"""
     __tablename__ = "subscriptions"
 
@@ -368,7 +389,7 @@ class Subscription(Base):
 # MODELOS CRM
 # ============================================================================
 
-class Client(Base):
+class Client(Base, TenantScopedModel):
     """Cliente — modelo central do CRM"""
     __tablename__ = "clients"
 
@@ -521,7 +542,7 @@ class Opportunity(Base):
         }
 
 
-class Appointment(Base):
+class Appointment(Base, TenantScopedModel):
     """Agendamentos com clientes"""
     __tablename__ = "appointments"
 
@@ -559,7 +580,7 @@ class Appointment(Base):
 # MODELO FINANCEIRO
 # ============================================================================
 
-class Transaction(Base):
+class Transaction(Base, TenantScopedModel):
     """Receitas e despesas"""
     __tablename__ = "transactions"
 
@@ -593,7 +614,7 @@ class Transaction(Base):
         }
 
 
-class Invoice(Base):
+class Invoice(Base, TenantScopedModel):
     """Faturas / contas a receber"""
     __tablename__ = "invoices"
 
@@ -625,7 +646,7 @@ class Invoice(Base):
 # MODELO DE AUTOMAÇÃO WEB (Assistente)
 # ============================================================================
 
-class ChatMessage(Base):
+class ChatMessage(Base, TenantScopedModel):
     """Histórico de mensagens do chat — persistência por usuário/agente.
 
     LGPD: content tem PII mascarado automaticamente via SQLAlchemy event
@@ -659,7 +680,7 @@ class ChatMessage(Base):
         }
 
 
-class ActivityLog(Base):
+class ActivityLog(Base, TenantScopedModel):
     """Log de atividades do usuário — timeline para dashboard analytics"""
     __tablename__ = "activity_logs"
 
@@ -684,7 +705,7 @@ class ActivityLog(Base):
         }
 
 
-class WebTask(Base):
+class WebTask(Base, TenantScopedModel):
     """Tarefa de automação web — requer aprovação humana"""
     __tablename__ = "web_tasks"
 
@@ -723,7 +744,7 @@ class WebTask(Base):
 # MODELOS DE INVENTÁRIO / ESTOQUE
 # ============================================================================
 
-class Product(Base):
+class Product(Base, TenantScopedModel):
     """Produto ou material — funciona para comércio, serviço e indústria"""
     __tablename__ = "products"
 
@@ -778,7 +799,7 @@ class Product(Base):
         }
 
 
-class StockMovement(Base):
+class StockMovement(Base, TenantScopedModel):
     """Movimentação de estoque — entrada ou saída"""
     __tablename__ = "stock_movements"
 
@@ -823,7 +844,7 @@ class StockMovement(Base):
 # FEEDBACK DO USUÁRIO
 # ============================================================================
 
-class Feedback(Base):
+class Feedback(Base, TenantScopedModel):
     """Feedback do usuário para melhoria contínua"""
     __tablename__ = "feedbacks"
 
@@ -918,7 +939,7 @@ class StripeEvent(Base):
 # Usage tracking (Tier 2 — persistencia)
 # ---------------------------------------------------------------------------
 
-class LLMUsageRecord(Base):
+class LLMUsageRecord(Base, TenantScopedModel):
     """Registro persistente de chamada LLM (sobrevive a restart/cold-start).
 
     Drenado em batch pelo UsageTracker.drainer thread a cada ~30s.
@@ -938,7 +959,7 @@ class LLMUsageRecord(Base):
     agent_type = Column(String(80), nullable=True, index=True)
 
 
-class AutomationUsageRecord(Base):
+class AutomationUsageRecord(Base, TenantScopedModel):
     """Registro persistente de acao Playwright (sobrevive a restart/cold-start)."""
     __tablename__ = "automation_usage_records"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -955,7 +976,7 @@ class AutomationUsageRecord(Base):
 # LGPD audit trail (Tier 2.4.2 — backfill retroativo de PII)
 # ---------------------------------------------------------------------------
 
-class AutomationTask(Base):
+class AutomationTask(Base, TenantScopedModel):
     """Plano de automacao persistido (Tier 2.4.7-bugfix).
 
     Substitui dict in-memory _automation_tasks que quebrava em multi-worker
@@ -1057,7 +1078,7 @@ class WebhookHit(Base):
 INVOICE_PAYMENT_STATUSES = frozenset({"paid", "refunded", "partial_refunded", "uncollectible"})
 
 
-class InvoicePayment(Base):
+class InvoicePayment(Base, TenantScopedModel):
     """Pagamento Stripe persistido (Tier 2.3.1 + refund tracking 2.3.3).
 
     Fonte: webhook handlers invoice.paid + charge.refunded (dispatch unificado
@@ -1193,7 +1214,7 @@ for _tbl_name, _model, _cols in PII_PROTECTED:
     _sa_event.listens_for(_model, "before_insert")(_make_pii_listener(_model, _cols))
 
 
-class RevenueEntry(Base):
+class RevenueEntry(Base, TenantScopedModel):
     """Toda entrada financeira do NEXUS, classificada por NATUREZA ECONÔMICA.
 
     Existe porque somar receita recorrente com não recorrente inverte decisões
@@ -1258,10 +1279,28 @@ class RevenueEntry(Base):
 
 
 def init_db():
-    """Cria todas as tabelas se não existirem + migra colunas faltantes"""
-    Base.metadata.create_all(bind=engine)
-    _auto_migrate_columns()
+    """Cria todas as tabelas se não existirem + migra colunas faltantes.
+
+    Roda com a pia desligada: DDL e auto-migração precisam tocar as tabelas
+    sem que exista tenant nenhum. Não é escotilha de uso geral — é a fase em
+    que ainda não há request, nem usuário, nem tabela.
+    """
+    from app.core.tenant import _bootstrap_sem_pia
+    with _bootstrap_sem_pia():
+        Base.metadata.create_all(bind=engine)
+        _auto_migrate_columns()
 
 
 # Auto-init na importação
 init_db()
+
+
+# ============================================================================
+# INSTALAÇÃO DA PIA — depois que TODOS os modelos existem
+# ============================================================================
+# A ordem importa: `tabelas_tenant()` é derivado das subclasses de
+# TenantScopedModel, então instalar antes das classes serem definidas
+# protegeria um conjunto vazio.
+from app.core.tenant import instalar_pia  # noqa: E402
+
+instalar_pia(SessionLocal, engine)

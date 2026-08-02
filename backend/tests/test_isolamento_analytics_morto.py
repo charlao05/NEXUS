@@ -104,32 +104,36 @@ def cenario(app_producao):
         finally:
             db.close()
 
+    from app.core.tenant import sem_tenant
+
     hoje = datetime.now(timezone.utc).date()
     db = SessionLocal()
-    try:
-        # o .db de teste persiste entre execucoes
-        for uid in ids.values():
-            db.query(ClientModel).filter(ClientModel.user_id == uid).delete()
-            db.query(Transaction).filter(Transaction.user_id == uid).delete()
-        db.commit()
+    # A pia exige escopo declarado para carga de dois tenants.
+    with sem_tenant("carga de dados de dois tenants para o teste"):
+        try:
+            # o .db de teste persiste entre execucoes
+            for uid in ids.values():
+                db.query(ClientModel).filter(ClientModel.user_id == uid).delete()
+                db.query(Transaction).filter(Transaction.user_id == uid).delete()
+            db.commit()
 
-        for apelido, qtd in (("ana", CLIENTES_ANA), ("bruno", CLIENTES_BRUNO)):
-            for i in range(qtd):
-                db.add(ClientModel(
-                    user_id=ids[apelido], name=f"c-{apelido}-{i}",
-                    email=f"{apelido}{i}@teste.com", is_active=True,
-                    created_at=datetime.now(timezone.utc) - timedelta(days=3),
-                ))
+            for apelido, qtd in (("ana", CLIENTES_ANA), ("bruno", CLIENTES_BRUNO)):
+                for i in range(qtd):
+                    db.add(ClientModel(
+                        user_id=ids[apelido], name=f"c-{apelido}-{i}",
+                        email=f"{apelido}{i}@teste.com", is_active=True,
+                        created_at=datetime.now(timezone.utc) - timedelta(days=3),
+                    ))
 
-        db.add(Transaction(user_id=ids["ana"], type="receita",
-                           amount=RECEITA_ANA, date=hoje, description="ana"))
-        db.add(Transaction(user_id=ids["ana"], type="despesa",
-                           amount=DESPESA_ANA, date=hoje, description="ana-d"))
-        db.add(Transaction(user_id=ids["bruno"], type="receita",
-                           amount=RECEITA_BRUNO, date=hoje, description="bruno"))
-        db.commit()
-    finally:
-        db.close()
+            db.add(Transaction(user_id=ids["ana"], type="receita",
+                               amount=RECEITA_ANA, date=hoje, description="ana"))
+            db.add(Transaction(user_id=ids["ana"], type="despesa",
+                               amount=DESPESA_ANA, date=hoje, description="ana-d"))
+            db.add(Transaction(user_id=ids["bruno"], type="receita",
+                               amount=RECEITA_BRUNO, date=hoje, description="bruno"))
+            db.commit()
+        finally:
+            db.close()
 
     return tokens
 

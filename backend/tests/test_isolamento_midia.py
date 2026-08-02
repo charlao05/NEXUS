@@ -97,22 +97,26 @@ def cenario(app):
         finally:
             db.close()
 
+    # A pia (app/core/tenant.py) exige escopo declarado: semear conversas de
+    # DOIS tenants e limpar o balde antigo sao operacoes de sistema.
+    from app.core.tenant import sem_tenant
     db = SessionLocal()
-    try:
-        # o .db de teste persiste entre execucoes
-        db.query(ChatMessage).filter(
-            ChatMessage.user_id.in_(list(ids.values()) + [0])).delete(
-            synchronize_session=False)
-        db.commit()
-        for apelido, segredo in (("marina", SEGREDO_MARINA),
-                                 ("lucas", SEGREDO_LUCAS)):
-            db.add(ChatMessage(user_id=ids[apelido], agent_id="assistente",
-                               role="user", content=segredo))
-            db.add(ChatMessage(user_id=ids[apelido], agent_id="assistente",
-                               role="assistant", content=f"anotado: {segredo}"))
-        db.commit()
-    finally:
-        db.close()
+    with sem_tenant("carga de historico de dois tenants para o teste"):
+        try:
+            # o .db de teste persiste entre execucoes
+            db.query(ChatMessage).filter(
+                ChatMessage.user_id.in_(list(ids.values()) + [0])).delete(
+                synchronize_session=False)
+            db.commit()
+            for apelido, segredo in (("marina", SEGREDO_MARINA),
+                                     ("lucas", SEGREDO_LUCAS)):
+                db.add(ChatMessage(user_id=ids[apelido], agent_id="assistente",
+                                   role="user", content=segredo))
+                db.add(ChatMessage(user_id=ids[apelido], agent_id="assistente",
+                                   role="assistant", content=f"anotado: {segredo}"))
+            db.commit()
+        finally:
+            db.close()
 
     return {"tokens": tokens, "ids": ids, "client": cli}
 
@@ -198,15 +202,20 @@ def test_gravacao_usa_o_usuario_real_e_nao_o_balde_zero(cenario, monkeypatch):
     monkeypatch.setattr(chat_mod, "get_llm_response",
                         lambda *a, **k: "resposta do agente")
 
+    from app.core.tenant import sem_tenant
+
     uid = cenario["ids"]["marina"]
     db = SessionLocal()
-    try:
-        antes_dela = db.query(ChatMessage).filter(
-            ChatMessage.user_id == uid).count()
-        antes_balde = db.query(ChatMessage).filter(
-            ChatMessage.user_id == 0).count()
-    finally:
-        db.close()
+    # Contar o balde `user_id=0` e, por definicao, olhar fora do tenant —
+    # e o proprio ponto do teste. Escopo declarado.
+    with sem_tenant("verificar que o balde user_id=0 nao voltou"):
+        try:
+            antes_dela = db.query(ChatMessage).filter(
+                ChatMessage.user_id == uid).count()
+            antes_balde = db.query(ChatMessage).filter(
+                ChatMessage.user_id == 0).count()
+        finally:
+            db.close()
 
     cli = cenario["client"]
     r = cli.post(
@@ -218,13 +227,14 @@ def test_gravacao_usa_o_usuario_real_e_nao_o_balde_zero(cenario, monkeypatch):
     assert r.status_code == 200
 
     db = SessionLocal()
-    try:
-        depois_dela = db.query(ChatMessage).filter(
-            ChatMessage.user_id == uid).count()
-        depois_balde = db.query(ChatMessage).filter(
-            ChatMessage.user_id == 0).count()
-    finally:
-        db.close()
+    with sem_tenant("verificar que o balde user_id=0 nao voltou"):
+        try:
+            depois_dela = db.query(ChatMessage).filter(
+                ChatMessage.user_id == uid).count()
+            depois_balde = db.query(ChatMessage).filter(
+                ChatMessage.user_id == 0).count()
+        finally:
+            db.close()
 
     assert depois_dela > antes_dela, (
         "As mensagens do upload nao foram gravadas sob o user_id da Marina. "

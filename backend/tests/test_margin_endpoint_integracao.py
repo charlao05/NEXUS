@@ -140,6 +140,7 @@ def cenario(client):
     """
     from database.models import (
         SessionLocal, User, Subscription, LLMUsageRecord, RevenueEntry)
+    from app.core.tenant import sem_tenant
 
     email = "cliente-margem@nexus.com"
     client.post("/api/auth/signup", json={
@@ -147,6 +148,10 @@ def cenario(client):
 
     agora = datetime.now(timezone.utc)
     db = SessionLocal()
+    # A pia (app/core/tenant.py) exige escopo declarado: semear e limpar dados
+    # fora de uma requisicao e operacao de sistema, nao de usuario.
+    escopo = sem_tenant("carga do cenario sintetico de margem")
+    escopo.__enter__()
     try:
         user = db.query(User).filter(User.email == email).first()
         assert user is not None, "usuario do cenario nao foi criado"
@@ -174,6 +179,7 @@ def cenario(client):
         return uid
     finally:
         db.close()
+        escopo.__exit__(None, None, None)
 
 
 @pytest.fixture

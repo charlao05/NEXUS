@@ -338,6 +338,27 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict[
         except Exception:  # noqa: BLE001
             pass
 
+        # ── A PIA: escopo de tenant da requisição ───────────────────────────
+        # ADICIONADO 01/08/2026. O mesmo ponto, agora com um segundo uso mais
+        # importante que o primeiro: a partir daqui TODA query desta requisição
+        # sai filtrada pelo tenant, sem ninguém escrever `.filter(user_id==...)`.
+        #
+        # Três vazamentos em três dias (analytics, notifications, agent_media)
+        # tinham a mesma causa: o isolamento dependia de alguém LEMBRAR. Aqui
+        # ele passa a ser garantia da arquitetura. Ver app/core/tenant.py.
+        #
+        # ⚠️ SEM try/except, ao contrário da telemetria acima — e a diferença é
+        # deliberada. Perder uma medição é aceitável; seguir a requisição com o
+        # tenant indefinido não é: as queries cairiam no fail-closed e a rota
+        # quebraria de qualquer forma, só que com erro obscuro em vez de claro.
+        #
+        # `admin` NÃO concede visão global. Só autoriza este request a PEDIR
+        # visão global via sem_tenant() — um admin navegando o próprio CRM
+        # continua vendo só o dele.
+        from app.core.tenant import entrar_no_tenant_do_request
+        entrar_no_tenant_do_request(
+            int(user.id), admin=role in ("admin", "superadmin"))
+
         return {
             "user_id": user.id,
             "email": user.email,
