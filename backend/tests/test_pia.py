@@ -280,6 +280,105 @@ def test_sem_tenant_exige_motivo_escrito():
                 pass
 
 
+def test_escotilha_de_producao_exige_ticket_e_prazo(monkeypatch):
+    """A exigencia que impede exceção temporária de virar permanente.
+
+    Em codigo de producao, `sem_tenant` exige `ticket` (o que a criou) e
+    `expires` (ate quando). Em teste, `motivo` basta — fixture e escopo
+    efemero, nao decisao de arquitetura que possa apodrecer.
+
+    A distincao e AUTOMATICA (pelo arquivo do chamador). Se dependesse de o
+    autor passar uma flag, seria mais uma coisa para lembrar — e este modulo
+    inteiro existe porque memoria humana falha.
+    """
+    import app.core.tenant as t
+
+    # finge que a chamada veio de codigo de producao
+    monkeypatch.setattr(t, "_origem_do_chamador", lambda: "app/api/qualquer.py:10")
+
+    with pytest.raises(ValueError, match="ticket"):
+        with t.sem_tenant("motivo sem ticket"):
+            pass
+
+    with pytest.raises(ValueError, match="expires"):
+        with t.sem_tenant("motivo com ticket", ticket="E-999"):
+            pass
+
+    # com os tres, passa
+    with t.sem_tenant("completo", ticket="E-999", expires=t.PERMANENTE):
+        pass
+
+
+def test_escotilha_vencida_falha_em_teste(monkeypatch):
+    """Prazo vencido: avisa sempre, falha onde ha quem conserte.
+
+    NUNCA derruba producao — uma data que passou nao pode virar
+    indisponibilidade para o usuario. O objetivo e forcar a revisao.
+    """
+    import app.core.tenant as t
+
+    monkeypatch.setattr(t, "_origem_do_chamador", lambda: "app/api/qualquer.py:10")
+
+    with pytest.raises(t.EscotilhaVencida, match="VENCIDA"):
+        with t.sem_tenant("exceção que alguem esqueceu",
+                          ticket="E-001", expires="2020-01-01"):
+            pass
+
+
+def test_escotilha_vencida_nao_derruba_producao(monkeypatch, caplog):
+    import logging
+    import app.core.tenant as t
+
+    monkeypatch.setattr(t, "_origem_do_chamador", lambda: "app/api/qualquer.py:10")
+    monkeypatch.setenv("ENVIRONMENT", "production")
+
+    with caplog.at_level(logging.WARNING, logger="app.core.tenant"):
+        with t.sem_tenant("vencida em producao", ticket="E-001",
+                          expires="2020-01-01"):
+            pass   # nao levanta
+
+    assert any(getattr(r, "evento", None) == "sem_tenant_vencida"
+               for r in caplog.records), "deveria ter avisado no log"
+
+
+def test_expires_invalido_e_recusado(monkeypatch):
+    """`expires="em breve"` nao e prazo. Ou e data ISO, ou e PERMANENTE."""
+    import app.core.tenant as t
+
+    monkeypatch.setattr(t, "_origem_do_chamador", lambda: "app/api/qualquer.py:10")
+    with pytest.raises(ValueError, match="ISO"):
+        with t.sem_tenant("motivo", ticket="E-1", expires="em breve"):
+            pass
+
+
+def test_escotilhas_de_producao_estao_declaradas():
+    """REGRESSAO: toda `sem_tenant` de producao tem ticket e prazo.
+
+    Pega quem acrescentar uma escotilha nova sem declarar — antes de virar
+    exceção permanente invisivel.
+    """
+    import io
+    import re
+
+    faltando = []
+    for arq in (BACKEND / "app").rglob("*.py"):
+        if arq.name == "tenant.py":
+            continue
+        linhas = io.open(arq, encoding="utf-8").read().splitlines()
+        for i, ln in enumerate(linhas):
+            # so CHAMADA conta: comentario que cita sem_tenant() e documentacao,
+            # nao escotilha aberta. Foi o primeiro falso-positivo deste teste.
+            if ln.lstrip().startswith("#") or "sem_tenant(" not in ln:
+                continue
+            trecho = "\n".join(linhas[i:i + 12])
+            if "ticket=" not in trecho or "expires=" not in trecho:
+                faltando.append(f"{arq.name}:{i + 1}")
+
+    assert not faltando, (
+        f"sem_tenant sem ticket/expires em producao: {faltando}. "
+        "Toda escotilha precisa dizer o que a criou e ate quando vale.")
+
+
 def test_sem_tenant_gera_registro_de_auditoria(caplog):
     """Responde 'quantos lugares enxergam tudo, e por que?' sem abrir o projeto."""
     import logging

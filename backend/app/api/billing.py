@@ -296,8 +296,12 @@ async def stripe_webhook(
     # Mesma correção de auth.py:1537 (E-042). Ver o comentário longo lá.
     # Webhook não tem usuário autenticado; o dono do evento é resolvido pelo
     # handler a partir do customer/metadata.
-    from app.core.tenant import sem_tenant
+    from app.core.tenant import sem_tenant, PERMANENTE
 
-    with sem_tenant("webhook Stripe (billing_v1): evento de sistema, sem "
-                    "usuário autenticado — o dono é resolvido pelo handler"):
+    with sem_tenant(
+        "webhook Stripe (billing_v1): evento de sistema, sem usuário "
+        "autenticado — o dono é resolvido pelo handler",
+        ticket="E-042",
+        expires=PERMANENTE,
+    ):
         return dispatch_stripe_event(event, db, source_route="billing_v1")

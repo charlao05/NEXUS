@@ -1549,12 +1549,19 @@ async def stripe_webhook(request: Request):
     # Escopo global é correto aqui, e não é atalho: o evento chega SEM saber de
     # quem é. Descobrir o dono a partir do customer/metadata é justamente o
     # trabalho do handler. Por isso a escotilha envolve o dispatch inteiro.
-    from app.core.tenant import sem_tenant
+    from app.core.tenant import sem_tenant, PERMANENTE
 
     db = _get_db_session()
     try:
-        with sem_tenant("webhook Stripe (auth_v1): evento de sistema, sem "
-                        "usuário autenticado — o dono é resolvido pelo handler"):
+        with sem_tenant(
+            "webhook Stripe (auth_v1): evento de sistema, sem usuário "
+            "autenticado — o dono é resolvido pelo handler",
+            ticket="E-042",
+            # PERMANENTE, e não uma data: webhook nunca vai ter usuário
+            # autenticado. Não é exceção temporária esperando conserto — é
+            # como a integração funciona.
+            expires=PERMANENTE,
+        ):
             result = dispatch_stripe_event(event, db, source_route="auth_v1")
         return result
     finally:
