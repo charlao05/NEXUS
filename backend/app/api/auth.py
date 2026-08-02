@@ -1534,9 +1534,28 @@ async def stripe_webhook(request: Request):
             raise HTTPException(status_code=400, detail="Assinatura invalida")
         raise
 
+    # ⚠️ REGRESSÃO DE PAGAMENTO CORRIGIDA EM 01/08/2026 (E-042).
+    #
+    # Webhook do Stripe é autenticado por ASSINATURA, não por JWT — não tem
+    # Depends(get_current_user), logo não há tenant no contexto. Com a pia
+    # instalada (commit 60f10de), dispatch_stripe_event levantava
+    # TenantContextMissing na primeira query de Subscription
+    # (_stripe_webhook_handler.py:256).
+    #
+    # E o modo de falha era o pior possível: :602 engole a exceção e devolve
+    # 200 ao Stripe. O Stripe marca como entregue e NUNCA reenvia. O cliente
+    # pagava e o plano não ativava — em silêncio, permanentemente.
+    #
+    # Escopo global é correto aqui, e não é atalho: o evento chega SEM saber de
+    # quem é. Descobrir o dono a partir do customer/metadata é justamente o
+    # trabalho do handler. Por isso a escotilha envolve o dispatch inteiro.
+    from app.core.tenant import sem_tenant
+
     db = _get_db_session()
     try:
-        result = dispatch_stripe_event(event, db, source_route="auth_v1")
+        with sem_tenant("webhook Stripe (auth_v1): evento de sistema, sem "
+                        "usuário autenticado — o dono é resolvido pelo handler"):
+            result = dispatch_stripe_event(event, db, source_route="auth_v1")
         return result
     finally:
         db.close()

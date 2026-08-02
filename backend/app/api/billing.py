@@ -41,12 +41,12 @@ PLANS = {
 @router.get("/invoices", response_model=List[InvoiceOut])
 def list_invoices(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
     """Lista todas as faturas/contas do usuario autenticado."""
     invoices = (
         db.query(Invoice)
-        .filter(Invoice.user_id == current_user.id)
+        .filter(Invoice.user_id == current_user["user_id"])
         .order_by(Invoice.created_at.desc())
         .all()
     )
@@ -57,12 +57,12 @@ def list_invoices(
 def get_invoice(
     invoice_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
     """Retorna uma fatura especifica do usuario."""
     invoice = (
         db.query(Invoice)
-        .filter(Invoice.id == invoice_id, Invoice.user_id == current_user.id)
+        .filter(Invoice.id == invoice_id, Invoice.user_id == current_user["user_id"])
         .first()
     )
     if not invoice:
@@ -73,13 +73,13 @@ def get_invoice(
 @router.get("/subscription", response_model=Optional[SubscriptionOut])
 def get_subscription(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
     """Retorna a assinatura ativa do usuario."""
     subscription = (
         db.query(Subscription)
         .filter(
-            Subscription.user_id == current_user.id,
+            Subscription.user_id == current_user["user_id"],
             Subscription.status == "active"
         )
         .first()
@@ -91,16 +91,32 @@ def get_subscription(
 def create_checkout_session(
     payload: SubscriptionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
-    """Cria sessao de checkout no Stripe e retorna URL de pagamento."""
+    """Cria sessao de checkout no Stripe e retorna URL de pagamento.
+
+    ☠️ ESTA ROTA NUNCA EXECUTA — E-040.
+
+    `auth.py:443` e `billing.py:14` declaram o MESMO prefixo /api/auth, e ambos
+    definem POST /checkout. `main.py:228` monta `auth` primeiro, e o FastAPI
+    resolve sempre para o primeiro registrado. Quem atende o checkout de
+    verdade e `auth.py:1166`.
+
+    ⚠️ E o corpo abaixo esta QUEBRADO: usa `current_user.stripe_customer_id`,
+    mas `get_current_user` devolve um DICT (auth.py:341). Corrigi as 4 rotas
+    VIVAS deste arquivo em 01/08/2026 (E-043) e deixei estas duas como estao,
+    de proposito: meio-consertar codigo morto esconde que ele e morto.
+
+    ANTES DE DESSOMBREAR ESTA ROTA: decida qual das duas implementacoes de
+    checkout sobrevive (elas nao sao identicas) e conserte o dict aqui.
+    """
     if not stripe.api_key:
         raise HTTPException(status_code=503, detail="Pagamentos nao configurados")
 
     plan_key = payload.plan.lower()
     plan_info = PLANS.get(plan_key, {})
 
-    logger.info(f"Checkout request: plan={plan_key}, user={current_user.email}")
+    logger.info(f"Checkout request: plan={plan_key}, user={current_user.get("email")}")
 
     resolved_price_id = (
         getattr(payload, 'price_id', None)
@@ -128,9 +144,9 @@ def create_checkout_session(
     try:
         if not current_user.stripe_customer_id:
             customer = stripe.Customer.create(
-                email=current_user.email,
-                name=current_user.full_name or current_user.email,
-                metadata={"user_id": str(current_user.id)},
+                email=current_user.get("email"),
+                name=current_user.get("full_name") or current_user.get("email"),
+                metadata={"user_id": str(current_user["user_id"])},
             )
             current_user.stripe_customer_id = customer.id
             db.commit()
@@ -145,7 +161,7 @@ def create_checkout_session(
             allow_promotion_codes=True,
             success_url=f"{frontend_url}/dashboard?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{frontend_url}/planos?checkout=cancelled",
-            metadata={"user_id": str(current_user.id), "plan": payload.plan},
+            metadata={"user_id": str(current_user["user_id"]), "plan": payload.plan},
         )
         logger.info(f"Checkout session created: {session.id}")
         return {"checkout_url": session.url, "session_id": session.id}
@@ -160,20 +176,25 @@ def create_checkout_session(
 @router.post("/checkout/addon-clients")
 def create_addon_checkout(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
-    """Cria sessao de checkout para addon +10 clientes/fornecedores (compra unica R$12,90)."""
+    """Cria sessao de checkout para addon +10 clientes/fornecedores (R$12,90).
+
+    ☠️ ESTA ROTA TAMBEM NUNCA EXECUTA — mesma colisao de prefixo (E-040).
+    Quem atende e `auth.py:1411`. E o corpo abaixo tem o mesmo defeito de dict
+    da irma acima. Ver o docstring de `create_checkout_session`.
+    """
     if not stripe.api_key:
         raise HTTPException(status_code=503, detail="Pagamentos nao configurados")
 
-    logger.info(f"Addon checkout request: user={current_user.email}")
+    logger.info(f"Addon checkout request: user={current_user.get("email")}")
 
     try:
         if not current_user.stripe_customer_id:
             customer = stripe.Customer.create(
-                email=current_user.email,
-                name=current_user.full_name or current_user.email,
-                metadata={"user_id": str(current_user.id)},
+                email=current_user.get("email"),
+                name=current_user.get("full_name") or current_user.get("email"),
+                metadata={"user_id": str(current_user["user_id"])},
             )
             current_user.stripe_customer_id = customer.id
             db.commit()
@@ -197,7 +218,7 @@ def create_addon_checkout(
             success_url=f"{frontend_url}/dashboard?addon=success&session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{frontend_url}/planos?addon=cancelled",
             metadata={
-                "user_id": str(current_user.id),
+                "user_id": str(current_user["user_id"]),
                 "addon_type": "extra_clients",
                 "extra_clients": "10",
                 "extra_suppliers": "10",
@@ -216,13 +237,13 @@ def create_addon_checkout(
 @router.delete("/subscription")
 def cancel_subscription(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
     """Cancela a assinatura ativa do usuario (ao final do periodo)."""
     subscription = (
         db.query(Subscription)
         .filter(
-            Subscription.user_id == current_user.id,
+            Subscription.user_id == current_user["user_id"],
             Subscription.status == "active"
         )
         .first()
@@ -272,4 +293,11 @@ async def stripe_webhook(
             raise HTTPException(status_code=400, detail="Assinatura invalida")
         raise
 
-    return dispatch_stripe_event(event, db, source_route="billing_v1")
+    # Mesma correção de auth.py:1537 (E-042). Ver o comentário longo lá.
+    # Webhook não tem usuário autenticado; o dono do evento é resolvido pelo
+    # handler a partir do customer/metadata.
+    from app.core.tenant import sem_tenant
+
+    with sem_tenant("webhook Stripe (billing_v1): evento de sistema, sem "
+                    "usuário autenticado — o dono é resolvido pelo handler"):
+        return dispatch_stripe_event(event, db, source_route="billing_v1")
