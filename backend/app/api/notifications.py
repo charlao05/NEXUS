@@ -268,14 +268,84 @@ async def notification_stream(
 # REST ENDPOINTS para notificações
 # ============================================================================
 
+def _brl(v: float) -> str:
+    """Formata em Real no padrão pt-BR (1.234,56).
+
+    ⚠️ Encontrado em 01/08/2026 pelo teste que ligou o motor: as notificações
+    diziam `R$ 1,234.50` — formato AMERICANO. Para um brasileiro isso lê como
+    "mil real e vinte e três centavos": o separador de milhar vira decimal.
+
+    É a primeira coisa que os cinco usuários do piloto veriam, num aviso de
+    cobrança. Mesma implementação de `contabilidade_agent._brl`.
+    """
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _id_estavel(n: dict[str, Any]) -> str:
+    """ID derivado do CONTEÚDO, não do relógio.
+
+    ⚠️ É a peça que faz o motor funcionar de verdade. O front deduplica por id
+    (`useNotifications.ts:29`) e consulta a cada 30 segundos. Com o id baseado
+    em timestamp que o `push` gera (`n-{epoch_ms}`), a MESMA cobrança vencida
+    reapareceria duas vezes por minuto, para sempre. O usuário fecharia o
+    produto no primeiro dia.
+
+    Com id estável, a notificação é a mesma coisa entre consultas — e some
+    sozinha quando a condição que a gerou deixa de existir.
+    """
+    d = n.get("data") or {}
+    chave = (d.get("invoice_id") or d.get("appointment_id")
+             or d.get("due_day") or d.get("upgrade_url") or "")
+    return f"p-{n.get('type')}-{chave}"
+
+
 @router.get("/unread")
 async def get_unread_notifications(
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    """Retorna notificações não lidas."""
+    """Notificações não lidas: as enviadas + as proativas, recalculadas.
+
+    ⚠️ MUDANÇA DE 01/08/2026 — o motor estava DESLIGADO.
+
+    `_generate_proactive_notifications` (:304) tem 6 regras escritas — boleto
+    do DAS, fatura vencida, vence hoje, vence em 3 dias, compromisso próximo —
+    e NENHUMA delas chegava ao usuário. Só o `/stream` (SSE) as invocava, e o
+    frontend nunca abriu o stream: ele faz *polling* aqui, a cada 30 segundos
+    (`useNotifications.ts:21,32`).
+
+    Resultado: o sino do produto exibia praticamente nada. A única notificação
+    viva era "admin recebeu um feedback" (`auth.py:970`).
+
+    A correção é ligar o que já existe — sem SSE, sem tocar no frontend, sem
+    depender da fila em memória (que morre a cada deploy). As proativas são
+    recalculadas do banco a cada consulta, então sobrevivem a restart.
+
+    SEMÂNTICA, e é deliberada: proativa é **vista do estado**, não evento.
+    Não se "dispensa" uma fatura vencida — ela some quando é paga. Por isso
+    elas não carregam estado de leitura: some sozinha quando a condição
+    acabar.
+
+    O que NÃO entra aqui: ação sugerida, priorização por contexto, IA. Isso é
+    a Central de Prioridades, e continua sendo desenhada.
+    """
     user_id = current_user["user_id"]
-    unread = [n for n in _notifications.get_unread(user_id) if not n.get("read")]
-    return {"notifications": unread, "count": len(unread)}
+
+    enviadas = [n for n in _notifications.get_unread(user_id) if not n.get("read")]
+
+    proativas: list[dict[str, Any]] = []
+    for n in _generate_proactive_notifications(user_id):
+        n.setdefault("id", _id_estavel(n))
+        n.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+        n["read"] = False
+        proativas.append(n)
+
+    # Se a mesma notificação foi empurrada E é gerada, a proativa vence: ela
+    # reflete o estado de agora, a empurrada é um retrato de quando ocorreu.
+    ids_proativas = {n["id"] for n in proativas}
+    enviadas = [n for n in enviadas if n.get("id") not in ids_proativas]
+
+    todas = proativas + enviadas
+    return {"notifications": todas, "count": len(todas)}
 
 
 @router.post("/read")
@@ -396,7 +466,7 @@ def _generate_proactive_notifications(user_id: int) -> list[dict[str, Any]]:
                 notifications.append({
                     "type": "invoice_overdue",
                     "title": "🔴 Pagamento atrasado",
-                    "message": f"{client_name} — R$ {inv.amount:,.2f} venceu há {days_late} dia(s)",
+                    "message": f"{client_name} — {_brl(inv.amount)} venceu há {days_late} dia(s)",
                     "severity": "error",
                     "data": {
                         "invoice_id": inv.id,
@@ -411,7 +481,7 @@ def _generate_proactive_notifications(user_id: int) -> list[dict[str, Any]]:
                 notifications.append({
                     "type": "invoice_overdue_summary",
                     "title": "🔴 Mais pagamentos atrasados",
-                    "message": f"Total: {len(overdue_invoices)} fatura(s) vencida(s) — R$ {total_overdue:,.2f}",
+                    "message": f"Total: {len(overdue_invoices)} fatura(s) vencida(s) — {_brl(total_overdue)}",
                     "severity": "error",
                     "data": {"count": len(overdue_invoices), "total": total_overdue},
                 })
@@ -436,7 +506,7 @@ def _generate_proactive_notifications(user_id: int) -> list[dict[str, Any]]:
             notifications.append({
                 "type": "invoice_due_today",
                 "title": "🟡 Vence hoje!",
-                "message": f"{client_name} — R$ {inv.amount:,.2f} vence HOJE",
+                "message": f"{client_name} — {_brl(inv.amount)} vence HOJE",
                 "severity": "warning",
                 "data": {
                     "invoice_id": inv.id,
@@ -470,7 +540,7 @@ def _generate_proactive_notifications(user_id: int) -> list[dict[str, Any]]:
             notifications.append({
                 "type": "invoice_due_soon",
                 "title": "📅 Pagamento próximo",
-                "message": f"{client_name} — R$ {inv.amount:,.2f} vence em {days_until} dia(s)",
+                "message": f"{client_name} — {_brl(inv.amount)} vence em {days_until} dia(s)",
                 "severity": "info",
                 "data": {
                     "invoice_id": inv.id,

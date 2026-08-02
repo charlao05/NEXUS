@@ -1031,17 +1031,68 @@ async def export_my_data(current_user: dict[str, Any] = Depends(get_current_user
     finally:
         db.close()
 
-    try:
-        from database.crm_service import CRMService  # type: ignore[import]
-        clients_data = CRMService.search_clients(query="", user_id=uid, limit=10000, offset=0)
-        clients = clients_data.get("clients", [])
-        for c in clients:
-            c["interactions"] = CRMService.get_interactions(c.get("id", 0), limit=1000)
-        opportunities = CRMService.get_pipeline_summary(user_id=uid).get("pipeline", [])
-        appointments = CRMService.get_appointments(user_id=uid).get("appointments", [])
-        transactions = CRMService.get_financial_summary(user_id=uid)
-    except Exception:
-        clients, opportunities, appointments, transactions = [], [], [], {}
+    # ⚠️ FALHA EM ABERTO CORRIGIDA EM 01/08/2026 (E-045).
+    #
+    # Este bloco tinha um `except Exception:` que devolvia listas VAZIAS em
+    # silêncio. Consequência: qualquer erro aqui virava HTTP 200 com uma
+    # exportação vazia, e o usuário levava embora um arquivo que parecia
+    # backup e não continha nada.
+    #
+    # É a pior variante do padrão que esta auditoria vem perseguindo — e numa
+    # rota de portabilidade LGPD, onde o usuário confia que está salvando os
+    # próprios dados antes de, por exemplo, cancelar a conta.
+    #
+    # Agora: cada seção falha por conta própria, o erro vai para o log com
+    # stack, e a resposta DIZ o que não pôde ser exportado. Exportação parcial
+    # é aceitável; exportação parcial silenciosa não é.
+    from database.crm_service import CRMService  # type: ignore[import]
+
+    clients, opportunities, appointments = [], [], []
+    transactions: dict[str, Any] = {}
+    falhas: list[str] = []
+
+    def _secao(nome: str, fn):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            logger.error("export-my-data: seção %s falhou para user=%s: %s",
+                         nome, uid, e, exc_info=True)
+            falhas.append(nome)
+            return None
+
+    def _lista(valor: Any, chave: str) -> list:
+        """Aceita dict-com-chave OU lista direta.
+
+        ⚠️ ERA ESTE O DEFEITO, e ele derrubava a exportação inteira: o
+        CRMService não tem forma de retorno uniforme. `search_clients` (:227)
+        e `get_pipeline_summary` (:460) devolvem DICT; `get_appointments`
+        (:526) e `get_interactions` (:331) devolvem LISTA.
+        O código fazia `.get("appointments", [])` no retorno de
+        `get_appointments` — `.get` numa lista levanta AttributeError, o
+        `except Exception` engolia, e TODAS as seções voltavam vazias.
+        """
+        if isinstance(valor, list):
+            return valor
+        if isinstance(valor, dict):
+            return valor.get(chave, []) or []
+        return []
+
+    clients = _lista(_secao("clients", lambda: CRMService.search_clients(
+        query="", user_id=uid, limit=10000, offset=0)), "clients")
+    for c in clients:
+        c["interactions"] = _lista(_secao(
+            "interactions",
+            lambda c=c: CRMService.get_interactions(c.get("id", 0), limit=1000)),
+            "interactions")
+
+    opportunities = _lista(_secao("opportunities", lambda:
+                                  CRMService.get_pipeline_summary(user_id=uid)),
+                           "pipeline")
+    appointments = _lista(_secao("appointments", lambda:
+                                 CRMService.get_appointments(user_id=uid)),
+                          "appointments")
+    transactions = _secao("financial_summary",
+                          lambda: CRMService.get_financial_summary(user_id=uid)) or {}
 
     return {
         "export_date": datetime.now(timezone.utc).isoformat(),
@@ -1050,6 +1101,10 @@ async def export_my_data(current_user: dict[str, Any] = Depends(get_current_user
         "opportunities": opportunities,
         "appointments": appointments,
         "financial_summary": transactions,
+        # Diz a verdade sobre o que não veio. Sem isto, exportação incompleta
+        # é indistinguível de conta vazia.
+        "secoes_com_falha": falhas,
+        "completa": not falhas,
         "notice": "Exportação conforme LGPD Art. 18 — Portabilidade de dados",
     }
 
