@@ -124,6 +124,74 @@ entra:** ação sugerida, priorização por contexto, IA.
 
 ---
 
+## D-011 · O Portão A termina quando o risco deixa de ser estrutural
+**Data:** 02/08/2026
+
+**Decisão (texto do dono):** *o Portão A termina quando o risco deixa de ser
+estrutural e passa a ser aprendizado de produto.*
+
+**Motivo:** depois desse ponto, o próximo ganho vem de observar usuários, não de
+fortalecer a arquitetura. Protege de uma tentação comum — sempre encontrar mais
+uma melhoria arquitetural antes de mostrar o produto para alguém.
+
+**Consequência:** o Portão A fechou em 02/08/2026 com 515 testes e 0 falhas.
+
+---
+
+## D-012 · Cálculo fiscal feito por IA se apresenta como estimativa
+**Data:** 02/08/2026
+
+**Motivo:** E-036. 10 ações fiscais são respondidas por LLM antes do cálculo
+determinístico. O risco **não é uniforme** — e essa distinção é o que permite
+não bloquear o piloto:
+
+| Grupo | Exemplo | Risco |
+|---|---|---|
+| repetir constante | DAS R$ 86,05, limite R$ 81.000 | baixo — ancorado no prompt |
+| interpretação | explicar regra, quando emitir nota | moderado, conferível |
+| **cálculo** | **multa, juros, IRPF** | 🔴 *"pode parecer extremamente convincente e ainda assim estar errada"* |
+
+**Decisão:** não bloqueia — **mas não pode parecer oficial.** Valor que a IA
+calculou se apresenta como **estimativa**, com a fonte oficial para conferir
+**antes de pagar ou declarar**.
+
+**Consequência:** instrução no prompt fiscal (`agent_chat.py`). O bloco deixou
+de se anunciar como `MULTAS (informação real)` — a **regra** é oficial, o
+**valor calculado a partir dela** não é. Não exigiu refatoração: mudou como a
+resposta se apresenta. Travado por `test_fiscal_estimativa.py` (6 testes),
+incluindo um que quebra se as constantes do prompt divergirem das do código.
+
+**Gatilho que reabre:** o dia em que o NEXUS emitir DAS, gerar DARF, calcular
+imposto automaticamente, preencher declaração ou enviar informação a órgão
+público. Aí o erro deixa de ser informação imprecisa e passa a ter consequência
+financeira — e as 10 ações migram para determinístico.
+
+---
+
+## D-013 · Portão A (engenharia) é separado de Portão O (operação)
+**Data:** 02/08/2026
+
+**Motivo:** o Portão A estava dependendo de Render pago e PITR do Neon. Um
+portão de engenharia que não fecha porque uma fatura não foi paga **deixa de
+medir engenharia**.
+
+**Decisão:**
+
+| | Prova | Resultado |
+|---|---|---|
+| **Portão A** | repositório | PASSOU / NÃO PASSOU |
+| **Portão O** | painel de provedor | PRONTO PARA PRODUÇÃO / AINDA NÃO |
+
+**A confirmação de que o corte é real:** dos 515 testes, os **dois únicos
+`SKIPPED`** são `STRIPE_WEBHOOK_SECRET ausente` e `pacote 'resend' nao
+instalado` — ambos Portão O. A suíte de engenharia só não consegue verificar
+aquilo que não é engenharia.
+
+**Evita o modo de falha:** a equipe dizer *"não passou no Portão A"* quando o
+que falta é pagar uma conta do provedor.
+
+---
+
 ## D-010 · Congelar a fundação quando o Portão A fechar
 **Data:** 02/08/2026
 

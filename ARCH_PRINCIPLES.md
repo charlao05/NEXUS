@@ -93,6 +93,28 @@ implementação mudar.
 ⚠️ **É a maior dívida arquitetural aberta.** O diferencial do NEXUS existe no
 código e está contornado em runtime.
 
+### Corolário — enquanto a dívida existir (D-012)
+
+> Sempre que uma resposta envolver obrigação tributária, cálculo de imposto,
+> multa, juros ou prazo legal, o sistema deve informar claramente **quando o
+> resultado é estimado** e quando foi calculado por regra determinística.
+
+Não exige refatoração — muda como a resposta se apresenta:
+
+```
+❌  "A multa ficou em R$ 47,32."
+✅  "Estimativa: cerca de R$ 47,32. Os juros dependem da Selic acumulada —
+     confirme no Portal do Simples Nacional antes de emitir a guia."
+```
+
+**Mecanismo:** ✅ instrução no prompt fiscal · `test_fiscal_estimativa.py` (6)
+
+O que sustenta isso como limitação aceitável, e não como bloqueio: **o NEXUS
+orienta, não executa ato fiscal.** Não emite DAS, não gera DARF, não declara,
+não envia nada a órgão público. No dia em que executar, estas ações migram para
+determinístico — o erro deixa de ser informação imprecisa e passa a ter
+consequência financeira.
+
 ---
 
 ## 4. IA só onde ela é indispensável
