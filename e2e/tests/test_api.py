@@ -86,25 +86,20 @@ class TestAPIHealth:
 class TestAuthAPI:
     """Testa fluxo de autenticação via HTTP."""
 
-    def test_signup_and_login(self, api_url, test_user):
-        """Signup → Login → Token válido."""
-        # Signup (pode falhar se user já existe)
-        requests.post(
-            f"{api_url}/api/auth/signup",
-            json=test_user,
-            timeout=10,
-        )
+    def test_signup_and_login(self, api_url, test_user, auth_session):
+        """Signup → Login → Token válido.
 
-        # Login
-        r = requests.post(
-            f"{api_url}/api/auth/login",
-            json={"email": test_user["email"], "password": test_user["password"]},
-            timeout=10,
-        )
+        O signup e o login acontecem em `auth_session` (conftest.py), UMA vez
+        para a suite inteira — /api/auth/login so aceita 5 tentativas por
+        minuto por IP e o E2E inteiro sai de um IP so. Este teste continua
+        cobrando o mesmo contrato (200, access_token, /me coerente); o que
+        mudou foi de onde vem a resposta, nao o que se verifica.
+        """
+        r = auth_session["response"]
         assert r.status_code == 200
-        data = r.json()
+        data = auth_session["data"]
         assert "access_token" in data
-        token = data["access_token"]
+        token = auth_session["token"]
 
         # /me com token
         r2 = requests.get(
@@ -138,20 +133,15 @@ class TestNotificationsAPI:
         r = requests.get(f"{api_url}/api/notifications/unread", timeout=10)
         assert r.status_code == 401
 
-    def test_unread_with_auth(self, api_url, test_user):
-        # Login
-        login_r = requests.post(
-            f"{api_url}/api/auth/login",
-            json={"email": test_user["email"], "password": test_user["password"]},
-            timeout=10,
-        )
-        if login_r.status_code != 200:
-            pytest.skip("User not registered")
-        token = login_r.json()["access_token"]
-
+    def test_unread_with_auth(self, api_url, auth_session):
+        # Reusa o token da sessao em vez de gastar mais um /api/auth/login do
+        # orcamento de 5/min da suite (ver `auth_session` em conftest.py). O
+        # `skip("User not registered")` que existia aqui tambem sumiu: o
+        # fixture garante o cadastro, entao nao logar agora e falha, nao
+        # motivo para pular.
         r = requests.get(
             f"{api_url}/api/notifications/unread",
-            headers={"Authorization": f"Bearer {token}"},
+            headers={"Authorization": f"Bearer {auth_session['token']}"},
             timeout=10,
         )
         assert r.status_code == 200

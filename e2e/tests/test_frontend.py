@@ -5,7 +5,6 @@ Verifica fluxos de usuário reais no navegador.
 """
 
 import re
-import pytest
 from playwright.sync_api import Page, expect
 
 
@@ -44,17 +43,14 @@ class TestLoginPage:
 class TestLoginFlow:
     """Testa o fluxo completo de login → dashboard."""
 
-    def test_successful_login_redirects(self, page: Page, base_url, api_url, test_user):
-        """Login com sucesso redireciona ao dashboard/onboarding."""
-        import requests
+    def test_successful_login_redirects(self, page: Page, base_url, test_user, auth_session):
+        """Login com sucesso redireciona ao dashboard/onboarding.
 
-        # Garantir que user existe
-        requests.post(
-            f"{api_url}/api/auth/signup",
-            json=test_user,
-            timeout=10,
-        )
-
+        `auth_session` aqui vale por "o usuario existe": era um
+        /api/auth/signup repetido neste teste, e o endpoint aceita 3/min.
+        O login continua sendo feito pelo formulario, no browser — e este e um
+        dos 4 que o orcamento de AUTH_LIMITS reserva para exercicio real.
+        """
         page.goto(f"{base_url}/login")
         page.wait_for_load_state("networkidle")
 
@@ -67,44 +63,53 @@ class TestLoginFlow:
         page.wait_for_url(re.compile(r"/(dashboard|onboarding|pricing)"), timeout=15000)
         assert page.url != f"{base_url}/login"
 
-    def test_logout_returns_to_login(self, page: Page, base_url, api_url, test_user):
-        """Logout redireciona de volta ao login."""
-        import requests
+    def test_logout_returns_to_login(self, page: Page, base_url, test_user, auth_session):
+        """Logout limpa a sessao e volta ao login — exercendo o clique.
 
-        # Login via API
-        login_r = requests.post(
-            f"{api_url}/api/auth/login",
-            json={"email": test_user["email"], "password": test_user["password"]},
-            timeout=10,
-        )
-        if login_r.status_code == 429:
-            # LACUNA CONHECIDA (26/07/2026): AUTH_LIMITS limita /api/auth/login a
-            # 5 tentativas/minuto por IP, e a suite gasta 6 antes de chegar aqui —
-            # entao este teste pula SEMPRE no compose. O rate limit esta certo; o
-            # que falta e a suite nao competir consigo mesma (reusar token de
-            # sessao ou isentar o IP do runner). Registrado para nao virar um
-            # verde que ninguem sabe que nao testa nada.
-            pytest.skip(
-                "429 em /api/auth/login: a propria suite estourou AUTH_LIMITS "
-                "(5/min). Este teste nao exerce o logout no ambiente do CI."
-            )
-        if login_r.status_code != 200:
-            pytest.skip(f"Cannot login (HTTP {login_r.status_code})")
+        A LACUNA QUE ISTO FECHA (26/07/2026 → 27/07/2026): este teste pulava
+        SEMPRE no compose. Duas causas, as duas resolvidas:
 
-        token = login_r.json()["access_token"]
+        1. 429. O login era feito aqui, e era o SEXTO da suite — AUTH_LIMITS
+           permite 5/min por IP e o E2E inteiro sai de um IP so. Agora o token
+           vem de `auth_session` (conftest.py), que loga uma unica vez para a
+           suite; nenhum limite foi afrouxado, a suite e que parou de competir
+           consigo mesma.
 
-        # Navegar para dashboard com token no localStorage
+        2. Mesmo sem o 429, o teste nao testava logout. Ele so gravava
+           access_token e ia para /dashboard — mas App.tsx:46,72 renderiza
+           <Onboarding/> nessa rota enquanto `onboarding_completed` nao existe,
+           e Onboarding nao tem botao de sair. O `if logout_btn.count() > 0`
+           entao engolia a tela errada como sucesso. O login real grava a flag
+           (NexusCodexLogin.tsx:69); como entramos pela sessao da API,
+           reproduzimos o mesmo estado aqui.
+
+        Sem `if`: se o botao de logout sumir, este teste falha em vez de passar
+        calado.
+        """
         page.goto(f"{base_url}/login")
-        page.evaluate(f"localStorage.setItem('access_token', '{token}')")
-        page.goto(f"{base_url}/dashboard")
-        page.wait_for_timeout(2000)
+        page.evaluate(
+            """([token, email]) => {
+                localStorage.setItem('access_token', token)
+                localStorage.setItem('user_email', email)
+                localStorage.setItem('onboarding_completed', 'true')
+            }""",
+            [auth_session["token"], test_user["email"]],
+        )
 
-        # Se tem botão de logout, clicar
-        logout_btn = page.locator("button:has-text('Sair'), button:has-text('Logout'), [data-testid='logout']")
-        if logout_btn.count() > 0:
-            logout_btn.first.click()
-            page.wait_for_timeout(2000)
-            assert "/login" in page.url or page.url.endswith("/")
+        page.goto(f"{base_url}/dashboard")
+
+        logout_btn = page.get_by_test_id("logout")
+        expect(logout_btn).to_be_visible(timeout=15000)
+        logout_btn.click()
+
+        # A volta ao login e consequencia de estado, nao de um redirect
+        # hardcoded: AuthContext.logout() zera o token e App.tsx cai no ramo
+        # nao-autenticado, cujo `path="*"` navega para /login.
+        page.wait_for_url(re.compile(r"/login"), timeout=10000)
+        assert page.evaluate("localStorage.getItem('access_token')") is None, (
+            "logout navegou para /login mas deixou o access_token no "
+            "localStorage — a sessao continua valida"
+        )
 
 
 class TestNavigation:
