@@ -219,9 +219,15 @@ dispara um redeploy de 2 a 5 minutos, então o intervalo é real.
 **Consequência:** procedimento oficial, na ida **e na volta**:
 `STRIPE_SECRET_KEY` + os 3 `STRIPE_PRICE_*` sempre juntos.
 
-**Verificação:** `/health` → `stripe.precos_coerentes` confere se cada price
-existe **no mesmo modo da chave** (`config_check.py:408`). Meio rollback deixa
-esse campo `false` — pior que qualquer um dos dois estados inteiros.
+**Verificação:** `/health` → `stripe.precos_ok` confere se cada price existe
+**no mesmo modo da chave**. Meio rollback deixa esse campo `false` — pior que
+qualquer um dos dois estados inteiros.
+
+⚠️ **O campo é `precos_ok` (`config_check.py:545`);
+`stripe_precos_coerentes()` é a função que o calcula (`config_check.py:408`).**
+Nome de função vazou para a documentação e mandaria o executor procurar no
+`/health` um campo que não existe. Corrigido em 03/08/2026 no passe adversarial
+dos runbooks.
 
 ---
 
