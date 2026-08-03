@@ -17,7 +17,32 @@ Tudo que depende de infraestrutura, conta paga e configuração de painel.
 
 ---
 
-# ⚠️ LEIA ANTES DE TOCAR NO PAINEL DO RENDER
+# ⚠️ CHECKLIST OBRIGATÓRIO — ANTES DE TOCAR NO PAINEL
+
+**Faça isto uma vez, antes de qualquer alteração.** É o que torna todo
+`COMO DESFAZER` deste documento possível: **não existe rollback sem o valor
+antigo salvo.**
+
+```
+[ ] 1. Render → nexus-backend → Environment → abra a lista completa
+[ ] 2. COPIE PARA O GERENCIADOR DE SENHAS, valor por valor:
+         DATABASE_URL              ← o mais importante (começa com postgresql://…neon.tech)
+         STRIPE_SECRET_KEY
+         STRIPE_PRICE_ESSENCIAL
+         STRIPE_PRICE_PROFISSIONAL
+         STRIPE_PRICE_COMPLETO
+         STRIPE_WEBHOOK_SECRET
+         RESEND_API_KEY
+         EMAIL_FROM
+[ ] 3. Salve também o /health de agora (mesmo suspenso, guarde a resposta)
+[ ] 4. Anote a data e a hora — o PITR do Neon, se existir, usa isso
+```
+
+**Regra que passa a valer (D-014):** nunca reaplicar blueprint em produção sem
+validar antes as variáveis críticas. E, durante qualquer operação: **trabalhe
+só pela aba Environment.**
+
+---
 
 ## A mina do `DATABASE_URL`
 
@@ -119,6 +144,20 @@ Resposta certa — o `status` e o `database` são o mínimo:
 | `502` / `503` | está subindo ainda, ou o boot falhou → veja **Logs** |
 | Boot falha com `Variaveis de ambiente CRITICAS ausentes` | faltou `DATABASE_URL` ou `JWT_SECRET` — são as duas únicas que **derrubam o boot** |
 
+**COMO DESFAZER**
+
+Pagamento não se desfaz. O que se desfaz é o **dano colateral** de mexer no
+painel:
+
+| Se aconteceu | Restaure | Onde acha o valor | Confirme |
+|---|---|---|---|
+| Deletou recurso errado | — | ⚠️ **Delete não tem volta no Render** | por isso o passo 3 manda **Suspend primeiro** |
+| `DATABASE_URL` mudou | `DATABASE_URL` | checklist pré-painel, item 2 | login → **seus dados aparecem** |
+| Reaplicou o blueprint | **todas** as `sync: false` | checklist pré-painel | `/health` → `degradadas_faltando: []` |
+
+**Tempo:** cada Save dispara um redeploy — **2 a 5 minutos** até voltar a
+`Live`. Não salve em sequência: aguarde o anterior terminar.
+
 ---
 
 ## 2 · Stripe em modo live
@@ -189,6 +228,25 @@ Os dois campos importam por motivos diferentes:
 Na página de planos, o banner **"Sistema de pagamento em manutenção"** some
 quando isto passa. Ele nunca foi modo de manutenção: é o sintoma de chave que
 não autentica.
+
+**COMO DESFAZER**
+
+```
+Restaurar:  as 4 variáveis, de volta aos valores de teste
+Onde achar: checklist pré-painel, item 2
+Como:       UM ÚNICO SAVE com as 4 juntas (mesma regra da ida — D-015)
+Esperar:    2 a 5 min (redeploy)
+Validar:    /health → config.stripe.autentica: true, motivo "modo test"
+```
+
+⚠️ **Não desfaça pela metade.** Voltar só a chave e deixar os price live (ou o
+contrário) deixa `precos_coerentes: false` — pior que qualquer um dos dois
+estados inteiros.
+
+🟢 **Reversível sem consequência**, *desde que ninguém tenha pago ainda*. Se já
+houver assinatura live, voltar para teste **não cancela a cobrança** — ela
+continua no Stripe e o NEXUS deixa de enxergá-la. A partir da primeira venda,
+isto deixa de ser rollback e vira migração.
 
 ---
 
@@ -263,6 +321,24 @@ mostra se algum evento chegou a ser processado.
 reenviar em duplicata. **Ver `200` no painel do Stripe não prova que deu
 certo.** Só o (c) prova.
 
+**COMO DESFAZER**
+
+```
+Desfazer:   Stripe → Webhooks → o endpoint → Disable (não Delete)
+            Render → STRIPE_WEBHOOK_SECRET → valor antigo
+Onde achar: checklist pré-painel, item 2
+Esperar:    2 a 5 min (redeploy)
+Validar:    /health → degradadas_faltando NÃO lista STRIPE_WEBHOOK_SECRET
+```
+
+**Disable, não Delete** — desabilitado guarda o histórico de entregas, que é o
+que você vai querer ler se algo deu errado.
+
+🟠 **Enquanto o endpoint estiver desabilitado, pagamento não ativa plano.** Se
+alguém pagar nessa janela, o Stripe guarda o evento: reabilite e use
+**Resend** na entrega que falhou. Do lado do NEXUS existe
+`POST /api/admin/billing/resync-invoices` para reconciliar.
+
 ---
 
 ## 4 · Backup do banco — PITR do Neon
@@ -303,6 +379,20 @@ testes) e **está no Portão A**.
 > ⚠️ Isso **não** é backup do banco. Se o Neon cair sem PITR, a exportação não
 > recupera nada — ela garante que o usuário tinha como tirar cópia enquanto o
 > sistema estava de pé. São coisas diferentes.
+
+**COMO DESFAZER**
+
+Este passo é **só leitura** — não há o que desfazer. Ninguém muda nada no Neon
+aqui; a resposta é uma anotação.
+
+⚠️ **A exceção perigosa:** se em algum momento você **restaurar** o banco por
+PITR, isso **descarta tudo que aconteceu depois do ponto escolhido**. Restaurar
+não é rollback barato — é a última opção, e o custo é o trabalho dos usuários
+desde aquele instante.
+
+**Antes de restaurar, sempre:** anote a hora exata do incidente, e prefira
+restaurar para um **branch novo** do Neon (ele suporta), comparar, e só então
+promover. Restaurar por cima do banco vivo é irreversível.
 
 ---
 
@@ -351,6 +441,24 @@ painel não prova nada.
 
 **SE DER ERRADO** — Render → `nexus-backend` → **Logs** → busque `RESEND`. A
 tabela acima traduz cada mensagem.
+
+**COMO DESFAZER**
+
+```
+Restaurar:  RESEND_API_KEY e EMAIL_FROM aos valores antigos
+Onde achar: checklist pré-painel, item 2
+Esperar:    2 a 5 min (redeploy)
+Validar:    Logs → nenhum CRITICAL de RESEND no boot
+```
+
+🟢 **Registro de DNS não precisa ser desfeito.** SPF e DKIM do Resend não
+atrapalham nada se ficarem lá — e você vai precisar deles de volta na próxima
+tentativa. Deixe.
+
+⚠️ **Com `RESEND_API_KEY` ausente, `forgot-password` responde 503** em vez de
+mentir *"enviamos"*. É o comportamento correto (foi corrigido de propósito) —
+mas significa que **a recuperação de senha fica indisponível** enquanto o
+rollback durar. Avise os cinco usuários se acontecer.
 
 ---
 

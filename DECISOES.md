@@ -192,6 +192,64 @@ que falta é pagar uma conta do provedor.
 
 ---
 
+## D-014 · Nunca reaplicar blueprint sem validar as variáveis críticas antes
+**Data:** 02/08/2026
+
+**Motivo:** `render.yaml:28-31` aponta `DATABASE_URL` para o `nexus-db`
+(Postgres do Render), mas produção usa **Neon** — o valor real existe só no
+painel. Reaplicar o blueprint troca o banco por um **vazio**.
+
+**E o sistema não cai.** `/health` responde `database: connected`, a aplicação
+sobe normal, e os dados somem de vista. É o pior formato de falha: parece que
+está tudo bem.
+
+**Consequência:** checklist obrigatório no topo do `PORTAO_O.md` — copiar todos
+os valores atuais **antes** de tocar em qualquer coisa, e trabalhar só pela aba
+Environment. Nunca `Sync` / `Reapply blueprint` em produção.
+
+---
+
+## D-015 · As 4 variáveis do Stripe live vão num único Save
+**Data:** 02/08/2026
+
+**Motivo:** o Stripe recusa chave live com price de teste (e o contrário).
+Salvar em duas etapas deixa o sistema **quebrado no intervalo** — e cada Save
+dispara um redeploy de 2 a 5 minutos, então o intervalo é real.
+
+**Consequência:** procedimento oficial, na ida **e na volta**:
+`STRIPE_SECRET_KEY` + os 3 `STRIPE_PRICE_*` sempre juntos.
+
+**Verificação:** `/health` → `stripe.precos_coerentes` confere se cada price
+existe **no mesmo modo da chave** (`config_check.py:408`). Meio rollback deixa
+esse campo `false` — pior que qualquer um dos dois estados inteiros.
+
+---
+
+## D-016 · Todo procedimento crítico tem rollback documentado
+**Data:** 02/08/2026
+
+**Decisão (do dono):** *"Todo procedimento crítico deveria ter: fazer; e voltar
+atrás."*
+
+**Motivo:** o runbook mandava alterar cinco coisas em produção e não dizia como
+voltar de nenhuma.
+
+**Consequência:** cada bloqueador do `PORTAO_O.md` ganhou `COMO DESFAZER` com
+cinco campos — qual variável restaurar · onde achar o valor antigo · como
+confirmar que voltou · quanto esperar · como validar.
+
+**E o que o rollback revelou** — três coisas que só apareceram ao escrever o
+caminho de volta:
+
+- **`Delete` no Render não tem volta.** Por isso o procedimento manda
+  `Suspend` primeiro.
+- **Depois da primeira venda, voltar o Stripe para teste deixa de ser
+  rollback** — a cobrança continua existindo e o NEXUS deixa de enxergá-la.
+- **Restaurar por PITR descarta tudo que veio depois do ponto escolhido.**
+  Restaurar para um branch novo do Neon, comparar, e só então promover.
+
+---
+
 ## D-010 · Congelar a fundação quando o Portão A fechar
 **Data:** 02/08/2026
 

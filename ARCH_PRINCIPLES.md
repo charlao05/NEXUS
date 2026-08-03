@@ -184,7 +184,41 @@ sem ninguém saber.
 
 ---
 
-## 7. Prova por mutação, não por "verde"
+## 7. O efeito, não o código de retorno
+
+**Nunca considerar sucesso porque o HTTP devolveu 200, o CI ficou verde ou o
+healthcheck respondeu OK. Sempre procurar o efeito esperado.**
+
+| Em vez de | Pergunte |
+|---|---|
+| "o webhook respondeu 200" | **o plano do usuário mudou?** |
+| "o cadastro retornou 201" | **ele consegue entrar?** |
+| "a exportação respondeu 200" | **o arquivo tem dados dentro?** |
+| "a notificação foi criada" | **apareceu para o usuário?** |
+| "o CI está verde" | **o teste exercita esse caminho?** |
+| "o `/health` diz ok" | **ok em relação a quê?** |
+
+**Mecanismo:** ✅ prática obrigatória em teste e em runbook — todo passo do
+[`PORTAO_O.md`](PORTAO_O.md) termina em teste de efeito, nunca em "configurei"
+
+**Por que virou princípio: aconteceu quatro vezes nesta auditoria, sempre com a
+mesma forma.**
+
+| Caso | O sinal dizia | A realidade era |
+|---|---|---|
+| Webhook do Stripe | **200** | `{"status": "error"}` — o cliente pagava e não recebia acesso. `_stripe_webhook_handler.py:602` devolve 200 **mesmo quando falha**, de propósito, para o Stripe não reenviar |
+| CI | **verde**, 4 jobs | aprovou um commit que quebrou o pagamento — o caminho não tinha teste |
+| `/health` | **ok** | subia sem `RESEND_API_KEY`: recuperação de senha morta, healthcheck aprovando |
+| Exportação LGPD | **200** | todas as seções vazias — o usuário levava um arquivo que parecia backup |
+
+Nos quatro, o sinal era tecnicamente correto e **respondia a pergunta errada**.
+
+**O corolário para teste:** asserção sobre status é o piso, não o teto. Um teste
+que só checa `status_code == 200` teria passado em todos os quatro casos acima.
+
+---
+
+## 8. Prova por mutação, não por "verde"
 
 Teste que passa não prova nada até se mostrar que ele **quebra**.
 
@@ -200,6 +234,30 @@ vazamento passava porque a função devolvia lista vazia.
 
 ---
 
+## 9. Risco operacional tem o mesmo peso que bug de código
+
+Configuração de painel derruba produto igual a código errado — e é **mais
+traiçoeira**, porque não passa por revisão, não tem teste e não deixa rastro no
+`git log`.
+
+**Mecanismo:** ✅ [`PORTAO_O.md`](PORTAO_O.md) — todo procedimento tem
+`COMO VERIFICAR` **e** `COMO DESFAZER`
+
+**O caso que fundou o princípio:** `render.yaml:28-31` aponta `DATABASE_URL`
+para o Postgres do Render, mas produção usa Neon — o valor real existe só no
+painel. Reaplicar o blueprint troca o banco por um **vazio**, e o sistema **não
+cai**: `/health` responde `database: connected`, a aplicação sobe, e os dados
+somem de vista.
+
+Nenhum teste pega isso. Nenhum code review pega isso.
+
+**As duas regras que saem daí:**
+- **D-014** — nunca reaplicar blueprint sem validar as variáveis críticas antes
+- **D-016** — todo procedimento crítico tem rollback documentado: *"fazer, e
+  voltar atrás"*
+
+---
+
 ## Como usar isto em revisão
 
 1. A mudança viola algum princípio? Qual, e com que justificativa?
@@ -208,6 +266,8 @@ vazamento passava porque a função devolvia lista vazia.
 4. Se toca dinheiro, isolamento, autenticação ou a jornada do primeiro cliente:
    **tem teste que falha se quebrar?**
 5. Se é proteção: foi provada por mutação?
+6. Se o teste checa `status_code`: **checa também o efeito?**
+7. Se é procedimento de painel: **tem como desfazer escrito?**
 
 ---
 
