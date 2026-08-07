@@ -43,15 +43,44 @@ onde ficam os valores antigos que tornam o rollback possível.
 
 ---
 
-## Critérios de saída
+## Estado medido — 07/08/2026
 
-| # | Bloqueador | Estado | Onde se resolve |
-|---|---|---|---|
-| 1 | **Render ativo** | ⛔ suspenso por inadimplência (E-034) | Runbook A, passo A2 (diagnóstico) → decisão no checkpoint → **Runbook B, passo B0** (o dono executa) |
-| 2 | **Stripe em modo live** | ⛔ chaves de teste em produção (E-029) | Runbook B, passo B1 |
-| 3 | **Webhook live** | ⛔ não confirmado | Runbook B, passo B2 |
-| 4 | **Backup do banco (PITR do Neon)** | ⛔ nunca verificado | Runbook A, passo A4 |
-| 5 | **E-mail transacional** | ⛔ não verificado | Runbook A, passo A5 → Runbook B, passo B3 |
+O diagnóstico (Runbook A) + verificação na API da Stripe substituíram a lista de
+"5 bloqueadores" por algo mais factual. **Metade já está confirmada.**
+
+### ✅ Confirmado
+
+| | Como se sabe |
+|---|---|
+| Produção aponta para **Neon**, não para `nexus-db` | `DATABASE_URL` contém `neon.tech` |
+| Origem da cobrança **identificada** | $25,56 de datastores **deletados** de `apocalipse`/`alinha` + $0,94 de cron. **NEXUS Free = $0,00** |
+| `STRIPE_SECRET_KEY` **já é live** | lida no painel |
+| **Webhook correto já existe** | `we_1TLnQw…` · livemode · enabled · os 6 eventos (E-048) |
+| Endpoint **morto** identificado | `we_1TCXbX…` → `/billing/webhook`, rota inexistente (E-048) |
+| **Resend verificado** | domínio `Verified`, `EMAIL_FROM` sem gmail |
+| **Zero assinaturas live** | `GET /v1/subscriptions` → `[]` (E-048) |
+| `nexus-db` **não é produção** | e será deletado em 21/08/2026 |
+
+### ⛔ Ainda precisa de ação ou verificação
+
+| # | Item | Onde |
+|---|---|---|
+| 1 | **Corrigir os 3 price IDs** — hoje apontam para test mode com chave live | Runbook B, **B1** |
+| 2 | **Confirmar o `whsec_`** do endpoint correto | Runbook B, **B2** |
+| 3 | **Desabilitar** o webhook morto | Runbook B, **B2** |
+| 4 | **Render ativo** — decidir a fatura | checkpoint → **B0** (o dono) |
+| 5 | **PITR do Neon** — *History window* = **6 horas**, plano Free | checkpoint, item 4 |
+| 6 | **Country** da conta Stripe | Prompt A, **A6.4** *(relatório cortou)* |
+| 7 | **Pix ativo?** em Payment methods | Prompt A, **A6.5** *(relatório cortou)* — decide o **DIV-001** |
+| 8 | **Rotação** das 4 credenciais expostas | decisão do dono (E-048) |
+
+🔴 **O item 1 não é configuração pendente — é falha operacional de cobrança.**
+Com chave live e price de test mode, a Stripe responde `No such price`: ninguém
+consegue assinar. Só não virou incidente porque o serviço está suspenso.
+
+⚠️ **Os itens 6 e 7 não pertencem a este portão.** Decidem o `DIV-001` (a
+promessa de PIX na página de preços) e estão aqui só porque a mesma ida ao painel
+os resolve.
 
 ### Não bloqueiam, mas registrado
 
@@ -96,12 +125,18 @@ engenharia.** Quando os bloqueadores 3 e 5 fecharem, os dois deixam de pular.
 **Duas provas, e a segunda não se substitui:**
 
 1. `/health` com todos os campos no valor esperado
-   ([`ops/PARAMETROS.md`](ops/PARAMETROS.md))
+   ([`ops/PARAMETROS.md`](ops/PARAMETROS.md)) — **incluindo
+   `stripe.cobranca_operacional: true`**
 2. **Uma compra real de R$ 29,90 que muda o plano do usuário no NEXUS**
 
 O `/health` prova configuração. Só a compra prova a cadeia inteira — e
 `200` no painel do Stripe **não conta**, porque o handler devolve 200 mesmo
 quando falha.
+
+🔴 **`cobranca_operacional` entrou na lista por medição, não por precaução.** É
+exatamente o campo que hoje diria `false` enquanto `autentica` diz `true`
+(E-048). Trocar os preços sem conferir esse campo é repetir o erro que o
+princípio **#7** descreve: aceitar sinal parcial como prova de saúde.
 
 ---
 

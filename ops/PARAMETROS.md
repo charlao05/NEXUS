@@ -38,12 +38,17 @@ produção**. Produção usa **Neon**. Ver `DATABASE_URL` abaixo.
 | `URL_API` | `https://api.nexxusapp.com.br` | `render.yaml:49` | 02/08/2026 |
 | `URL_APP` | `https://app.nexxusapp.com.br` | `render.yaml:45` | 02/08/2026 |
 | `URL_HEALTH` | `https://api.nexxusapp.com.br/health` | `render.yaml:21` | 02/08/2026 |
-| `URL_WEBHOOK_STRIPE` | `https://api.nexxusapp.com.br/api/auth/webhook` | `billing.py:269` | 03/08/2026 |
+| `URL_WEBHOOK_STRIPE` | `https://api.nexxusapp.com.br/api/auth/webhook/stripe` | `auth.py:1563` | **07/08/2026** |
 
-⚠️ `URL_WEBHOOK_STRIPE` — **não** é `/webhooks/stripe` nem
-`/api/billing/webhook`. Essas duas **não existem**. Existe também
-`/api/auth/webhook/stripe` (`auth.py:1563`), funcionalmente equivalente; use a
-primeira para manter live e test consistentes.
+🔴 **Corrigido em 07/08/2026.** Este parâmetro dizia `/api/auth/webhook`
+(`billing.py:269`). **O endpoint live registrado na conta usa
+`/api/auth/webhook/stripe`** — medido na API (`we_1TLnQw…`, livemode, enabled, 6
+eventos). As duas rotas existem e são equivalentes; a recomendação é que estava
+desalinhada do que está em uso. **Trocar por trocar cria risco sem ganho.**
+
+⚠️ **Não** é `/webhooks/stripe` nem `/api/billing/webhook` — essas não existem.
+E existe um endpoint live apontando para `https://api.nexxusapp.com.br/billing/webhook`
+(`we_1TCXbX…`), cuja **rota não existe**: falha entrega desde março. Ver E-048.
 
 **Por que `/api/auth/` sendo o arquivo `billing.py`:** o router do `billing.py`
 declara `prefix="/api/auth"` (`billing.py:14`) — o mesmo prefixo do `auth.py`
@@ -53,7 +58,17 @@ arquivo.
 
 ## Stripe — price IDs
 
-Geração **atual** (29,90 / 59,90 / 89,90):
+🔴 **MEDIDO EM 07/08/2026 — o ambiente de produção NÃO usa estes IDs.**
+
+Os três Price IDs **atualmente configurados no Render** referenciam objetos que
+existem **apenas em Test Mode**; a tentativa de uso com a chave live retorna
+`No such price`. A `STRIPE_SECRET_KEY` **já é `sk_live_`**.
+
+**Isso não é divergência documental — é falha operacional de cobrança**, e é o
+estado misto que o **D-015** define como pior que qualquer um dos dois puros. Ver
+**E-048**.
+
+Geração **atual** (29,90 / 59,90 / 89,90) — **os corretos, a serem aplicados**:
 
 | Parâmetro | Valor | Preço | Verificado |
 |---|---|---|---|

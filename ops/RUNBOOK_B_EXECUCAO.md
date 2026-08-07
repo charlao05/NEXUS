@@ -64,9 +64,12 @@ SE O /health FALHAR APÓS UM SAVE
        não voltou → vá em Logs, copie o erro, e NÃO mexa em mais nada.
 ```
 
-⚠️ **Nunca restaure pela metade.** Voltar a chave e deixar os price (ou o
-contrário) produz `precos_ok: false` — estado pior que qualquer um dos dois
-inteiros.
+⚠️ **Nunca restaure pela metade.** Restaurar parte dos três price IDs produz
+`precos_ok: false` — o mesmo estado misto de que este runbook está tentando sair.
+
+🔴 **O ponto de partida já é o estado misto** (chave live + price de teste,
+medido em 07/08 — **E-048**). "Voltar ao anterior" aqui significa **voltar ao
+quebrado**: só faça isso se o Save tiver causado algo pior que o já existente.
 
 ---
 
@@ -74,6 +77,11 @@ inteiros.
 
 **Este passo não é do executor nem de agente nenhum.** Envolve pagar ou remover
 recurso, e a decisão foi tomada no [`CHECKPOINT.md`](CHECKPOINT.md), item 2.
+
+📌 **Medido em 07/08:** a fatura de **$26,50** vem de **datastores já deletados**
+de outros projetos (`apocalipse`, `alinha`) e de um cron do `alinha`. Os serviços
+NEXUS são Free e geram **$0,00**. É cobrança de período consumido — a decisão é
+pagar ou não, não "remover o recurso que cobra".
 
 Sem ele, **B1 e B2 não têm como rodar**: os dois terminam conferindo o
 `/health`, e serviço suspenso não responde `/health`.
@@ -93,34 +101,38 @@ no checkpoint, antes, e não aqui.
 
 ---
 
-# B1 · Stripe em modo live
+# B1 · Corrigir os 3 price IDs — a chave já está certa
 
-**PRÉ:** o **B0** concluído — serviço **Live**. Se estiver suspenso, este passo
-não roda.
+🔴 **REESCRITO EM 07/08/2026.** Este passo mandava trocar **quatro** variáveis.
+Medido na API: a `STRIPE_SECRET_KEY` **já é `sk_live_`**, e os três price IDs em
+produção **referenciam objetos que só existem em Test Mode** (`No such price` com
+chave live). **Trocar a chave seria mexer no que está certo.** Ver **E-048**.
 
-**ONDE:** `https://dashboard.stripe.com` → depois
-`https://dashboard.render.com` → `nexus-backend` → **Environment**
+> **O ambiente já está no estado misto do D-015** — o pior dos três. Sair dele é
+> o objetivo deste passo.
+
+**PRÉ:** o **B0** concluído — serviço **Live**. Se estiver suspenso, não roda.
+
+**ONDE:** `https://dashboard.render.com` → `nexus-backend` → **Environment**
 
 **O QUE FAZER**
 
-1. Stripe → topo da tela → **DESLIGUE o "Test mode"**. Confirme antes de
-   seguir.
-2. **Developers → API keys** → linha "Secret key" → **Reveal live key** → use o
-   **ícone de copiar** *(nunca selecione e arraste — é assim que se trunca)*
-3. Render → `nexus-backend` → **Environment**
-4. Edite as **quatro** variáveis abaixo
-5. 🔴 **Um único Save, com as quatro já editadas**
+1. **NÃO toque em `STRIPE_SECRET_KEY`.** Ela já está correta.
+2. Edite as **três** variáveis abaixo.
+3. 🔴 **Um único Save, com as três já editadas.**
 
 **VALOR EXATO**
 
 ```
-STRIPE_SECRET_KEY          = <a sk_live_ do passo 2>
 STRIPE_PRICE_ESSENCIAL     = price_1TFtcdRwnNMZfuJ2Yfub1J0S
 STRIPE_PRICE_PROFISSIONAL  = price_1TFteFRwnNMZfuJ2mi7OS4n2
 STRIPE_PRICE_COMPLETO      = price_1TFtfmRwnNMZfuJ2PToTrk6O
 ```
 *(parâmetros `PRICE_ESSENCIAL`, `PRICE_PROFISSIONAL`, `PRICE_COMPLETO` —
 se divergirem do `PARAMETROS.md`, o `PARAMETROS` vence)*
+
+✅ **`price_1TFtcd…` foi conferido na API em 07/08:** `livemode: true`,
+R$ 29,90, `recurring: month`.
 
 ⚠️ Existe uma **geração antiga** na conta (39,90 / 69,90 / 99,90) que continua
 ativa e ainda é o `default_price` dos produtos. **Nunca escolha pelo nome do
@@ -154,61 +166,68 @@ no código e **não aparece no JSON**.
 
 **COMO DESFAZER**
 ```
-Restaurar:  as 4 variáveis, valores da tabela do CHECKPOINT
-Como:       UM único Save com as 4 juntas
+Restaurar:  os 3 price IDs, valores da tabela do CHECKPOINT
+Como:       UM único Save com os 3 juntos
 Esperar:    2 a 5 min
-Validar:    /health → stripe.autentica: true, motivo "modo test"
+Validar:    /health → stripe.precos_ok volta a false
 ```
+⚠️ **Voltar significa voltar ao estado quebrado** — os valores antigos são
+price de teste com chave live. Só desfaça se o Save tiver causado algo pior.
+
 🟢 Reversível **enquanto ninguém tiver pago**. Depois da primeira venda, voltar
-para teste **não cancela a cobrança** — ela continua no Stripe e o NEXUS deixa
-de enxergá-la. A partir daí isto deixa de ser rollback e vira migração.
+**não cancela a cobrança** — ela continua no Stripe e o NEXUS deixa de enxergá-la.
 
 ---
 
-# B2 · Webhook em modo live
+# B2 · Webhook — conferir e limpar, NÃO criar
+
+🔴 **REESCRITO EM 07/08/2026.** Este passo mandava **Add endpoint**. Medido na
+API: **o endpoint live correto já existe**, com os 6 eventos certos. Criar outro
+produziria **entrega duplicada** — intervenção destrutiva. Ver **E-048**.
+
+```
+JÁ EXISTE  we_1TLnQw…   https://api.nexxusapp.com.br/api/auth/webhook/stripe
+                        livemode · enabled · os 6 eventos, exatos
+MORTO      we_1TCXbX…   https://api.nexxusapp.com.br/billing/webhook
+                        rota inexistente — falha entrega desde março
+```
 
 **ONDE:** `https://dashboard.stripe.com/webhooks` *(Test mode **desligado**)*
 
 **O QUE FAZER**
 
-1. **Add endpoint**
-2. URL — exatamente:
+1. 🔴 **NÃO clique em `Add endpoint`.**
+2. Abra `we_1TLnQw…` (`/api/auth/webhook/stripe`) e **confirme os 6 eventos**:
    ```
-   https://api.nexxusapp.com.br/api/auth/webhook
+   checkout.session.completed      invoice.paid
+   invoice.payment_failed          charge.refunded
+   customer.subscription.updated   customer.subscription.deleted
    ```
-   *(parâmetro `URL_WEBHOOK_STRIPE`)*
-
-   ⚠️ **Não** é `/webhooks/stripe`, **não** é `/api/billing/webhook`. Essas
-   duas **não existem**. Path errado = o cliente paga e não recebe acesso.
-3. Selecione **os 6 eventos** *(parâmetro: eventos do webhook)*:
-   ```
-   checkout.session.completed
-   invoice.paid
-   invoice.payment_failed
-   charge.refunded
-   customer.subscription.updated
-   customer.subscription.deleted
-   ```
-   Confirme que ficaram **6** selecionados. Evento a mais é ignorado; evento a
-   menos significa que aquele efeito nunca acontece no NEXUS.
-4. Salve → copie o **Signing secret** (`whsec_…`) pelo **ícone de copiar**
-5. Render → Environment → `STRIPE_WEBHOOK_SECRET` = o `whsec_` → **Save**
+3. Nesse endpoint, revele o **Signing secret** e compare **10 primeiros + 4
+   últimos** com o `STRIPE_WEBHOOK_SECRET` que está no Render.
+   - **iguais** → não mexa em nada
+   - **diferentes** → copie o deste endpoint pelo ícone e atualize a variável no
+     Render → Save
+4. Abra `we_1TCXbX…` (`/billing/webhook`) → **Disable**.
+   🔴 **Disable, não Delete** — desabilitado preserva o histórico de entregas,
+   que é o que se vai querer ler.
 
 **COMO VERIFICAR**
 
-`/health` → `config.degradadas_faltando` **não** lista
-`STRIPE_WEBHOOK_SECRET`.
+`/health` → `config.degradadas_faltando` **não** lista `STRIPE_WEBHOOK_SECRET`.
 
-⚠️ **Isso só prova que a variável existe — não que o webhook funciona.** A
-prova está na validação final.
+⚠️ **Isso só prova que a variável existe — não que o webhook funciona.** A prova
+está na validação final.
 
 **COMO DESFAZER**
 ```
-Desfazer:   Stripe → Webhooks → o endpoint → Disable  (NÃO Delete)
-            Render → STRIPE_WEBHOOK_SECRET → valor do CHECKPOINT
-Esperar:    2 a 5 min
-Validar:    /health → degradadas_faltando sem STRIPE_WEBHOOK_SECRET
+Se trocou o secret:  Render → STRIPE_WEBHOOK_SECRET → valor do CHECKPOINT
+Se desabilitou:      Stripe → we_1TCXbX… → Enable
+Esperar:             2 a 5 min
+Validar:             /health → degradadas_faltando sem STRIPE_WEBHOOK_SECRET
 ```
+🟢 Reabilitar o endpoint morto é inócuo — ele aponta para rota inexistente e só
+volta a acumular falha de entrega.
 **Disable, não Delete** — desabilitado preserva o histórico de entregas, que é
 o que você vai querer ler.
 
