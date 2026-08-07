@@ -12,60 +12,22 @@ que justificativa.
 
 # O meta-princípio
 
-**Isto não é o 11º princípio.** É a propriedade que os dez compartilham, e o
-teste que um princípio novo precisa passar para entrar aqui.
+**Não é o 11º princípio** — é a propriedade que os dez compartilham, e o teste
+que um princípio novo precisa passar para entrar aqui.
 
 > **Todo artefato _governado_ declara por que existe.**
 > **Todo artefato governado e _contingente_ declara também quando deixa de existir.**
 
-**Governado** — rascunho, notebook descartável, experimento local e saída de
-análise **não devem nada a ninguém**. Quem obedece é o que faz parte da
-arquitetura documental e de decisão do projeto. A fronteira está definida em
-[`DECISOES.md`](DECISOES.md) → **D-018** → *"A quem o quadro se aplica"*, e não é
-repetida aqui de propósito: duas cópias divergem, e a que se lê primeiro vence.
-
-⚠️ **Sem o qualificador, uma leitura literal daqui a dois anos cobra prazo de
-rascunho** — e escape sem definição é o mesmo defeito de `sem_tenant` sem
-`motivo`: alguém declara tudo não-governado e a regra evapora.
+**Governado** — rascunho, notebook descartável e saída de análise não devem nada
+a ninguém. A fronteira está no **D-018**, e não é repetida aqui de propósito.
 
 **Contingente** = exceção · dívida · estrutura transitória · decisão revisável ·
-procedimento. O que é invariante declara só a primeira metade — **exigir prazo de
-um invariante é contradição**: *"esta regra vale até 2027"* é o oposto de
-princípio.
+procedimento. Invariante declara só a primeira metade: **exigir prazo de um
+invariante é contradição.**
 
-**Verificado contra os dez** — afirmar propriedade dos dez é afirmação sobre os
-dez, e o **#10** proíbe afirmar sem conferir:
-
-| Declara | Quantos | Onde |
-|---|---|---|
-| **por que existe** | **10 / 10** | todos |
-| **quando deixa de existir** | **4 / 10** | **#2** `expires` obrigatório · **#3** D-012 vale *enquanto a dívida existir* · **#4** e **#5** o 🟡 declara o que falta · **#9** D-016, todo procedimento tem `COMO DESFAZER` |
-
-Os seis restantes — falhar fechado, teste, efeito, mutação, fluxo de execução —
-são invariantes, e é correto que não tenham prazo.
-
-### Onde a propriedade aparece, fora daqui
-
-| Contingente — declara o fim | Invariante — não declara |
-|---|---|
-| escotilha — `sem_tenant(motivo, expires)` | contexto de tenant (a pia) |
-| divergência — critério de encerramento | teste |
-| documento transitório — D-018 | princípio |
-| decisão — gatilhos de reabertura (D-017) | |
-| dívida arquitetural — marcador 🟡 | |
-| procedimento — `COMO DESFAZER` (D-016) | |
-
-### A simetria que isto produz
-
-O mesmo modelo mental serve ao código e ao documento — é por isso que o D-018
-pergunta ao documento o que o code review pergunta ao código:
-
-| Ao código | Ao documento |
-|---|---|
-| quem chama? | quem consulta? |
-| quando executa? | quando nasce? |
-| quando falha? | quando morre? |
-| quem substitui? | qual o sucessor? |
+*Verificado (03/08/2026): os dez declaram por quê; quatro declaram também quando
+acabam — #2 `expires`, #3 D-012, #4 e #5 pelo 🟡, #9 D-016. Os outros seis são
+invariantes.*
 
 ---
 
@@ -320,110 +282,51 @@ Nenhum teste pega isso. Nenhum code review pega isso.
 ## 10. Nenhuma evidência estrutural substitui a observação do fluxo real de execução
 
 Quando a conclusão depende do **comportamento** do sistema, ler o código não
-basta — em nenhum nível de sofisticação.
+basta — em nenhum nível de sofisticação. Irmão do **#7** (*não confie no sinal*)
+e do **#8** (*não confie no verde*).
 
-Irmão do **#7** (*não confie no sinal*) e do **#8** (*não confie no verde*). Este
-é: **não confie na leitura estática.**
-
-### As três camadas, e por que a última não tem substituto
-
-| Camada | O que ela entrega | O que ela não vê |
+| Camada | Entrega | Não vê |
 |---|---|---|
-| **1 · Busca textual** | a **linha** | a que bloco pertence, se o nome encontrado é o referente |
-| **2 · Estrutura estática** | o grafo de chamadas, a árvore de rotas | despacho dinâmico, colisão de registro, ordem de montagem |
-| **3 · Fluxo de execução** | o que **acontece** | — |
+| **1 · busca textual** | a linha | o bloco; se o nome é o referente |
+| **2 · estrutura estática** | grafo de chamadas, árvore de rotas | despacho dinâmico, colisão de registro |
+| **3 · fluxo de execução** | o que **acontece** | — |
 
-**Cada camada pega o que a anterior não pega, e nenhuma substitui a terceira.**
-Foi exatamente assim que duas varreduras sucessivas concluíram *"0 rotas sem
-contexto"* e ambas erraram: as duas operavam na camada 2, e o defeito vivia na 3.
-
-### Onde parar de subir
-
-A escada só é útil com regra de parada. Sem ela, o princípio produz o erro
-oposto: depois de aprender que execução importa, passa-se a querer executar tudo
-— e na maioria dos casos um `grep` resolve.
-
-⚠️ **A regra não pode ser *"a resposta já é suficiente?"*** — é exatamente essa
-pergunta que produziu os sete casos abaixo, respondida com "sim" quando era não.
-A versão confiável é guiada pela **afirmação que se vai escrever**, não pela
-sensação de suficiência:
-
-> **A camada é definida pela afirmação que você vai escrever — e ela é um piso,
-> não um teto.**
-
-| A afirmação é sobre | Camada mínima | Acima do mínimo |
-|---|---|---|
-| existência de texto — *"há referência a X"* | **1** | permitido — custa tempo |
-| forma do código — *"esta função recebe N parâmetros"* | **1** | permitido — custa tempo |
-| estrutura — *"esta rota está registrada", "A chama B"* | **2** | permitido — custa tempo |
-| **comportamento** — *"vaza", "protege", "o usuário recebe", "funciona"* | **3** | — |
-
-### A cláusula de escape
+**A camada é definida pela afirmação — e é piso, não teto.** Texto e forma → 1.
+Estrutura (*"a rota está registrada", "A chama B"*) → 2. **Comportamento**
+(*"vaza", "protege", "o usuário recebe"*) → **3**.
 
 > **É permitido subir uma camada para reduzir incerteza relevante. O que não é
 > permitido é concluir usando uma camada insuficiente.**
 
-**São duas grandezas diferentes, e nenhuma responde a outra:**
+São grandezas diferentes: a **afirmação** define o piso; a **decisão** define se
+vale subir acima dele. *"Esta consulta faz N+1"* é estrutural — mas subir à 3
+pode mostrar 3 ms por cache, e a camada 2 bastava para a afirmação **e não para a
+decisão de reportá-la**.
 
-| | Define |
-|---|---|
-| a **afirmação** | o **piso** — abaixo dele a conclusão é inválida |
-| a **decisão** | se vale subir **acima** do piso |
+O escape é unilateral porque os erros não custam o mesmo: **subir sem precisar
+custa tempo (recuperável); concluir abaixo do mínimo custa correção pública (não
+recuperável)**.
 
-**Exemplo:** *"esta consulta faz N+1"* é afirmação estrutural — a camada 2
-sustenta. Mas subir à 3 pode mostrar que ela roda em 3 ms por cache ou índice. **A
-camada 2 bastava para a afirmação e não bastava para a decisão de reportá-la.**
+🔴 **Subida obrigatória:** despacho dinâmico, herança, decorator, middleware ou
+colisão de registro — a camada 2 não conclui.
 
-**Por que o escape é unilateral** — os dois erros não custam a mesma coisa:
+**Sete casos desta auditoria** — *o que decidia, e estava fora da evidência
+usada:*
 
-| Erro | Custo | Recuperável? |
-|---|---|---|
-| subir sem precisar | tempo | ✅ sim |
-| concluir abaixo do mínimo | correção pública, confiança | ❌ **não** |
-
-🔴 **Subida obrigatória, independente da afirmação:** se o caminho passa por
-**despacho dinâmico, herança, decorator, middleware ou colisão de registro**, a
-camada 2 **não conclui**. Foi o `_HANDLERS` que derrotou as duas varreduras.
-
-**Um princípio que só empurra para cima troca falso positivo por paralisia — e um
-que só empurra para baixo troca paralisia por superficialidade.**
-
-### Sete casos desta auditoria, um por camada
-
-| Camada | Caso | O que decidia — e estava fora da evidência usada |
-|---|---|---|
-| **1** | Vazamento no `/api/crm/dashboard` | `crm_routes.py:396` **sempre isolou**. Existia uma rota com esse nome e um defeito real **em outra** — a busca casou o nome, não o referente |
-| **1** | `precos_coerentes` | era a **função** (`config_check.py:408`); o campo do JSON é `precos_ok` (`:545`). O runbook mandava conferir campo inexistente (E-045) |
-| **1** | `Pricing.tsx:365` | "Cartão ou PIX" — as **6 linhas acima** diziam "R$ 12,90, compra única". Bloco do **addon**, não dos planos (E-046) |
-| **2** | `billing.py` | arquivo coerente, rotas plausíveis — e `:14` declara `prefix="/api/auth"`, colidindo com `auth.py:464`. **Metade nunca executa** (E-040) |
-| **2** | Varredura de webhooks | nenhuma chamada direta ao handler: `_HANDLERS` (`_stripe_webhook_handler.py:495`) resolve em runtime. **Despacho dinâmico derrota grafo de chamadas** |
-| **3** | Testes de notificação | asserts passando sobre uma função que devolvia `[]` — **verde vazio** (ver #8) |
-| **3** | Exportação LGPD | o caminho feliz lê como se exportasse; um `except Exception` sem tipo engolia o `AttributeError` e devolvia vazio (E-047) |
-
-⚠️ **A exportação LGPD aparece também no princípio #7.** Não é contagem dupla: é
-um incidente com **dois modos de falha** — o sinal (`200`) mentia, **e** a
-leitura estática não revelava o desvio de fluxo.
-
-**Mecanismo:** ✅ prática obrigatória em auditoria — a exigência muda conforme a
-camada de onde veio a conclusão:
-
-| Se a conclusão veio de | Antes de concluir |
-|---|---|
-| busca textual | ler o **bloco inteiro**; confirmar que o nome encontrado é o referente |
-| estrutura estática | seguir a chamada **do cliente até o handler**; conferir prefixo e ordem de registro |
-| qualquer uma das duas, com comportamento dependente de runtime | **executar ou instrumentar** — despacho dinâmico não se resolve por leitura |
-
-**A regra em uma frase:**
+1. `/api/crm/dashboard` — `crm_routes.py:396` sempre isolou; o defeito era de outra rota
+2. `precos_coerentes` — era a função (`config_check.py:408`); o campo é `precos_ok` (`:545`) · E-045
+3. `Pricing.tsx:365` — as 6 linhas acima diziam "compra única": bloco do addon · E-046
+4. `billing.py` — `:14` declara `prefix="/api/auth"` e colide com `auth.py:464` · E-040
+5. webhooks — `_HANDLERS` (`_stripe_webhook_handler.py:495`) resolve em runtime
+6. notificações — asserts verdes sobre função que devolvia `[]` · ver #8
+7. exportação LGPD — `except Exception` engolia o desvio · E-047 *(também no #7: dois modos de falha)*
 
 > **"X existe" + "Y tem o defeito" nunca prova "X expõe o defeito".**
 
-⚠️ **Estes sete casos não foram revelados por inspeção mais cuidadosa** — foram
-revelados por um **processo de revisão que exige a origem de cada afirmação**.
-Nenhum deles é defeito do código: todos são conclusões de análise maiores que a
-evidência que as sustentava.
-
-O princípio existe para que esse processo **não dependa de quem está revisando**.
-Um princípio que só cataloga acertos não protege ninguém.
+⚠️ Nenhum é defeito do código — todos são conclusões maiores que a evidência que
+as sustentava, reveladas por **um processo que exige a origem de cada
+afirmação**. O princípio existe para que esse processo não dependa de quem
+revisa.
 
 **O princípio inteiro cabe numa linha:**
 

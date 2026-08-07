@@ -270,6 +270,12 @@ abandona?
 usar isso durante uma semana?* — e não *o que ainda pode ser melhorado?*. A
 segunda pergunta nunca acaba.
 
+🔴 **O filtro vale também para método e documentação** *(acrescentado em
+07/08/2026)*. O método passou por baixo deste congelamento porque *"é só
+documentação"* — e produziu **quatro entregas seguidas, 432 linhas, zero de
+produto**. Melhoria de método não impede ninguém de usar o produto: enquanto o
+Portão O estiver aberto, ela reprova na primeira pergunta do filtro do D-018.
+
 ---
 
 ## D-017 · O gateway continua Stripe — nesta escala
@@ -476,114 +482,51 @@ EM ABERTO, INDEPENDENTE DESTA DECISÃO
 ---
 
 ## D-018 · Critério para identificadores permanentes
-**Data:** 03/08/2026
+**Data:** 03/08/2026 · **Enxugado em 07/08/2026** — reprovava no próprio critério
+(tinha 112 linhas)
 
 **Motivo:** cada descoberta desta auditoria virava estrutura documental nova.
-Sem critério, o sistema de conhecimento cresce até ficar mais caro navegar que
-consultar — o padrão que se vê em projetos antigos:
+Sem critério, o conhecimento cresce até ficar mais caro navegar que consultar.
 
-```
-BUG-001   OBS-014   NOTE-022   FACT-017   DIV-011   SPIKE-004
-```
+### O teste
 
-Depois de dois anos, ninguém sabe qual família consultar.
+> **Se este documento nunca existisse, qual decisão concreta seria pior daqui a
+> um ano?**
 
-### A regra
+**Se a resposta não for objetiva, o documento não existe.** Esta pergunta absorve
+"qual o objetivo", "quem consulta" e "quando vale criar" — todas são
+aproximações dela.
 
-> Um artefato recebe identificador permanente somente quando:
->
-> - **altera ou pode alterar decisões futuras** de arquitetura, produto, operação
->   ou negócio; **ou**
-> - **sua rastreabilidade é exigida** por obrigação legal, regulatória,
->   contratual ou de auditoria.
->
-> Descobertas pontuais, bugs corrigidos, investigações concluídas e evidências
-> sem impacto decisório devem permanecer vinculadas ao registro que motivaram
-> (teste, commit, decisão ou evidência), **sem criar uma nova família
-> documental**.
+### A regra do identificador
 
-Dois critérios, não uma exceção "especial para LGPD". O segundo já vale hoje: o
-NEXUS registra consentimento com IP e timestamp (`models.py:270-273`) e mascara
-PII com auditoria (`:406`, `:491`, `:522` + `PIISentinelState`,
-`PIIBackfillAudit`). A LGPD exige **prestação de contas** — demonstrar
-conformidade, não apenas cumpri-la. Na parte que toca dado pessoal, este arquivo
-e o registro de evidências **são artefato de accountability**, e a granularidade
-ali é requisito, não excesso.
+Recebe identificador permanente o que **altera decisões futuras** de arquitetura,
+produto, operação ou negócio, **ou** cuja **rastreabilidade seja exigida** por
+obrigação legal, regulatória, contratual ou de auditoria.
 
-### O quadro de toda família documental nova
+O resto — descoberta pontual, bug corrigido, investigação concluída — fica
+vinculado ao registro que motivou (teste, commit, decisão, evidência).
 
-Preenchido **antes** de o arquivo existir. Cinco campos, nenhum opcional:
+⚖️ O segundo critério já vale: o NEXUS registra consentimento LGPD com IP e
+timestamp (`models.py:270-273`) e opera sob prestação de contas. Ali a
+granularidade é requisito, não excesso — e foi o que produziu o **E-047**.
 
-| Campo | Pergunta | Se ficar vazio |
-|---|---|---|
-| **Objetivo** | que pergunta este documento responde? | não há por que criar |
-| **Consumidor** | **quem abre isto daqui a seis meses?** | **quase sempre morre** |
-| **Critério de criação** | quando vale a pena criar? | está sendo criado por reflexo |
-| **Duplicação** | que documento responde isso hoje? | **se algum responde, não crie** |
-| **Critério de encerramento** | que evento faz deixar de existir? | vira estrutura eterna |
-| **Documento sucessor** | para onde o conteúdo migra ao encerrar? | o encerramento perde o conteúdo |
+### Os dois campos que o teste não responde
 
-**Consumidor** aceita: arquiteto · auditor · operação · suporte · desenvolvedor ·
-produto · cliente · jurídico. Documento cujo único leitor é o autor não
-sobrevive — e é o campo que mais elimina documentação morta antes de ela nascer.
-
-Ele também fecha a simetria do meta-princípio: era a única das quatro perguntas
-de code review (*quem chama · quando executa · quando falha · quem substitui*)
-sem equivalente documental.
-
-### 🔴 A quem o quadro se aplica
-
-**Somente a documento permanente ou família documental nova.**
-
-**Não** se aplica a arquivo de trabalho, rascunho, anotação, saída de análise ou
-qualquer coisa descartável. Exigir seis campos de uma nota de duas linhas
-transforma a regra contra burocracia **em** burocracia.
-
-### Teste retroativo do campo Consumidor
-
-Aplicado às famílias que já existem:
-
-| Documento | Consumidor |
+| Campo | Pergunta |
 |---|---|
-| `DECISOES.md` | arquiteto · desenvolvedor futuro · auditor |
-| `ARCH_PRINCIPLES.md` | quem faz code review |
-| `PORTAO_A.md` · `PORTAO_O.md` | dono · operação |
-| `16_REGISTRO_EVIDENCIAS.md` | auditor · dono |
-| `docs/SPIKE_MULTI_GATEWAY.md` | arquiteto, quando um gatilho do D-017 disparar |
-| `docs/DIVERGENCIAS.md` | **produto** (decide cumprir ou corrigir) · desenvolvedor |
+| **Duplicação** | que documento responde isso hoje? *(se algum responde, não crie)* |
+| **Critério de encerramento** | que evento faz este documento deixar de existir? |
 
-**Nenhuma morre** — e isso é informação, não confirmação: a poda aconteceu nas
-rodadas anteriores, e o campo novo encontra o que sobrou, não sobra.
+Documento transitório cujo conteúdo passe a ser exigido externamente **deixa de
+ser transitório** — o encerramento não vence a obrigação.
 
-⚠️ **O campo "critério de encerramento" nunca foi preenchido ao criar o
-`docs/DIVERGENCIAS.md`**, e é exatamente ele que produziu a correção: o arquivo
-nasceu com cinco categorias inventadas a partir de quatro observações — três
-delas sem nenhuma instância — e com dois itens que reprovam no critério acima.
-Hoje é **transitório**, com o quadro preenchido no próprio cabeçalho.
+### Filtro de melhoria metodológica
 
-### Transitório não vence obrigação externa
+Antes de virar documentação permanente: **muda decisões futuras? · resolve erro
+recorrente? · cabe em menos de meia página?**
 
-Documento transitório cujo conteúdo passe a ser exigido por obrigação legal,
-regulatória, contratual ou de auditoria **deixa de ser transitório**.
+**Qualquer "não" ⇒ não vira documento.**
 
-> **O critério de encerramento não se sobrepõe ao critério 2.**
-
-É o mesmo laço que produziu o **E-047**: um item saiu do registro transitório por
-estar encerrado, e ganhou identificador permanente por tocar direito de titular.
-A regra decide; o rótulo do arquivo, não.
-
-### Auto-teste
-
-O D-018 passa no próprio critério: altera toda decisão futura de identificador.
-**Se não passasse, não deveria existir.**
-
-### Aplicação registrada
-
-| Item | Ganha identificador? | Por quê |
-|---|---|---|
-| Falha da exportação LGPD | ✅ **E-047** | critério 2 — direito de titular que devolveu vazio em produção |
-| Motor de notificações mudo | ❌ não | nenhum dos dois — histórico em `test_notificacoes_vivas.py` e no commit |
-
-**Gatilho de revisão:** ambiente regulado novo (certificação, exigência de
-cliente corporativo) amplia o critério **mantendo o princípio** — cada família
-com finalidade definida e distinta.
+🔴 **Aplica-se a documento permanente e família nova.** Não a rascunho, anotação
+ou saída de análise — exigir isso de uma nota de duas linhas transforma a regra
+contra burocracia **em** burocracia.
