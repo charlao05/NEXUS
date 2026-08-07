@@ -15,6 +15,49 @@ precise ser adquirido de novo daqui a seis meses.
 
 ---
 
+# 📌 Se você ler uma seção só, leia esta
+
+**Trocar de gateway não é trocar de SDK.**
+
+O acoplamento não está na API da Stripe — está no **modelo de dados** e na
+**operação**. As duas coisas mais caras deste projeto hipotético não aparecem em
+nenhum diagrama de integração:
+
+1. **O schema** (§3) — `stripe_customer_id`, `stripe_subscription_id` e
+   `stripe_invoice_id` são colunas `unique`. Uma coluna única com nome de
+   provedor não comporta o ID de outro. Abstrair é migrar para
+   `(provider, external_id)` — mudança de schema em tabelas com histórico
+   financeiro.
+2. **A reautorização** (§5.1) — nenhum provedor transfere autorização de cartão
+   para outro. Cada cliente pagante precisa cadastrar o pagamento de novo, e uma
+   fração não faz. É perda de receita, não de código.
+
+Escrever a Provider Interface é a parte fácil. Ela não é o projeto.
+
+---
+
+# 0 · Dependência arquitetural atual
+
+Onde o sistema depende de Stripe hoje — a lista que explica por que a troca não
+é pontual:
+
+| Camada | Dependência |
+|---|---|
+| **Identidade do cliente** | `User.stripe_customer_id` — `unique` |
+| **Identidade da assinatura** | `Subscription.stripe_subscription_id` — `unique` |
+| **Identidade da fatura** | `InvoicePayment.stripe_invoice_id` — `unique` |
+| **Webhooks** | `_stripe_webhook_handler.py`, duas rotas de entrada |
+| **Eventos** | tabela `stripe_events` — o nome também é do provedor |
+| **Health checks** | `config_check.py` — `stripe_autentica`, `precos_ok`, `cobranca_operacional` |
+| **Configuração** | 4 envs `STRIPE_*` classificadas como DEGRADADA |
+| **Testes** | 10 arquivos |
+| **Documentação** | `ops/PARAMETROS.md`, `ops/RUNBOOK_B_EXECUCAO.md` |
+| **Operação** | o Portão O inteiro — checkout, webhook, conciliação |
+
+**Dez camadas.** Um adapter resolve uma delas.
+
+---
+
 ## 1 · Como funcionaria
 
 **Adicionar um provedor, não substituir.** A diferença não é de estilo, é de
@@ -175,7 +218,49 @@ maior taxa de defeito histórico do projeto.
 
 ---
 
-## 8 · Quando reabrir
+## 8 · Duas perguntas que este spike NÃO responde
+
+São as que decidem o projeto, e **não têm resposta hoje** — nem deveriam ter,
+porque dependem de um contexto de negócio que ainda não existe. Registradas para
+que quem retomar saiba que elas estão abertas, e não confunda ausência de
+resposta com resposta.
+
+### 8.1 · Como coexistem dois gateways?
+
+Um cliente novo entra por qual?
+
+| Estratégia | A favor | Contra |
+|---|---|---|
+| Stripe sempre, MP só sob demanda | simples; muda pouco | ninguém descobre se o MP converte melhor |
+| MP para novos, Stripe para antigos | corta o custo de migração | duas bases divergindo para sempre |
+| Configurável por conta | flexível | dobra a matriz de teste |
+| A/B por coorte | **mede** em vez de supor | exige volume que o produto não tem |
+
+⚠️ Enquanto houver zero clientes pagantes, **nenhuma dessas opções é
+decidível** — todas dependem de dados de conversão que não existem.
+
+### 8.2 · Como migrar os clientes existentes?
+
+**Esta é a pergunta cara, e a resposta não é técnica.**
+
+Autorização de cartão não se transfere entre provedores. Migrar significa pedir
+a cada cliente pagante que cadastre o pagamento de novo — uma campanha, com
+prazo, suporte e uma taxa de abandono que só se conhece depois.
+
+O que precisa ser respondido antes de qualquer linha de código:
+
+- quanto da base se aceita perder na transição?
+- migração forçada com prazo, ou coexistência indefinida?
+- quem fica sem acesso se não reautorizar — e em quanto tempo?
+- qual a mensagem que não parece golpe? *(pedir dados de pagamento por e-mail é
+  exatamente o que um golpe faz)*
+
+**O último item é o mais subestimado.** Um público de MEI, acostumado a fraude
+por WhatsApp, recebendo um pedido para recadastrar cartão.
+
+---
+
+## 9 · Quando reabrir
 
 Os gatilhos vivem em **[`DECISOES.md` → D-017](../DECISOES.md)** e não são
 copiados aqui de propósito — duas cópias divergem, e a que alguém lê primeiro
@@ -187,7 +272,7 @@ provedores.
 
 ---
 
-## 9 · O que este spike NÃO avaliou
+## 10 · O que este spike NÃO avaliou
 
 Disponibilidade e SLA do Mercado Pago · histórico de indisponibilidade ·
 qualidade do suporte · estabilidade da API · risco regulatório · estratégia

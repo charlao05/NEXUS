@@ -284,6 +284,26 @@ se sustentou.
 **Decisão:** o gateway permanece **Stripe**. Nenhuma migração, nenhuma camada de
 abstração, nenhuma refatoração nesta fase.
 
+> ## 📌 O achado que dimensiona o projeto
+>
+> **Não é o Pix. É o schema.**
+>
+> ```
+> User.stripe_customer_id              models.py:253    unique
+> Subscription.stripe_subscription_id  models.py:349    unique
+> InvoicePayment.stripe_invoice_id     models.py:1102   unique
+> ```
+>
+> **Uma coluna única chamada `stripe_*` não comporta o ID de outro provedor.**
+>
+> Trocar de gateway **não é trocar de SDK** — é migrar o modelo de dados para
+> pares `(provider, external_id)`, com unicidade composta, em tabelas que
+> guardam o histórico financeiro. Mudança de schema, com dados de produção
+> dentro. Isso, e não a API do gateway, é o que define o tamanho do projeto.
+>
+> O segundo maior custo também não é código: é a **reautorização de meio de
+> pagamento** de cada cliente pagante. Ver `docs/SPIKE_MULTI_GATEWAY.md` §3 e §5.1.
+
 Este registro separa **fato**, **medição** e **premissa** de propósito. Misturar
 os três é como uma decisão vira dogma: daqui a seis meses alguém lê a conclusão
 sem o contexto que a produziu.
@@ -294,22 +314,41 @@ sem o contexto que a produziu.
 |---|---|
 | Na data desta decisão, **Pix Automático não está disponível para contas Stripe no Brasil** | docs.stripe.com/payments/pix |
 | Pix Automático **existe e está em produção** na Stripe — mandates, pré-débito de 3 dias, retries, Billing | docs.stripe.com/payments/pix/pix-automatico |
-| O checkout vivo aceita **somente cartão** | `auth.py:1340` — `payment_method_types=["card"]` |
-| A página de preços **promete PIX ao cliente** | `Pricing.tsx:365` |
+| Os **dois** checkouts vivos aceitam somente cartão | `auth.py:1340` (assinatura) e `auth.py:1524` (addon) — `payment_method_types=["card"]` |
+| A página de preços **promete PIX** — no bloco do **addon** | `Pricing.tsx:359-366` |
 | Pix em `mode="subscription"` exige Pix Automático | docs da Stripe, seção Checkout |
+| O addon é `mode="payment"` — onde **Pix avulso é suportado** | `auth.py:1536` |
 | Acoplamento medido: **457 linhas**, 12 arquivos-fonte + 10 de teste | `grep -rin stripe` |
 | As colunas de provedor são `unique=True` | `models.py:253`, `:349`, `:1102` |
 | Duas gerações de preço **ativas no mesmo produto** | API viva — `prod_UB7yU4HCQnB7Yk` tem 29,90 **e** 39,90 |
 
-**O achado que decide:** a promessa de Pix na página de preços é **incumprível na
-Stripe**. Não é configuração — o produto é assinatura mensal, Pix em assinatura
-exige Pix Automático, e Pix Automático não está disponível para conta BR.
+**A divergência de PIX — e as duas causas distintas.** *Na implementação atual do
+NEXUS, a promessa de pagamento por PIX no addon não é atendida.*
 
-Verificado na rota que **realmente roda** (`authService.ts:274` →
-`/api/auth/checkout` → `auth.py:1242`), e não na rota homônima sombreada de
-`billing.py:90` (E-040). Ver **E-046**.
+| Caminho | Modo | Promete PIX? | Entrega? | Causa |
+|---|---|---|---|---|
+| Assinatura `auth.py:1339` | `subscription` | não | não | **restrição do provedor** na data — Pix Automático indisponível p/ conta BR |
+| Addon R$ 12,90 `auth.py:1523` | `payment` | **sim** (`Pricing.tsx:365`) | não | **escolha de implementação** — `payment_method_types=["card"]` + elegibilidade da conta não verificada |
+
+⚠️ **Correção de rota (registrada, não silenciosa).** A primeira redação deste
+registro dizia que a promessa era *"incumprível"* porque assinatura exige Pix
+Automático. **Estava errado — e não só forte demais.** O texto de PIX está no
+bloco do **addon** (`Pricing.tsx:359-366`), que é `mode="payment"`. Pix avulso
+**é suportado** pela Stripe nesse modo. A análise de Pix Automático continua
+correta *sobre assinaturas* e **não explica esta promessa**. Ver **E-046**.
+
+Consequência prática: se Pix avulso estiver habilitado na conta, o correto é
+**cumprir a promessa**, não apagá-la. Rastreado em
+[`docs/DIVERGENCIAS.md`](docs/DIVERGENCIAS.md) → **DIV-001**.
+
+Tudo verificado na rota que **realmente roda** (`authService.ts:274` →
+`/api/auth/checkout` → `auth.py:1242`), e não na homônima sombreada de
+`billing.py:90` (E-040).
 
 ### Medições (dependem de premissas atuais)
+
+> **Os cálculos utilizam as taxas consideradas na pesquisa e representam um
+> cenário de simulação.**
 
 Taxas conforme citadas no relatório — **não conferi as tabelas oficiais**.
 Depende de MDR, prazo de recebimento, ticket médio e número de clientes.
@@ -321,9 +360,9 @@ Depende de MDR, prazo de recebimento, ticket médio e número de clientes.
 | R$ 89,90 | R$ 3,98 · 4,42% | R$ 4,48 | R$ 3,58 |
 
 **Ponto de virada: R$ 39,39.** Acima disso a Stripe é mais barata que o Mercado
-Pago "na hora". O MP só ganha nos três planos aceitando liquidação em **30 dias**
-— o que é o oposto do que convém a quem já teve serviço suspenso por
-inadimplência.
+Pago "na hora". **No cenário analisado, o Mercado Pago apresenta vantagem
+econômica apenas quando considerada a liquidação em 30 dias** — o que é o oposto
+do que convém a quem já teve serviço suspenso por inadimplência.
 
 O relatório constrói a vantagem do MP sobre **Pix** (0–0,99% vs 1,19%) enquanto
 registra que a vertical SaaS é **~79% cartão** e ~13% Pix. A vantagem se aplica à
@@ -355,8 +394,8 @@ Não *"o benefício não existe"* — essa formulação é forte demais e envelh
 |---|---|---|
 | Produto funciona com Stripe | sim | manter |
 | Usuários pagantes | 0 | manter |
-| **Pix comum no checkout** | **não existe — e a página promete** | **corrigir a promessa** |
-| Pix Automático | indisponível na Stripe BR *(nesta data)* | acompanhar |
+| **Pix avulso no addon** | **prometido na página, não oferecido no checkout** | **DIV-001 — verificar a conta e alinhar** |
+| Pix em assinatura | exige Pix Automático, indisponível na Stripe BR *(nesta data)* | acompanhar |
 | Churn medido | inexistente | insuficiente |
 | Custo de migração | alto | manter |
 | Ganho financeiro imediato | baixo | manter |
@@ -407,3 +446,29 @@ percepção, não é evidência.
 **Volume de clientes NÃO é gatilho.** É fácil de medir e mede a coisa errada:
 500 clientes satisfeitos no cartão não indicam problema algum, e 50 vendas
 perdidas por falta de Pix recorrente indicam — e não aparecem na contagem.
+
+### Resumo
+
+```
+STATUS DA DECISÃO
+
+  ✓ Não migrar de gateway
+
+MOTIVOS PRINCIPAIS
+
+  ✓ Produto ainda em validação
+  ✓ Custo elevado de migração — e o custo é o SCHEMA, não a API
+  ✓ Ganho financeiro baixo na escala atual
+  ✓ Pix Automático indisponível para conta Stripe BR (nesta data)
+
+REAVALIAR QUANDO
+
+  ✓ churn involuntário aumentar          (>10% por 2 meses)
+  ✓ demanda real por Pix recorrente      (registrada no CRM)
+  ✓ mudança estratégica do produto       (marketplace, split, internacional)
+  ✓ mudança relevante nas capacidades dos provedores
+
+EM ABERTO, INDEPENDENTE DESTA DECISÃO
+
+  → DIV-001 — PIX prometido no addon e não oferecido no checkout
+```

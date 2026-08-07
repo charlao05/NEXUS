@@ -60,6 +60,12 @@ onde ficam os valores antigos que tornam o rollback possível.
 | Domínio, DNS, HTTPS | ✅ funcionavam antes da suspensão |
 | Monitoramento (Sentry) | ✅ ativo — **falta** alerta que avise quando `/health` parar |
 | **Disaster Recovery** | ⛔ **nunca discutido** |
+| **Divergências produto × implementação** | 📋 registradas em [`docs/DIVERGENCIAS.md`](docs/DIVERGENCIAS.md) — **DIV-001** (PIX no addon) e **DIV-004** abertas |
+
+⚠️ **Divergências não são bloqueadores deste portão, e o registro delas fica
+fora daqui de propósito.** Este documento responde *"posso colocar em
+produção?"*. O `DIVERGENCIAS.md` responde *"o produto comunica exatamente o que
+ele faz?"* — pergunta que continua valendo muito depois deste portão fechar.
 
 **DR é diferente de backup.** Backup responde *"os dados existem em outro
 lugar?"*; DR responde *"em quanto tempo o serviço volta, e quem faz?"*. Para
