@@ -15,8 +15,18 @@ que justificativa.
 **Isto não é o 11º princípio.** É a propriedade que os dez compartilham, e o
 teste que um princípio novo precisa passar para entrar aqui.
 
-> **Todo artefato declara por que existe.**
-> **Todo artefato _contingente_ declara também quando deixa de existir.**
+> **Todo artefato _governado_ declara por que existe.**
+> **Todo artefato governado e _contingente_ declara também quando deixa de existir.**
+
+**Governado** — rascunho, notebook descartável, experimento local e saída de
+análise **não devem nada a ninguém**. Quem obedece é o que faz parte da
+arquitetura documental e de decisão do projeto. A fronteira está definida em
+[`DECISOES.md`](DECISOES.md) → **D-018** → *"A quem o quadro se aplica"*, e não é
+repetida aqui de propósito: duas cópias divergem, e a que se lê primeiro vence.
+
+⚠️ **Sem o qualificador, uma leitura literal daqui a dois anos cobra prazo de
+rascunho** — e escape sem definição é o mesmo defeito de `sem_tenant` sem
+`motivo`: alguém declara tudo não-governado e a regra evapora.
 
 **Contingente** = exceção · dívida · estrutura transitória · decisão revisável ·
 procedimento. O que é invariante declara só a primeira metade — **exigir prazo de
@@ -338,27 +348,45 @@ pergunta que produziu os sete casos abaixo, respondida com "sim" quando era não
 A versão confiável é guiada pela **afirmação que se vai escrever**, não pela
 sensação de suficiência:
 
-> **Pare na camada mais barata que sustente a afirmação que você vai escrever.**
+> **A camada é definida pela afirmação que você vai escrever — e ela é um piso,
+> não um teto.**
 
-| A afirmação é sobre | Camada suficiente | Subir além disso |
+| A afirmação é sobre | Camada mínima | Acima do mínimo |
 |---|---|---|
-| existência de texto — *"há referência a X"* | **1** | desperdício |
-| forma do código — *"esta função recebe N parâmetros"* | **1** | desperdício |
-| estrutura — *"esta rota está registrada", "A chama B"* | **2** | desperdício |
-| **comportamento** — *"vaza", "protege", "o usuário recebe", "funciona"* | **3** | **necessário** |
+| existência de texto — *"há referência a X"* | **1** | permitido — custa tempo |
+| forma do código — *"esta função recebe N parâmetros"* | **1** | permitido — custa tempo |
+| estrutura — *"esta rota está registrada", "A chama B"* | **2** | permitido — custa tempo |
+| **comportamento** — *"vaza", "protege", "o usuário recebe", "funciona"* | **3** | — |
+
+### A cláusula de escape
+
+> **É permitido subir uma camada para reduzir incerteza relevante. O que não é
+> permitido é concluir usando uma camada insuficiente.**
+
+**São duas grandezas diferentes, e nenhuma responde a outra:**
+
+| | Define |
+|---|---|
+| a **afirmação** | o **piso** — abaixo dele a conclusão é inválida |
+| a **decisão** | se vale subir **acima** do piso |
+
+**Exemplo:** *"esta consulta faz N+1"* é afirmação estrutural — a camada 2
+sustenta. Mas subir à 3 pode mostrar que ela roda em 3 ms por cache ou índice. **A
+camada 2 bastava para a afirmação e não bastava para a decisão de reportá-la.**
+
+**Por que o escape é unilateral** — os dois erros não custam a mesma coisa:
+
+| Erro | Custo | Recuperável? |
+|---|---|---|
+| subir sem precisar | tempo | ✅ sim |
+| concluir abaixo do mínimo | correção pública, confiança | ❌ **não** |
 
 🔴 **Subida obrigatória, independente da afirmação:** se o caminho passa por
 **despacho dinâmico, herança, decorator, middleware ou colisão de registro**, a
 camada 2 **não conclui**. Foi o `_HANDLERS` que derrotou as duas varreduras.
 
-**Os dois erros que este princípio evita:**
-
-| Erro | Custo |
-|---|---|
-| parar cedo demais | os sete casos abaixo |
-| subir sem necessidade | auditoria que não termina; execução onde `grep` bastava |
-
-**Um princípio que só empurra para cima troca falso positivo por paralisia.**
+**Um princípio que só empurra para cima troca falso positivo por paralisia — e um
+que só empurra para baixo troca paralisia por superficialidade.**
 
 ### Sete casos desta auditoria, um por camada
 
@@ -396,6 +424,11 @@ evidência que as sustentava.
 
 O princípio existe para que esse processo **não dependa de quem está revisando**.
 Um princípio que só cataloga acertos não protege ninguém.
+
+**O princípio inteiro cabe numa linha:**
+
+> **Não medir menos do que a afirmação exige, nem mais do que a decisão
+> justifica.**
 
 ---
 
