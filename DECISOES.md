@@ -472,3 +472,70 @@ EM ABERTO, INDEPENDENTE DESTA DECISÃO
 
   → DIV-001 — PIX prometido no addon e não oferecido no checkout
 ```
+
+---
+
+## D-018 · Critério para identificadores permanentes
+**Data:** 03/08/2026
+
+**Motivo:** cada descoberta desta auditoria virava estrutura documental nova.
+Sem critério, o sistema de conhecimento cresce até ficar mais caro navegar que
+consultar — o padrão que se vê em projetos antigos:
+
+```
+BUG-001   OBS-014   NOTE-022   FACT-017   DIV-011   SPIKE-004
+```
+
+Depois de dois anos, ninguém sabe qual família consultar.
+
+### A regra
+
+> Um artefato recebe identificador permanente somente quando:
+>
+> - **altera ou pode alterar decisões futuras** de arquitetura, produto, operação
+>   ou negócio; **ou**
+> - **sua rastreabilidade é exigida** por obrigação legal, regulatória,
+>   contratual ou de auditoria.
+>
+> Descobertas pontuais, bugs corrigidos, investigações concluídas e evidências
+> sem impacto decisório devem permanecer vinculadas ao registro que motivaram
+> (teste, commit, decisão ou evidência), **sem criar uma nova família
+> documental**.
+
+Dois critérios, não uma exceção "especial para LGPD". O segundo já vale hoje: o
+NEXUS registra consentimento com IP e timestamp (`models.py:270-273`) e mascara
+PII com auditoria (`:406`, `:491`, `:522` + `PIISentinelState`,
+`PIIBackfillAudit`). A LGPD exige **prestação de contas** — demonstrar
+conformidade, não apenas cumpri-la. Na parte que toca dado pessoal, este arquivo
+e o registro de evidências **são artefato de accountability**, e a granularidade
+ali é requisito, não excesso.
+
+### As três perguntas de toda família documental nova
+
+Respondidas **antes** de o arquivo existir:
+
+1. **Qual pergunta este documento responde?**
+2. **Qual documento deixará de responder essa pergunta?** — evita duplicação
+3. **Qual evento encerra a existência desta família?** — evita estrutura eterna
+
+⚠️ **A terceira nunca foi feita ao criar o `docs/DIVERGENCIAS.md`**, e é
+exatamente ela que produziu a correção: o arquivo nasceu com cinco categorias
+inventadas a partir de quatro observações — três delas sem nenhuma instância — e
+com dois itens que reprovam no critério acima. Hoje é **transitório**, com
+gatilho de aposentadoria escrito.
+
+### Auto-teste
+
+O D-018 passa no próprio critério: altera toda decisão futura de identificador.
+**Se não passasse, não deveria existir.**
+
+### Aplicação registrada
+
+| Item | Ganha identificador? | Por quê |
+|---|---|---|
+| Falha da exportação LGPD | ✅ **E-047** | critério 2 — direito de titular que devolveu vazio em produção |
+| Motor de notificações mudo | ❌ não | nenhum dos dois — histórico em `test_notificacoes_vivas.py` e no commit |
+
+**Gatilho de revisão:** ambiente regulado novo (certificação, exigência de
+cliente corporativo) amplia o critério **mantendo o princípio** — cada família
+com finalidade definida e distinta.

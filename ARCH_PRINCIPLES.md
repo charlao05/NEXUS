@@ -258,6 +258,47 @@ Nenhum teste pega isso. Nenhum code review pega isso.
 
 ---
 
+## 10. Nenhuma conclusão por busca textual quando o comportamento depende do contexto de execução
+
+`grep` devolve **a linha**. O que decide o comportamento — qual rota atende, qual
+handler roda, a que bloco a linha pertence, se a função é sequer alcançada —
+está **fora do resultado da busca**.
+
+Irmão do **#7** (*não confie no sinal*) e do **#8** (*não confie no verde*). Este
+é: **não confie na leitura estática.**
+
+**Mecanismo:** ✅ prática obrigatória em auditoria — antes de concluir, responder
+**qual código realmente roda**:
+
+1. seguir a chamada do cliente até o handler (não presumir pelo nome do arquivo)
+2. conferir prefixo e ordem de registro da rota
+3. ler o **bloco inteiro**, nunca a linha isolada
+4. se o despacho for dinâmico, a análise estática **não serve** — instrumentar ou
+   executar
+
+**Por que virou princípio: é a causa de praticamente todos os falsos positivos
+desta auditoria.** Seis casos, a mesma forma.
+
+| Caso | O que a busca mostrou | O que decidia |
+|---|---|---|
+| Vazamento no `/api/crm/dashboard` | uma rota com esse nome, e um defeito real **em outra** | `crm_routes.py:396` **sempre isolou** — acusei um vazamento que nunca existiu |
+| Varredura de webhooks | nenhuma chamada direta ao handler | `_HANDLERS` (`_stripe_webhook_handler.py:495`) — **dispatch dinâmico derrota análise estática**. Errei duas vezes, por caminhos diferentes |
+| `billing.py` | arquivo coerente, rotas plausíveis | `billing.py:14` declara `prefix="/api/auth"` e colide com `auth.py:464` — **metade do arquivo nunca executa** (E-040) |
+| `precos_coerentes` | o nome, presente no código | era a **função** (`config_check.py:408`); o campo do JSON é `precos_ok` (`:545`) — o runbook mandava conferir campo inexistente (E-045) |
+| `Pricing.tsx:365` | "Cartão ou PIX" | as **6 linhas acima** diziam "R$ 12,90, compra única" — bloco do **addon**, não dos planos. Conclusão certa, causa errada (E-046) |
+| Testes de notificação | asserts passando | a função devolvia `[]` — **verde vazio**, ver #8 |
+
+**A regra em uma frase:**
+
+> **"X existe" + "Y tem o defeito" nunca prova "X expõe o defeito".**
+
+⚠️ **Este princípio não nasce de defeito do código — nasce de erro meu.** É a
+lista dos meus falsos positivos, e está aqui para que a próxima auditoria comece
+sabendo onde a anterior errou. Um princípio que só cataloga acertos não protege
+ninguém.
+
+---
+
 ## Como usar isto em revisão
 
 1. A mudança viola algum princípio? Qual, e com que justificativa?
@@ -268,6 +309,9 @@ Nenhum teste pega isso. Nenhum code review pega isso.
 5. Se é proteção: foi provada por mutação?
 6. Se o teste checa `status_code`: **checa também o efeito?**
 7. Se é procedimento de painel: **tem como desfazer escrito?**
+8. Se a conclusão veio de `grep` ou leitura local: **qual código realmente roda?**
+9. Se cria família documental nova: respondeu as **três perguntas do D-018** —
+   inclusive *"qual evento encerra esta família?"*
 
 ---
 
