@@ -522,10 +522,20 @@ ser transitório** — o encerramento não vence a obrigação.
 
 ### Filtro de melhoria metodológica
 
-Antes de virar documentação permanente: **muda decisões futuras? · resolve erro
-recorrente? · cabe em menos de meia página?**
+Antes de virar documentação permanente:
+
+1. **muda decisões futuras?**
+2. **existe uma medição que demonstre que a versão anterior do método falhou em
+   um caso real?** — caso ocorrido, erro observado, e mudança que o reduza
+3. **cabe em menos de meia página?**
 
 **Qualquer "não" ⇒ não vira documento.**
+
+⚠️ **A pergunta 2 já era *"resolve um erro recorrente?"* e falhou** — responde-se
+por impressão (*"parece recorrente"*), e foi respondida com "sim" nas quatro
+entregas que produziram **432 linhas de método e zero de produto**. A versão atual
+exige **medição**, não convicção: é o princípio **#10** aplicado às conclusões
+sobre o próprio método.
 
 🔴 **Aplica-se a documento permanente e família nova.** Não a rascunho, anotação
 ou saída de análise — exigir isso de uma nota de duas linhas transforma a regra
