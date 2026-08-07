@@ -269,3 +269,141 @@ abandona?
 **O filtro que decide o que entra:** *o que ainda impede cinco pessoas reais de
 usar isso durante uma semana?* — e não *o que ainda pode ser melhorado?*. A
 segunda pergunta nunca acaba.
+
+---
+
+## D-017 · O gateway continua Stripe — nesta escala
+**Data:** 03/08/2026
+
+Chegou um relatório de pesquisa recomendando, na prática, migrar para o Mercado
+Pago. A pesquisa foi avaliada contra a fonte, não contra a impressão. O desenho
+arquitetural dela é bom e foi preservado em
+[`docs/SPIKE_MULTI_GATEWAY.md`](docs/SPIKE_MULTI_GATEWAY.md); a recomendação não
+se sustentou.
+
+**Decisão:** o gateway permanece **Stripe**. Nenhuma migração, nenhuma camada de
+abstração, nenhuma refatoração nesta fase.
+
+Este registro separa **fato**, **medição** e **premissa** de propósito. Misturar
+os três é como uma decisão vira dogma: daqui a seis meses alguém lê a conclusão
+sem o contexto que a produziu.
+
+### Fatos verificados (03/08/2026)
+
+| Fato | Onde |
+|---|---|
+| Na data desta decisão, **Pix Automático não está disponível para contas Stripe no Brasil** | docs.stripe.com/payments/pix |
+| Pix Automático **existe e está em produção** na Stripe — mandates, pré-débito de 3 dias, retries, Billing | docs.stripe.com/payments/pix/pix-automatico |
+| O checkout vivo aceita **somente cartão** | `auth.py:1340` — `payment_method_types=["card"]` |
+| A página de preços **promete PIX ao cliente** | `Pricing.tsx:365` |
+| Pix em `mode="subscription"` exige Pix Automático | docs da Stripe, seção Checkout |
+| Acoplamento medido: **457 linhas**, 12 arquivos-fonte + 10 de teste | `grep -rin stripe` |
+| As colunas de provedor são `unique=True` | `models.py:253`, `:349`, `:1102` |
+| Duas gerações de preço **ativas no mesmo produto** | API viva — `prod_UB7yU4HCQnB7Yk` tem 29,90 **e** 39,90 |
+
+**O achado que decide:** a promessa de Pix na página de preços é **incumprível na
+Stripe**. Não é configuração — o produto é assinatura mensal, Pix em assinatura
+exige Pix Automático, e Pix Automático não está disponível para conta BR.
+
+Verificado na rota que **realmente roda** (`authService.ts:274` →
+`/api/auth/checkout` → `auth.py:1242`), e não na rota homônima sombreada de
+`billing.py:90` (E-040). Ver **E-046**.
+
+### Medições (dependem de premissas atuais)
+
+Taxas conforme citadas no relatório — **não conferi as tabelas oficiais**.
+Depende de MDR, prazo de recebimento, ticket médio e número de clientes.
+
+| Plano | Stripe (3,99% + R$0,39) | MP na hora (4,98%) | MP 30 dias (3,98%) |
+|---|---|---|---|
+| R$ 29,90 | R$ 1,58 · 5,29% | R$ 1,49 | R$ 1,19 |
+| R$ 59,90 | R$ 2,78 · 4,64% | R$ 2,98 | R$ 2,38 |
+| R$ 89,90 | R$ 3,98 · 4,42% | R$ 4,48 | R$ 3,58 |
+
+**Ponto de virada: R$ 39,39.** Acima disso a Stripe é mais barata que o Mercado
+Pago "na hora". O MP só ganha nos três planos aceitando liquidação em **30 dias**
+— o que é o oposto do que convém a quem já teve serviço suspenso por
+inadimplência.
+
+O relatório constrói a vantagem do MP sobre **Pix** (0–0,99% vs 1,19%) enquanto
+registra que a vertical SaaS é **~79% cartão** e ~13% Pix. A vantagem se aplica à
+minoria das transações.
+
+### Premissas — todas podem mudar
+
+| Premissa | Pode mudar? |
+|---|---|
+| zero clientes pagantes | **sim** |
+| Stripe atende os requisitos atuais | **sim** |
+| Pix Automático indisponível em conta BR | **sim** |
+| custo de migração alto | **sim** |
+| acoplamento atual elevado | **sim** |
+| produto em fase de validação | **sim** |
+| taxas praticadas por Stripe e Mercado Pago | **sim** |
+
+### Conclusão
+
+> **Na escala atual do produto, os benefícios não justificam a troca.** Até o
+> momento, não há evidências suficientes de que os benefícios superem o custo e o
+> risco da migração.
+
+Não *"o benefício não existe"* — essa formulação é forte demais e envelhece mal.
+
+### Matriz de decisão
+
+| Critério | Situação atual | Impacto |
+|---|---|---|
+| Produto funciona com Stripe | sim | manter |
+| Usuários pagantes | 0 | manter |
+| **Pix comum no checkout** | **não existe — e a página promete** | **corrigir a promessa** |
+| Pix Automático | indisponível na Stripe BR *(nesta data)* | acompanhar |
+| Churn medido | inexistente | insuficiente |
+| Custo de migração | alto | manter |
+| Ganho financeiro imediato | baixo | manter |
+| Acoplamento atual | elevado | não migrar |
+
+### Por que NÃO implementar agora
+
+- **Produção não tem clientes.** Taxa sobre R$ 0 é R$ 0. No piloto de cinco
+  usuários a diferença é de cerca de **R$ 2 por mês**.
+- **A Stripe atende os requisitos atuais** — cartão recorrente, o meio que
+  responde por ~79% da vertical.
+- **O custo de migração supera o benefício hoje** — e recai sobre o único
+  subsistema que quebrou produção duas vezes esta semana (E-042, E-043).
+- **A necessidade do produto ainda não existe.** ⚠️ *Correção de rota:* a
+  formulação inicial era *"Pix Automático ainda depende de maturidade do
+  ecossistema"*. **Não é o caso** — na Stripe ele está maduro e em produção; o
+  que existe é restrição por país da conta. O que ainda não amadureceu é a
+  necessidade do produto, não a tecnologia. Registrar a razão imprecisa seria o
+  defeito do E-045.
+- **A prioridade é validar usuários reais**, não substituir infraestrutura
+  financeira (D-010).
+
+### O que NÃO foi avaliado
+
+**Silêncio aqui não é aprovação.** Fora do escopo desta decisão: disponibilidade
+e SLA do Mercado Pago · histórico de indisponibilidade · qualidade do suporte ·
+estabilidade da API · risco regulatório · estratégia internacional · múltiplas
+moedas · evolução do Open Finance · custos operacionais de conciliação.
+
+### Gatilhos de reabertura
+
+> Esta decisão será reavaliada quando houver evidências objetivas de que o
+> gateway atual limita o crescimento do negócio. Os gatilhos são: (1) aumento
+> sustentado do churn involuntário por falhas de cobrança; (2) demanda recorrente
+> e documentada por Pix recorrente/Pix Automático; (3) mudança estratégica do
+> produto que exija uma arquitetura de pagamentos mais abrangente (marketplace,
+> split, múltiplos gateways ou expansão internacional); ou (4) mudança relevante
+> nas capacidades ou condições comerciais dos provedores, suficiente para alterar
+> as premissas desta decisão. Até que um desses gatilhos ocorra, a prioridade
+> permanece validar o produto com usuários reais, e não substituir a
+> infraestrutura de pagamentos.
+
+**Limiar do gatilho (1):** cobranças recusadas acima de **10% por dois meses
+consecutivos**.
+**Condição do gatilho (2):** só conta **registrado no CRM** — enquanto for
+percepção, não é evidência.
+
+**Volume de clientes NÃO é gatilho.** É fácil de medir e mede a coisa errada:
+500 clientes satisfeitos no cartão não indicam problema algum, e 50 vendas
+perdidas por falta de Pix recorrente indicam — e não aparecem na contagem.
