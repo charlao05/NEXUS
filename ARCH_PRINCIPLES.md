@@ -10,6 +10,55 @@ que justificativa.
 
 ---
 
+# O meta-princípio
+
+**Isto não é o 11º princípio.** É a propriedade que os dez compartilham, e o
+teste que um princípio novo precisa passar para entrar aqui.
+
+> **Todo artefato declara por que existe.**
+> **Todo artefato _contingente_ declara também quando deixa de existir.**
+
+**Contingente** = exceção · dívida · estrutura transitória · decisão revisável ·
+procedimento. O que é invariante declara só a primeira metade — **exigir prazo de
+um invariante é contradição**: *"esta regra vale até 2027"* é o oposto de
+princípio.
+
+**Verificado contra os dez** — afirmar propriedade dos dez é afirmação sobre os
+dez, e o **#10** proíbe afirmar sem conferir:
+
+| Declara | Quantos | Onde |
+|---|---|---|
+| **por que existe** | **10 / 10** | todos |
+| **quando deixa de existir** | **4 / 10** | **#2** `expires` obrigatório · **#3** D-012 vale *enquanto a dívida existir* · **#4** e **#5** o 🟡 declara o que falta · **#9** D-016, todo procedimento tem `COMO DESFAZER` |
+
+Os seis restantes — falhar fechado, teste, efeito, mutação, fluxo de execução —
+são invariantes, e é correto que não tenham prazo.
+
+### Onde a propriedade aparece, fora daqui
+
+| Contingente — declara o fim | Invariante — não declara |
+|---|---|
+| escotilha — `sem_tenant(motivo, expires)` | contexto de tenant (a pia) |
+| divergência — critério de encerramento | teste |
+| documento transitório — D-018 | princípio |
+| decisão — gatilhos de reabertura (D-017) | |
+| dívida arquitetural — marcador 🟡 | |
+| procedimento — `COMO DESFAZER` (D-016) | |
+
+### A simetria que isto produz
+
+O mesmo modelo mental serve ao código e ao documento — é por isso que o D-018
+pergunta ao documento o que o code review pergunta ao código:
+
+| Ao código | Ao documento |
+|---|---|
+| quem chama? | quem consulta? |
+| quando executa? | quando nasce? |
+| quando falha? | quando morre? |
+| quem substitui? | qual o sucessor? |
+
+---
+
 ## 1. Falhar fechado é melhor que vazar
 
 Quando falta contexto, informação ou configuração, o sistema **mostra menos** —
@@ -277,6 +326,39 @@ Irmão do **#7** (*não confie no sinal*) e do **#8** (*não confie no verde*). 
 **Cada camada pega o que a anterior não pega, e nenhuma substitui a terceira.**
 Foi exatamente assim que duas varreduras sucessivas concluíram *"0 rotas sem
 contexto"* e ambas erraram: as duas operavam na camada 2, e o defeito vivia na 3.
+
+### Onde parar de subir
+
+A escada só é útil com regra de parada. Sem ela, o princípio produz o erro
+oposto: depois de aprender que execução importa, passa-se a querer executar tudo
+— e na maioria dos casos um `grep` resolve.
+
+⚠️ **A regra não pode ser *"a resposta já é suficiente?"*** — é exatamente essa
+pergunta que produziu os sete casos abaixo, respondida com "sim" quando era não.
+A versão confiável é guiada pela **afirmação que se vai escrever**, não pela
+sensação de suficiência:
+
+> **Pare na camada mais barata que sustente a afirmação que você vai escrever.**
+
+| A afirmação é sobre | Camada suficiente | Subir além disso |
+|---|---|---|
+| existência de texto — *"há referência a X"* | **1** | desperdício |
+| forma do código — *"esta função recebe N parâmetros"* | **1** | desperdício |
+| estrutura — *"esta rota está registrada", "A chama B"* | **2** | desperdício |
+| **comportamento** — *"vaza", "protege", "o usuário recebe", "funciona"* | **3** | **necessário** |
+
+🔴 **Subida obrigatória, independente da afirmação:** se o caminho passa por
+**despacho dinâmico, herança, decorator, middleware ou colisão de registro**, a
+camada 2 **não conclui**. Foi o `_HANDLERS` que derrotou as duas varreduras.
+
+**Os dois erros que este princípio evita:**
+
+| Erro | Custo |
+|---|---|
+| parar cedo demais | os sete casos abaixo |
+| subir sem necessidade | auditoria que não termina; execução onde `grep` bastava |
+
+**Um princípio que só empurra para cima troca falso positivo por paralisia.**
 
 ### Sete casos desta auditoria, um por camada
 

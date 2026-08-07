@@ -517,10 +517,43 @@ Preenchido **antes** de o arquivo existir. Cinco campos, nenhum opcional:
 | Campo | Pergunta | Se ficar vazio |
 |---|---|---|
 | **Objetivo** | que pergunta este documento responde? | não há por que criar |
+| **Consumidor** | **quem abre isto daqui a seis meses?** | **quase sempre morre** |
 | **Critério de criação** | quando vale a pena criar? | está sendo criado por reflexo |
 | **Duplicação** | que documento responde isso hoje? | **se algum responde, não crie** |
 | **Critério de encerramento** | que evento faz deixar de existir? | vira estrutura eterna |
 | **Documento sucessor** | para onde o conteúdo migra ao encerrar? | o encerramento perde o conteúdo |
+
+**Consumidor** aceita: arquiteto · auditor · operação · suporte · desenvolvedor ·
+produto · cliente · jurídico. Documento cujo único leitor é o autor não
+sobrevive — e é o campo que mais elimina documentação morta antes de ela nascer.
+
+Ele também fecha a simetria do meta-princípio: era a única das quatro perguntas
+de code review (*quem chama · quando executa · quando falha · quem substitui*)
+sem equivalente documental.
+
+### 🔴 A quem o quadro se aplica
+
+**Somente a documento permanente ou família documental nova.**
+
+**Não** se aplica a arquivo de trabalho, rascunho, anotação, saída de análise ou
+qualquer coisa descartável. Exigir seis campos de uma nota de duas linhas
+transforma a regra contra burocracia **em** burocracia.
+
+### Teste retroativo do campo Consumidor
+
+Aplicado às famílias que já existem:
+
+| Documento | Consumidor |
+|---|---|
+| `DECISOES.md` | arquiteto · desenvolvedor futuro · auditor |
+| `ARCH_PRINCIPLES.md` | quem faz code review |
+| `PORTAO_A.md` · `PORTAO_O.md` | dono · operação |
+| `16_REGISTRO_EVIDENCIAS.md` | auditor · dono |
+| `docs/SPIKE_MULTI_GATEWAY.md` | arquiteto, quando um gatilho do D-017 disparar |
+| `docs/DIVERGENCIAS.md` | **produto** (decide cumprir ou corrigir) · desenvolvedor |
+
+**Nenhuma morre** — e isso é informação, não confirmação: a poda aconteceu nas
+rodadas anteriores, e o campo novo encontra o que sobrou, não sobra.
 
 ⚠️ **O campo "critério de encerramento" nunca foi preenchido ao criar o
 `docs/DIVERGENCIAS.md`**, e é exatamente ele que produziu a correção: o arquivo

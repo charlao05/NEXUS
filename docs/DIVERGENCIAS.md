@@ -11,10 +11,15 @@ divergência seja um domínio próprio.
 | Campo | |
 |---|---|
 | **Objetivo** | o produto promete algo que a implementação não entrega? |
+| **Consumidor** | **produto** — decide entre cumprir a promessa e corrigir a comunicação · **desenvolvedor** — executa a escolha |
 | **Critério de criação** | existe divergência aberta e nenhum documento a responde |
 | **Duplicação** | nenhum documento responde isso hoje |
 | **Critério de encerramento** | a Matriz de Funcionalidades existir **ou** zerarem as divergências abertas |
 | **Documento sucessor** | Matriz de Funcionalidades — divergência vira **estado de uma funcionalidade** |
+
+⚠️ **O consumidor é produto, não engenharia.** Cada item tem dois desfechos
+possíveis — cumprir ou corrigir a comunicação — e escolher entre eles não é
+decisão técnica.
 
 ⚠️ **O critério de encerramento não foi preenchido quando este arquivo nasceu.**
 Ele começou com cinco categorias inventadas a partir de quatro observações — três
