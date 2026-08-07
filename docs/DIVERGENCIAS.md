@@ -6,21 +6,25 @@
 promete algo que não entrega?"* ainda não tem outra casa — não porque
 divergência seja um domínio próprio.
 
-**As três perguntas do [D-018](../DECISOES.md), respondidas:**
+**O quadro do [D-018](../DECISOES.md), preenchido:**
 
-| | |
+| Campo | |
 |---|---|
-| **Que pergunta responde?** | o produto promete algo que a implementação não entrega? |
-| **Que documento deixará de responder?** | nenhum — hoje nenhum responde. A Matriz de Funcionalidades responderá |
-| **Que evento encerra esta família?** | a Matriz de Funcionalidades existir **ou** não haver mais divergência aberta |
+| **Objetivo** | o produto promete algo que a implementação não entrega? |
+| **Critério de criação** | existe divergência aberta e nenhum documento a responde |
+| **Duplicação** | nenhum documento responde isso hoje |
+| **Critério de encerramento** | a Matriz de Funcionalidades existir **ou** zerarem as divergências abertas |
+| **Documento sucessor** | Matriz de Funcionalidades — divergência vira **estado de uma funcionalidade** |
 
-⚠️ **A terceira pergunta não foi feita quando este arquivo nasceu.** Ele começou
-com cinco categorias inventadas a partir de quatro observações — três sem
-nenhuma instância — e com dois itens encerrados ocupando espaço. Isto é o que
+⚠️ **O critério de encerramento não foi preenchido quando este arquivo nasceu.**
+Ele começou com cinco categorias inventadas a partir de quatro observações — três
+sem nenhuma instância — e com dois itens encerrados ocupando espaço. Isto é o que
 sobrou depois de aplicar o D-018.
 
-**Quando a Matriz existir, divergência vira _estado de uma funcionalidade_** e
-migra como linha. Este arquivo então desaparece.
+🔴 **O gatilho de aposentadoria não vale para item exigido externamente.** Se
+algum item vier a ser exigido por obrigação legal, regulatória, contratual ou de
+auditoria, ele **deixa de ser transitório** — migra para registro permanente em
+vez de sumir com o arquivo. Foi o que aconteceu com a exportação LGPD (**E-047**).
 
 ## Regras
 

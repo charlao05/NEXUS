@@ -510,19 +510,34 @@ conformidade, não apenas cumpri-la. Na parte que toca dado pessoal, este arquiv
 e o registro de evidências **são artefato de accountability**, e a granularidade
 ali é requisito, não excesso.
 
-### As três perguntas de toda família documental nova
+### O quadro de toda família documental nova
 
-Respondidas **antes** de o arquivo existir:
+Preenchido **antes** de o arquivo existir. Cinco campos, nenhum opcional:
 
-1. **Qual pergunta este documento responde?**
-2. **Qual documento deixará de responder essa pergunta?** — evita duplicação
-3. **Qual evento encerra a existência desta família?** — evita estrutura eterna
+| Campo | Pergunta | Se ficar vazio |
+|---|---|---|
+| **Objetivo** | que pergunta este documento responde? | não há por que criar |
+| **Critério de criação** | quando vale a pena criar? | está sendo criado por reflexo |
+| **Duplicação** | que documento responde isso hoje? | **se algum responde, não crie** |
+| **Critério de encerramento** | que evento faz deixar de existir? | vira estrutura eterna |
+| **Documento sucessor** | para onde o conteúdo migra ao encerrar? | o encerramento perde o conteúdo |
 
-⚠️ **A terceira nunca foi feita ao criar o `docs/DIVERGENCIAS.md`**, e é
-exatamente ela que produziu a correção: o arquivo nasceu com cinco categorias
-inventadas a partir de quatro observações — três delas sem nenhuma instância — e
-com dois itens que reprovam no critério acima. Hoje é **transitório**, com
-gatilho de aposentadoria escrito.
+⚠️ **O campo "critério de encerramento" nunca foi preenchido ao criar o
+`docs/DIVERGENCIAS.md`**, e é exatamente ele que produziu a correção: o arquivo
+nasceu com cinco categorias inventadas a partir de quatro observações — três
+delas sem nenhuma instância — e com dois itens que reprovam no critério acima.
+Hoje é **transitório**, com o quadro preenchido no próprio cabeçalho.
+
+### Transitório não vence obrigação externa
+
+Documento transitório cujo conteúdo passe a ser exigido por obrigação legal,
+regulatória, contratual ou de auditoria **deixa de ser transitório**.
+
+> **O critério de encerramento não se sobrepõe ao critério 2.**
+
+É o mesmo laço que produziu o **E-047**: um item saiu do registro transitório por
+estar encerrado, e ganhou identificador permanente por tocar direito de titular.
+A regra decide; o rótulo do arquivo, não.
 
 ### Auto-teste
 

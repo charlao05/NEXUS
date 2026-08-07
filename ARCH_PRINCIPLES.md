@@ -258,44 +258,62 @@ Nenhum teste pega isso. Nenhum code review pega isso.
 
 ---
 
-## 10. Nenhuma conclusão por busca textual quando o comportamento depende do contexto de execução
+## 10. Nenhuma evidência estrutural substitui a observação do fluxo real de execução
 
-`grep` devolve **a linha**. O que decide o comportamento — qual rota atende, qual
-handler roda, a que bloco a linha pertence, se a função é sequer alcançada —
-está **fora do resultado da busca**.
+Quando a conclusão depende do **comportamento** do sistema, ler o código não
+basta — em nenhum nível de sofisticação.
 
 Irmão do **#7** (*não confie no sinal*) e do **#8** (*não confie no verde*). Este
 é: **não confie na leitura estática.**
 
-**Mecanismo:** ✅ prática obrigatória em auditoria — antes de concluir, responder
-**qual código realmente roda**:
+### As três camadas, e por que a última não tem substituto
 
-1. seguir a chamada do cliente até o handler (não presumir pelo nome do arquivo)
-2. conferir prefixo e ordem de registro da rota
-3. ler o **bloco inteiro**, nunca a linha isolada
-4. se o despacho for dinâmico, a análise estática **não serve** — instrumentar ou
-   executar
-
-**Por que virou princípio: é a causa de praticamente todos os falsos positivos
-desta auditoria.** Seis casos, a mesma forma.
-
-| Caso | O que a busca mostrou | O que decidia |
+| Camada | O que ela entrega | O que ela não vê |
 |---|---|---|
-| Vazamento no `/api/crm/dashboard` | uma rota com esse nome, e um defeito real **em outra** | `crm_routes.py:396` **sempre isolou** — acusei um vazamento que nunca existiu |
-| Varredura de webhooks | nenhuma chamada direta ao handler | `_HANDLERS` (`_stripe_webhook_handler.py:495`) — **dispatch dinâmico derrota análise estática**. Errei duas vezes, por caminhos diferentes |
-| `billing.py` | arquivo coerente, rotas plausíveis | `billing.py:14` declara `prefix="/api/auth"` e colide com `auth.py:464` — **metade do arquivo nunca executa** (E-040) |
-| `precos_coerentes` | o nome, presente no código | era a **função** (`config_check.py:408`); o campo do JSON é `precos_ok` (`:545`) — o runbook mandava conferir campo inexistente (E-045) |
-| `Pricing.tsx:365` | "Cartão ou PIX" | as **6 linhas acima** diziam "R$ 12,90, compra única" — bloco do **addon**, não dos planos. Conclusão certa, causa errada (E-046) |
-| Testes de notificação | asserts passando | a função devolvia `[]` — **verde vazio**, ver #8 |
+| **1 · Busca textual** | a **linha** | a que bloco pertence, se o nome encontrado é o referente |
+| **2 · Estrutura estática** | o grafo de chamadas, a árvore de rotas | despacho dinâmico, colisão de registro, ordem de montagem |
+| **3 · Fluxo de execução** | o que **acontece** | — |
+
+**Cada camada pega o que a anterior não pega, e nenhuma substitui a terceira.**
+Foi exatamente assim que duas varreduras sucessivas concluíram *"0 rotas sem
+contexto"* e ambas erraram: as duas operavam na camada 2, e o defeito vivia na 3.
+
+### Sete casos desta auditoria, um por camada
+
+| Camada | Caso | O que decidia — e estava fora da evidência usada |
+|---|---|---|
+| **1** | Vazamento no `/api/crm/dashboard` | `crm_routes.py:396` **sempre isolou**. Existia uma rota com esse nome e um defeito real **em outra** — a busca casou o nome, não o referente |
+| **1** | `precos_coerentes` | era a **função** (`config_check.py:408`); o campo do JSON é `precos_ok` (`:545`). O runbook mandava conferir campo inexistente (E-045) |
+| **1** | `Pricing.tsx:365` | "Cartão ou PIX" — as **6 linhas acima** diziam "R$ 12,90, compra única". Bloco do **addon**, não dos planos (E-046) |
+| **2** | `billing.py` | arquivo coerente, rotas plausíveis — e `:14` declara `prefix="/api/auth"`, colidindo com `auth.py:464`. **Metade nunca executa** (E-040) |
+| **2** | Varredura de webhooks | nenhuma chamada direta ao handler: `_HANDLERS` (`_stripe_webhook_handler.py:495`) resolve em runtime. **Despacho dinâmico derrota grafo de chamadas** |
+| **3** | Testes de notificação | asserts passando sobre uma função que devolvia `[]` — **verde vazio** (ver #8) |
+| **3** | Exportação LGPD | o caminho feliz lê como se exportasse; um `except Exception` sem tipo engolia o `AttributeError` e devolvia vazio (E-047) |
+
+⚠️ **A exportação LGPD aparece também no princípio #7.** Não é contagem dupla: é
+um incidente com **dois modos de falha** — o sinal (`200`) mentia, **e** a
+leitura estática não revelava o desvio de fluxo.
+
+**Mecanismo:** ✅ prática obrigatória em auditoria — a exigência muda conforme a
+camada de onde veio a conclusão:
+
+| Se a conclusão veio de | Antes de concluir |
+|---|---|
+| busca textual | ler o **bloco inteiro**; confirmar que o nome encontrado é o referente |
+| estrutura estática | seguir a chamada **do cliente até o handler**; conferir prefixo e ordem de registro |
+| qualquer uma das duas, com comportamento dependente de runtime | **executar ou instrumentar** — despacho dinâmico não se resolve por leitura |
 
 **A regra em uma frase:**
 
 > **"X existe" + "Y tem o defeito" nunca prova "X expõe o defeito".**
 
-⚠️ **Este princípio não nasce de defeito do código — nasce de erro meu.** É a
-lista dos meus falsos positivos, e está aqui para que a próxima auditoria comece
-sabendo onde a anterior errou. Um princípio que só cataloga acertos não protege
-ninguém.
+⚠️ **Estes sete casos não foram revelados por inspeção mais cuidadosa** — foram
+revelados por um **processo de revisão que exige a origem de cada afirmação**.
+Nenhum deles é defeito do código: todos são conclusões de análise maiores que a
+evidência que as sustentava.
+
+O princípio existe para que esse processo **não dependa de quem está revisando**.
+Um princípio que só cataloga acertos não protege ninguém.
 
 ---
 
